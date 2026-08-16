@@ -1,0 +1,20 @@
+# Phase log (2026-08-16)
+
+Format per spec §68. Git commits are in this repository (`git log`).
+
+| PHASE | STATUS | COMPLETED | KEY FILES | TESTS | WARNINGS / ERRORS | COMMIT |
+|---|---|---|---|---|---|---|
+| 0 Architecture audit | PASS | env, repos, site, REST, robots, sitemap, GSC prerequisites inspected; report written | `docs/architecture-validation-report.md` | — | obra/knowledge-graph rejected (dormant, broken MCP, write tools, no LICENSE); Node.js not needed | e23d4be |
+| 1 Local environment audit | PASS | Windows 11, Python 3.13, Git 2.55, Claude Desktop 1.30096.5; Node & Obsidian absent | same | — | Obsidian to be installed | e23d4be |
+| 2 Git + scaffold | PASS | repo, `.gitignore`, `.env.example`, `pyproject.toml`, config, `src/*`, `scripts/*`, tests | scaffold | 13 unit | — | e23d4be |
+| 3 Obsidian setup | **PARTIAL** | vault created (`obsidian/SEO-Knowledge-Graph`, 14 folders, `.obsidian` graph/core-plugin config); **Obsidian app install IN PROGRESS** — winget stalled (GitHub release host ~40 KB/s on this network); manual resumable download of `Obsidian-1.13.7.exe` running, SHA256 to be verified before install | `src/graph/vault.py`, `scripts/setup.py` | preflight | Obsidian not yet installed → vault not yet opened in Obsidian; plugins (Dataview, Local REST API) not installed | 1bbea9e |
+| 4 Graph engine | PASS (decision changed) | Python `networkx` + SQLite FTS5 instead of obra/knowledge-graph; PageRank (pure Python), Louvain, N-hop, paths, FTS | `src/graph/builder.py`, `src/graph/queries.py` | integration + e2e | semantic search deferred (hook only) | 06f7575 |
+| 5 WordPress connector | PASS | live sync: 3 pages, 11 posts, 5 categories, 0 tags, 62 media, 17 post↔term; Yoast canonical/robots/schema captured; raw JSON stored | `src/wordpress/*`, `scripts/sync-wordpress.py` | live run | public endpoints only (no app password provided) | 1bbea9e |
+| 6 Crawler | PASS | 20-URL validation crawl → 19 URLs (=whole discoverable site), 0 failures, 184 links (172 internal / 12 external), 117 schema entities; validated titles/H1/canonical/robots/schema/hash; cap raised to 500 | `src/crawler/*`, `scripts/crawl.py` | live run + parser unit tests | — | 1bbea9e |
+| 7 SQLite data layer | PASS | 28 tables incl. FTS5, run tables, `site_id` everywhere | `src/database/schema.sql`, `db.py` | unit/integration | — | e23d4be |
+| 8 GSC connector | **BLOCKED (live) / PASS (code)** | OAuth (loopback), list/resolve property, paginated Search Analytics, raw storage, upsert, aggregation, importance flags, backoff; script reports `BLOCKED` cleanly | `src/gsc/*`, `scripts/sync-gsc.py` | unit (`test_gsc_sync.py`) | needs `GOOGLE_CLIENT_ID/SECRET` from user; 1-day and 30-day live syncs NOT RUN | 1bbea9e |
+| 9 Graph generator | PASS | first graph (12 pages) validated, then full: 45 nodes / 298 edges; Obsidian: 45 notes + 3 reports; wikilinks == real edges; frontmatter real-only | `src/graph/*`, `scripts/build-graph.py` | e2e test 9 | QUERY nodes: 0 (no GSC yet) | 06f7575 |
+| 10 MCP server | PASS | `mcp` 2.0 `MCPServer`, stdio, 21 read-only tools; Claude Desktop config registered with backup | `mcp/server.py`, `docs/mcp.md` | 3 integration | Claude Desktop must be restarted by the user to load it (not done from inside this session) | 06f7575 / 5dcd767 |
+| 11 SEO analysis | PASS | 57 problems (9 types) + 86 internal-link opportunities on real data; GSC-based analyses implemented but produce nothing until GSC synced | `src/analysis/*` | e2e | — | 06f7575 |
+| 12 Dashboard | PASS | FastAPI on 127.0.0.1:3000, 9 pages + JSON API; all routes 200; visually checked | `src/dashboard/app.py`, `scripts/dashboard.py` | route smoke test | — | 5dcd767 |
+| 13 End-to-end | PASS (with GSC in NO_GSC_DATA mode) | acceptance tests 1–10 via MCP stdio; WP unchanged (0/14 modified timestamps differ) | `tests/e2e/test_acceptance.py` | 10 e2e | TESTS 4–6 return explicit NO_GSC_DATA; TEST 9 visual Graph View check pending Obsidian install | — |

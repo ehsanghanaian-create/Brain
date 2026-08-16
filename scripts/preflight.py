@@ -175,7 +175,7 @@ def main() -> int:
         if site:
             try:
                 r = http_get(site.wp_url.rstrip("/") + "/wp-json/")
-                ok = r.status_code == 200 and "wp/v2" in r.text
+                ok = r.status_code == 200 and "wp/v2" in r.text.replace("\\/", "/")
                 add("WordPress REST API", "PASS" if ok else "FAIL", f"{site.wp_url}/wp-json/ -> {r.status_code}", "" if ok else "check WP_URL / REST API not disabled")
             except Exception as e:  # noqa: BLE001
                 add("WordPress REST API", "FAIL", str(e), "check network / WP_URL")

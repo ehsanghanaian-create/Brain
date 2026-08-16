@@ -7,7 +7,7 @@ sites:
     language: "fa-IR"
     gsc_property: "https://emdadmodiran.com/"
     crawler:
-      max_urls: 20            # PHASE GATE: raise only after 20-URL validation passes
+      max_urls: 500           # validated 2026-08-16 (20-URL gate passed; full site = 19 URLs)
       concurrency: 2
       delay_seconds: 1.0
       timeout_seconds: 20

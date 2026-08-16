@@ -89,7 +89,7 @@ class ObsidianWriter:
             md = self._render(n, out_e[nid], in_e[nid])
             p = self.vault / (self.path_of[nid] + ".md")
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(md, encoding="utf-8")
+            p.write_text(md, encoding="utf-8", newline="\n")
             self.conn.execute("UPDATE graph_nodes SET vault_path=? WHERE site_id=? AND node_id=?", (self.path_of[nid] + ".md", self.sid, nid))
             written += 1
         self._reports()

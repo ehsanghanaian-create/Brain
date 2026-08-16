@@ -42,3 +42,6 @@ obsidian/SEO-Knowledge-Graph/.trash/
 Thumbs.db
 .idea/
 .vscode/
+
+# generated vault notes (derived from production data) — regenerate with build-graph.py
+obsidian/SEO-Knowledge-Graph/[0-9][0-9]-*/

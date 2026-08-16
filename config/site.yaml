@@ -1,0 +1,26 @@
+# Active site configuration (Phase 1: emdadmodiran.com only). No secrets here.
+sites:
+  - site_id: emdadmodiran
+    name: "امداد مدیران"
+    canonical_url: "https://emdadmodiran.com/"
+    wp_url: "https://emdadmodiran.com"
+    language: "fa-IR"
+    gsc_property: "https://emdadmodiran.com/"
+    crawler:
+      max_urls: 20            # PHASE GATE: raise only after 20-URL validation passes
+      concurrency: 2
+      delay_seconds: 1.0
+      timeout_seconds: 20
+      max_retries: 3
+      user_agent: "SEO-KG-Crawler/0.1 (+local; read-only)"
+      respect_robots: true
+      allowed_hosts: ["emdadmodiran.com", "www.emdadmodiran.com"]
+      exclude_patterns: ["/wp-json/", "/feed/", "?s=", "/wp-admin/", "/wp-login", "?rest_route=", "/search/"]
+    gsc:
+      lookback_days: 1        # PHASE GATE: raise to 30 only after 1-day validation passes
+      dimensions: ["date", "query", "page", "country", "device"]
+      row_limit: 25000
+    graph:
+      important_query_min_impressions: 50
+      important_query_min_clicks: 5
+      max_query_nodes: 200

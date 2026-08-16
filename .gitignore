@@ -1,0 +1,44 @@
+# secrets
+.env
+credentials/
+tokens/
+secrets/
+*.pem
+*.key
+client_secret*.json
+
+# databases
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# raw / processed data (production data never committed)
+data/raw/
+data/processed/
+data/logs/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# node (not used in MVP, reserved)
+node_modules/
+
+# obsidian runtime state (vault content is generated; keep out of git except templates)
+obsidian/SEO-Knowledge-Graph/.obsidian/workspace*.json
+obsidian/SEO-Knowledge-Graph/.obsidian/cache
+obsidian/SEO-Knowledge-Graph/.trash/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

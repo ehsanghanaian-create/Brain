@@ -100,6 +100,21 @@ export type GraphEdge = { source: string; target: string; relation_type: string;
 export type GraphMode = { key: 'seo' | 'content' | 'links'; title_fa: string; description_fa: string; layout: string; group_by: string; node_types: string[]; relation_types: string[] };
 export type GraphView = { mode: GraphMode; nodes: GraphNode[]; edges: GraphEdge[]; truncated: boolean; total_nodes: number; stats: { by_type: Record<string, number>; by_relation: Record<string, number> } };
 export type NodeDetails = Record<string, unknown> & { id: string; type: string; label: string; url: string | null; pagerank: number | null; community: number | null; props: Record<string, unknown>; degree: number };
+// phase 5 — keywords
+export type KeywordGsc = { clicks: number; impressions: number; ctr: number; position: number | null; top_page: string | null; pages_count: number } | null;
+export type KeywordRow = {
+  id: number; site_id: string; keyword: string; normalized: string; intent: string | null; cluster_id: string | null; topic: string | null;
+  volume: number | null; difficulty: number | null; priority: string | null; target_url: string | null; status: string; source: string | null;
+  notes: string | null; created_at: string; updated_at: string; gsc: KeywordGsc; cluster: { cluster_id: string; name: string; topic: string | null } | null;
+};
+export type KeywordDetail = KeywordRow & { gsc_pages: { page: string; clicks: number; impressions: number; position: number }[]; opportunities: KeywordOpportunity[] };
+export type KeywordCounts = { total: number; by_status: Record<string, number>; by_intent: Record<string, number>; clusters: number; with_target: number; opportunities_new: Record<string, number> };
+export type KeywordList = { items: KeywordRow[]; total: number; limit: number; offset: number; counts: KeywordCounts };
+export type KeywordCluster = { site_id: string; cluster_id: string; name: string; topic: string | null; keywords_count: number; method: string | null; created_at: string | null; updated_at: string | null };
+export type TopicMap = { clusters: (KeywordCluster & { members: KeywordRow[]; gsc: { impressions: number; clicks: number; avg_position: number | null; with_data: number }; targets: string[]; volume: number })[]; unclustered: KeywordRow[]; counts: KeywordCounts };
+export type KeywordOpportunity = { id: number; site_id: string; keyword_id: number; kind: string; kind_fa?: string; keyword?: string | null; keyword_status?: string | null; target_url: string | null; score: number; reason: string; evidence: Record<string, unknown>; status: string; run_id: string | null; created_at: string; updated_at: string };
+export type ImportResult = { format: string; columns: string[]; mapping: Record<string, string>; unmapped_columns: string[]; rows_total: number; rows_valid: number; rows_imported: number; rows_updated: number; rows_skipped: number; errors: { row: number; error: string }[]; errors_count: number; preview: Record<string, unknown>[]; import_id: number | null; dry_run: boolean };
+export type KeywordsMeta = { intents: string[]; priorities: string[]; statuses: string[]; opportunity_kinds: { kind: string; fa: string }[]; opportunity_statuses: string[] };
 export type SiteCreateBody = Schemas['SiteCreate'];
 export type SiteUpdateBody = Schemas['SiteUpdate'];
 export type MemoryUpdateBody = Schemas['MemoryUpdate'];
@@ -130,6 +145,36 @@ export const endpoints = {
     return api<GraphView>(`/sites/${encodeURIComponent(id)}/graph/view?${q.toString()}`);
   },
   nodeDetails: (id: string, nodeId: string) => api<NodeDetails>(`/sites/${encodeURIComponent(id)}/graph/node-details/${encodeURIComponent(nodeId)}`),
+  // phase 5 — keywords
+  keywords: (id: string, params: Record<string, string | number | undefined> = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => v !== undefined && v !== '' && q.set(k, String(v)));
+    return api<KeywordList>(`/sites/${encodeURIComponent(id)}/keywords?${q.toString()}`);
+  },
+  keyword: (id: string, kid: number) => api<KeywordDetail>(`/sites/${encodeURIComponent(id)}/keywords/${kid}`),
+  createKeyword: (id: string, body: Record<string, unknown>) => api<KeywordRow>(`/sites/${encodeURIComponent(id)}/keywords`, { method: 'POST', json: body }),
+  updateKeyword: (id: string, kid: number, body: Record<string, unknown>) => api<KeywordRow>(`/sites/${encodeURIComponent(id)}/keywords/${kid}`, { method: 'PATCH', json: body }),
+  deleteKeyword: (id: string, kid: number) => api<{ deleted: number }>(`/sites/${encodeURIComponent(id)}/keywords/${kid}`, { method: 'DELETE' }),
+  keywordsMeta: (id: string) => api<KeywordsMeta>(`/sites/${encodeURIComponent(id)}/keywords/meta`),
+  importKeywords: (id: string, file: File, opts: { dryRun: boolean; mapping?: Record<string, string> }) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('dry_run', opts.dryRun ? 'true' : 'false');
+    if (opts.mapping) fd.append('mapping', JSON.stringify(opts.mapping));
+    return api<ImportResult>(`/sites/${encodeURIComponent(id)}/keywords/import`, { method: 'POST', body: fd });
+  },
+  keywordClusters: (id: string) => api<KeywordCluster[]>(`/sites/${encodeURIComponent(id)}/keywords/clusters`),
+  runClustering: (id: string, threshold?: number) => api<Record<string, unknown>>(`/sites/${encodeURIComponent(id)}/keywords/cluster${threshold ? `?threshold=${threshold}` : ''}`, { method: 'POST' }),
+  updateCluster: (id: string, cid: string, body: { name?: string; topic?: string }) => api<KeywordCluster>(`/sites/${encodeURIComponent(id)}/keywords/clusters/${encodeURIComponent(cid)}`, { method: 'PATCH', json: body }),
+  topicMap: (id: string) => api<TopicMap>(`/sites/${encodeURIComponent(id)}/keywords/topic-map`),
+  analyzeKeywords: (id: string) => api<Record<string, unknown>>(`/sites/${encodeURIComponent(id)}/keywords/analyze`, { method: 'POST' }),
+  keywordOpportunities: (id: string, params: Record<string, string | number | undefined> = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => v !== undefined && v !== '' && q.set(k, String(v)));
+    return api<{ items: KeywordOpportunity[]; total: number }>(`/sites/${encodeURIComponent(id)}/keywords/opportunities?${q.toString()}`);
+  },
+  setOpportunityStatus: (id: string, oid: number, status: string) => api<KeywordOpportunity>(`/sites/${encodeURIComponent(id)}/keywords/opportunities/${oid}`, { method: 'PATCH', json: { status } }),
+  syncKeywordGraph: (id: string) => api<Record<string, unknown>>(`/sites/${encodeURIComponent(id)}/keywords/sync-graph`, { method: 'POST' }),
   putMemory: (id: string, body: MemoryUpdateBody) => api<SiteMemory>(`/sites/${encodeURIComponent(id)}/memory`, { method: 'PUT', json: body })
 };
 

@@ -147,11 +147,31 @@ def main() -> int:
           json={"audience": {"segments": ["مالکان MVM"], "pains": [], "intent_notes": ""}, "cta_rules": ["تماس در پاراگراف اول"], "forbidden_claims": ["ارزان‌ترین"]})
     check("site brain in AI context", "GET", api + f"/sites/{tmp}/memory/context", 200, lambda r: "NEVER claim" in r.json()["messages"][0]["content"], headers=H)
 
+    # ---- phase 5: keywords (temporary site)
+    kcsv = "کلمه کلیدی,اینتنت,حجم,اولویت,صفحه هدف\nتست کلمه یک,تراکنشی,100,بالا,https://validation.example/a\nتست کلمه دو,,50,,\n"
+    check("keywords import dry-run", "POST", api + f"/sites/{tmp}/keywords/import", 200, lambda r: r.json()["dry_run"] and r.json()["rows_valid"] == 2 and r.json()["mapping"]["کلمه کلیدی"] == "keyword",
+          headers=H, files={"file": ("k.csv", kcsv.encode("utf-8"), "text/csv")}, data={"dry_run": "true"})
+    check("keywords import commit", "POST", api + f"/sites/{tmp}/keywords/import", 200, lambda r: r.json()["rows_imported"] == 2 and r.json()["import_id"] is not None,
+          headers=H, files={"file": ("k.csv", kcsv.encode("utf-8"), "text/csv")}, data={"dry_run": "false"})
+    check("keywords list", "GET", api + f"/sites/{tmp}/keywords", 200, lambda r: r.json()["total"] == 2 and "gsc" in r.json()["items"][0] and r.json()["counts"]["total"] == 2, headers=H)
+    r = check("keyword create", "POST", api + f"/sites/{tmp}/keywords", 201, lambda r: r.json()["keyword"] == "تست کلمه سه", headers=H, json={"keyword": "تست کلمه سه", "intent": "local"})
+    kid = r.json()["id"] if r is not None and r.status_code == 201 else 0
+    check("keyword create duplicate → 409", "POST", api + f"/sites/{tmp}/keywords", 409, headers=H, json={"keyword": "تست  کلمه سه"})
+    check("keyword patch", "PATCH", api + f"/sites/{tmp}/keywords/{kid}", 200, lambda r: r.json()["status"] == "planned", headers=H, json={"status": "planned"})
+    check("keyword detail", "GET", api + f"/sites/{tmp}/keywords/{kid}", 200, lambda r: "gsc_pages" in r.json() and "opportunities" in r.json(), headers=H)
+    check("keywords cluster", "POST", api + f"/sites/{tmp}/keywords/cluster", 200, lambda r: r.json()["clusters"] >= 1 and "graph" in r.json(), headers=H)
+    check("keywords topic-map", "GET", api + f"/sites/{tmp}/keywords/topic-map", 200, lambda r: sum(c["keywords_count"] for c in r.json()["clusters"]) == 3, headers=H)
+    check("keywords analyze", "POST", api + f"/sites/{tmp}/keywords/analyze", 200, lambda r: r.json()["keywords"] == 3 and r.json()["by_kind"].get("create_content", 0) >= 1, headers=H)
+    check("keyword opportunities", "GET", api + f"/sites/{tmp}/keywords/opportunities", 200, lambda r: r.json()["total"] >= 1 and bool(r.json()["items"][0]["kind_fa"]), headers=H)
+    check("keywords in graph view", "GET", api + f"/sites/{tmp}/graph/view?mode=seo&types=KEYWORD,TOPIC", 200, lambda r: r.json()["stats"]["by_type"].get("KEYWORD") == 3, headers=H)
+    check("keyword delete", "DELETE", api + f"/sites/{tmp}/keywords/{kid}", 200, lambda r: r.json()["deleted"] == kid, headers=H)
+    check("keywords meta", "GET", api + f"/sites/{tmp}/keywords/meta", 200, lambda r: len(r.json()["opportunity_kinds"]) == 4, headers=H)
+
     # ---- legacy + cleanup
     check("legacy dashboard", "GET", BASE + "/legacy/", 200)
     check("legacy api", "GET", BASE + "/legacy/api/sites", 200)
     check("site delete refused (has data) → 409", "DELETE", api + f"/sites/{tmp}", 409, lambda r: r.json()["error"]["code"] == "site_has_data" and {"site_memory", "site_connections", "graph_nodes"} <= set(r.json()["error"]["details"]), headers=H)
-    check("site delete force", "DELETE", api + f"/sites/{tmp}?force=true", 200, lambda r: r.json()["deleted"] == tmp and r.json()["related_rows_deleted"].get("site_connections") == 3, headers=H)
+    check("site delete force", "DELETE", api + f"/sites/{tmp}?force=true", 200, lambda r: r.json()["deleted"] == tmp and r.json()["related_rows_deleted"].get("site_connections") == 3 and r.json()["related_rows_deleted"].get("keywords") == 2, headers=H)
     check("site gone → 404", "GET", api + f"/sites/{tmp}", 404, headers=H)
     check("real site untouched", "GET", api + f"/sites/{sid}/graph/summary", 200, lambda r: r.json()["nodes"] > 0, headers=H)
 

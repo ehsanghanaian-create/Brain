@@ -50,7 +50,8 @@ def update_site(body: SiteUpdate, site: Site = Depends(require_site), repo: Site
 
 # tables that reference sites(site_id); a site with data is only deleted with ?force=true
 # dependency order: dependents first (entity_mentions→entities, post_terms→posts, gsc_query_page→queries, graph_edges→graph_nodes)
-_CHILD_TABLES = ("entity_mentions", "post_terms", "links", "gsc_query_page", "gsc_daily", "graph_edges", "seo_problems",
+_CHILD_TABLES = ("keyword_opportunities", "keywords", "keyword_clusters", "keyword_imports",
+                 "entity_mentions", "post_terms", "links", "gsc_query_page", "gsc_daily", "graph_edges", "seo_problems",
                  "seo_opportunities", "media", "schemas", "entities", "queries", "pages", "posts", "categories", "tags",
                  "taxonomies", "graph_nodes", "site_memory", "site_connections", "crawl_runs", "sync_runs")
 

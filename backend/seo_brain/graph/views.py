@@ -27,8 +27,8 @@ MODES: dict[str, GraphMode] = {
     "seo": GraphMode(
         key="seo", title_fa="نقشه سئو",
         description_fa="صفحات، کوئری‌ها/کلمات کلیدی، موجودیت‌ها، مشکلات و فرصت‌ها — چه چیزی برای چه چیزی رتبه دارد و کجا مشکل است",
-        node_types=("SITE", "PAGE", "POST", "CATEGORY", "QUERY", "KEYWORD", "BRAND", "MODEL", "SERVICE", "LOCATION", "SEO_PROBLEM", "SEO_OPPORTUNITY"),
-        relation_types=("HAS_PAGE", "HAS_POST", "HAS_CATEGORY", "RANKS_FOR", "KEYWORD_TARGETS", "TARGETS", "ABOUT", "OFFERS", "HAS_PROBLEM", "HAS_OPPORTUNITY"),
+        node_types=("SITE", "PAGE", "POST", "CATEGORY", "QUERY", "KEYWORD", "TOPIC", "BRAND", "MODEL", "SERVICE", "LOCATION", "SEO_PROBLEM", "SEO_OPPORTUNITY"),
+        relation_types=("HAS_PAGE", "HAS_POST", "HAS_CATEGORY", "RANKS_FOR", "KEYWORD_TARGETS", "CLUSTERED_IN", "TARGETS", "ABOUT", "OFFERS", "HAS_PROBLEM", "HAS_OPPORTUNITY"),
         layout="force", group_by="type"),
     "content": GraphMode(
         key="content", title_fa="نقشه محتوا",

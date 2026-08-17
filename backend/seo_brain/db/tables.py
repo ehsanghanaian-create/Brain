@@ -91,3 +91,68 @@ def reflect(engine) -> MetaData:
     md = MetaData()
     md.reflect(bind=engine)
     return md
+
+
+# ----------------------------------------------------------------------------- phase 5: keywords
+keyword_clusters = Table(
+    "keyword_clusters", metadata,
+    Column("cluster_id", String, primary_key=True),
+    Column("site_id", String, primary_key=True),
+    Column("name", String, nullable=False),
+    Column("topic", String),
+    Column("keywords_count", Integer, nullable=False, server_default="0"),
+    Column("method", String),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+
+keywords = Table(
+    "keywords", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("keyword", String, nullable=False),
+    Column("normalized", String, nullable=False),
+    Column("intent", String),
+    Column("cluster_id", String),
+    Column("topic", String),
+    Column("volume", Integer),
+    Column("difficulty", Float),
+    Column("priority", String),
+    Column("target_url", String),
+    Column("status", String, nullable=False, server_default="new"),
+    Column("source", String),
+    Column("notes", Text),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+
+keyword_imports = Table(
+    "keyword_imports", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("filename", String),
+    Column("format", String),
+    Column("rows_total", Integer, nullable=False, server_default="0"),
+    Column("rows_imported", Integer, nullable=False, server_default="0"),
+    Column("rows_updated", Integer, nullable=False, server_default="0"),
+    Column("rows_skipped", Integer, nullable=False, server_default="0"),
+    Column("mapping", Text),
+    Column("errors", Text),
+    Column("created_at", String, nullable=False),
+)
+
+keyword_opportunities = Table(
+    "keyword_opportunities", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("keyword_id", Integer, nullable=False),
+    Column("kind", String, nullable=False),
+    Column("target_url", String),
+    Column("score", Float, nullable=False, server_default="0"),
+    Column("reason", Text),
+    Column("evidence", Text),
+    Column("status", String, nullable=False, server_default="new"),
+    Column("run_id", String),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)

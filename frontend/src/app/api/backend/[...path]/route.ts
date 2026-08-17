@@ -21,7 +21,7 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
     const res = await fetch(target, {
       method: req.method,
       headers,
-      body: hasBody ? await req.text() : undefined,
+      body: hasBody ? await req.arrayBuffer() : undefined,   // arrayBuffer keeps multipart/binary intact
       cache: 'no-store'
     });
     const body = await res.text();

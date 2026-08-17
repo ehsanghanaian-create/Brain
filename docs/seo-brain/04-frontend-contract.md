@@ -110,3 +110,17 @@ UI rule for `ConnectionResult`: show `message` verbatim; badge by `status` (`ok`
 | `GET /sites/{id}/graph/node-details/{node_id}` | `{id, type, label, url, pagerank, community, props, degree, …one of: page{…}, keyword{…}, problem{…}, opportunity{…}, entity{…}, schema{…}, site{…}, neighbors[]}` — see `07-phase4-graph.md §1` for the per-kind fields; unknown → 404 |
 
 Client rule: node ids go into the path as **one `encodeURIComponent` segment** (`/graph/node-details/page%3Ahttps%3A%2F%2F…`); Next.js collapses `//` inside multi-segment paths.
+
+## 10. Phase 5 additions (2026-08-17, additive) — `/sites/{id}/keywords/*`
+
+| Endpoint | Notes |
+|---|---|
+| `GET /keywords?q&status&intent&priority&cluster_id&topic&sort&order&limit&offset` | **paginated envelope** `{items, total, limit, offset, counts}`; item = keyword row + `gsc: {clicks, impressions, ctr, position, top_page, pages_count}|null` + `cluster: {cluster_id, name, topic}|null` |
+| `POST /keywords` → 201 · `GET/PATCH/DELETE /keywords/{kid}` | 409 `conflict` on same normalized keyword; 422 on bad enums; detail adds `gsc_pages[]`, `opportunities[]` |
+| `POST /keywords/import` (multipart: `file`, `dry_run`=true|false, `mapping` JSON) | `ImportResult {format, columns, mapping, unmapped_columns, rows_total, rows_valid, rows_imported, rows_updated, rows_skipped, errors[{row,error}], errors_count, preview[], import_id, dry_run}`; 400 empty/too large |
+| `GET /keywords/template.csv` · `GET /keywords/imports` · `GET /keywords/meta` | |
+| `POST /keywords/cluster?threshold&sync_graph` · `GET /keywords/clusters` · `PATCH /keywords/clusters/{cid}` · `GET /keywords/topic-map` | topic-map = `{clusters:[cluster + members[] + gsc{} + targets[] + volume], unclustered[], counts}` |
+| `POST /keywords/analyze?min_impressions&sync_graph` · `GET /keywords/opportunities?kind&status&keyword_id&min_score` · `PATCH /keywords/opportunities/{oid}` `{status}` | opportunity = `{id, keyword_id, keyword, kind, kind_fa, target_url, score 0–1, reason (fa), evidence{}, status, run_id}` |
+| `POST /keywords/sync-graph` | KEYWORD/TOPIC nodes + CLUSTERED_IN/KEYWORD_TARGETS edges |
+
+Frontend: file uploads go through the proxy as `FormData` (the proxy forwards the raw body); never set `Content-Type` manually for multipart.

@@ -51,7 +51,7 @@ A local-first, read-only SEO knowledge graph, per the plan's 13 phases:
 ## 6. Environment risks noticed
 
 * **Disk space on C: is critically low** (observed between 82 MB and 2.6 GB free during this work). Project footprint is ~250 MB (venv). Consider freeing space before running larger crawls or long GSC histories.
-* Preflight: `python scripts\preflight.py` → 22 PASS / 7 WARNING / 0 FAIL after GSC connection (2026-08-17).
+* Preflight: `python scripts\preflight.py` → 23 PASS / 6 WARNING / 0 FAIL after GSC connection (2026-08-17).
 
 ## 7. How to keep it fresh
 

@@ -37,7 +37,7 @@ One node per normalized URL: a crawled category archive URL is merged into the C
 * `community`: Louvain on the undirected LINKS_TO graph (networkx, seed 42).
 * `graph_fts`: FTS5 (unicode61, diacritics removed) over label, decoded URL, title/H1/description/excerpt/aliases.
 
-## Entity extraction rules (see `src/analysis/entities.py`)
+## Entity extraction rules (see `backend/seo_brain/analysis/entities.py`)
 
 R1 service = dominant leading generic phrase of titles/categories · R2 location = trailing "در X" · R3 brand = content category name minus generic words (hierarchy follows category tree) · R4 alias = digit-free title subject in ≥ 50 % of a brand category's post titles · R5 model = other title subjects inside a brand category (most specific category wins) · R6 token-subset merge. Overrides: `config/entities.yaml` (`aliases:`, `types:`), empty by default. Every entity stores its `evidence` JSON.
 

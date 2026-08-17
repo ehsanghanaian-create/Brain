@@ -1,4 +1,4 @@
-# SEO Knowledge Graph — local-first, read-only
+# SEO Brain (built on the SEO Knowledge Graph) — local-first, read-only by default
 
 A local SEO knowledge graph for **emdadmodiran.com** (امداد مدیران), designed multi-site-ready (`site_id` everywhere).
 
@@ -7,32 +7,33 @@ A local SEO knowledge graph for **emdadmodiran.com** (امداد مدیران), 
 | **What it does** | Snapshots WordPress (REST, read-only), crawls the site (robots-aware), caches Google Search Console, extracts entities (brands / models / services / locations) from real content, runs SEO analyses, materialises a graph in SQLite, writes an Obsidian vault, and exposes 21 read-only MCP tools to Claude Desktop plus a local dashboard. |
 | **Guarantee** | The target website is never modified: the codebase contains no HTTP write verbs; MCP tools are read-only; acceptance test 10 checks both. |
 | **Runtime** | Python 3.13 (single runtime; Node.js not needed). SQLite (FTS5). Obsidian for humans, Claude Desktop (stdio MCP) for AI. |
-| **Status** | See `docs/phase-log.md` and `docs/final-report.md`. GSC live sync is **blocked** until you supply Google OAuth credentials (`docs/gsc.md`). |
+| **Status** | v0.1 knowledge graph complete (`docs/final-report.md`, GSC live). **SEO Brain Phase 1 done** (`docs/seo-brain/`): restructured into `backend/` (FastAPI `/api/v1`, SQLAlchemy Core repositories, migrations, GraphStore, AI orchestrator + site memory, JobQueue). Phase 2 (Next.js UI) blocked on Node.js + disk space — `docs/seo-brain/phase2-prerequisites.md`. |
 
 ## Architecture
 
 ```
-Claude Desktop ─stdio─▶ mcp/server.py ─▶ src/graph/queries.py ─▶ data/seo.db (SQLite)
+Next.js UI (Phase 2) ─HTTP─▶ backend/seo_brain/api (FastAPI /api/v1) ─▶ services ─▶ repositories ─▶ data/seo.db (SQLite)
+Claude Desktop ─stdio─▶ backend/mcp_server/server.py ─▶ seo_brain/graph/queries.py ─┘
                                                                    ▲
        WordPress REST (GET) ─┐                                     │
-       Crawler (robots.txt)  ├─▶ src/normalizer ─▶ ingestion ──────┤
+       Crawler (robots.txt)  ├─▶ seo_brain/normalizer ─▶ ingestion ──────┤
        GSC (OAuth, cached)  ─┘                                     │
-                                          src/analysis (entities, SEO) ─┘
-                                          src/graph/builder (nodes, edges, PageRank, communities)
-                                          src/graph/obsidian_writer ─▶ obsidian/SEO-Knowledge-Graph/ (Graph View)
-                                          src/dashboard ─▶ http://127.0.0.1:3000/
+                                          seo_brain/analysis (entities, SEO) ─┘
+                                          seo_brain/graph/builder (nodes, edges, PageRank, communities)
+                                          seo_brain/graph/obsidian_writer ─▶ obsidian/SEO-Knowledge-Graph/ (Graph View)
+                                          seo_brain/dashboard ─▶ http://127.0.0.1:3000/
 ```
-Full details: `docs/architecture.md`; audit & decisions: `docs/architecture-validation-report.md`.
+Full details: `docs/architecture.md` (v0.1) and `docs/seo-brain/01-architecture.md` (platform); audit & decisions: `docs/architecture-validation-report.md`.
 
 ## Installation
 
 ```powershell
 cd seo-knowledge-graph
 python -m venv .venv
-.venv\Scripts\python -m pip install -e .[dev]
-.venv\Scripts\python scripts\setup.py --env --vault --db
+.venv\Scripts\python -m pip install -e "backend[dev]"
+.venv\Scripts\python backend\cli\setup.py --env --vault --db
 notepad .env                        # WP app password (optional), Google OAuth client (for GSC) — never commit
-.venv\Scripts\python scripts\preflight.py
+.venv\Scripts\python backend\cli\preflight.py
 ```
 
 ## Configuration
@@ -44,32 +45,34 @@ notepad .env                        # WP app password (optional), Google OAuth c
 ## Running
 
 ```powershell
-.venv\Scripts\python scripts\sync-wordpress.py                 # WordPress → SQLite (+ data/raw/wordpress)
-.venv\Scripts\python scripts\crawl.py --max-urls 20            # validation crawl, then:  --full
-.venv\Scripts\python scripts\sync-gsc.py --auth-only           # once; then --days 1, then --days 30
-.venv\Scripts\python scripts\build-graph.py --limit-pages 15   # first graph, then without the flag
-.venv\Scripts\python scripts\setup.py --claude-config          # register the MCP server (backs up the config)
-.venv\Scripts\python scripts\dashboard.py                      # http://127.0.0.1:3000/
+.venv\Scripts\python backend\cli\sync-wordpress.py                 # WordPress → SQLite (+ data/raw/wordpress)
+.venv\Scripts\python backend\cli\crawl.py --max-urls 20            # validation crawl, then:  --full
+.venv\Scripts\python backend\cli\sync-gsc.py --auth-only           # once; then --days 1, then --days 30
+.venv\Scripts\python backend\cli\build-graph.py --limit-pages 15   # first graph, then without the flag
+.venv\Scripts\python backend\cli\setup.py --claude-config          # register the MCP server (backs up the config)
+.venv\Scripts\python backend\cli\api.py                            # SEO Brain API http://127.0.0.1:8000/api/docs (legacy dashboard at /legacy)
+.venv\Scripts\python backend\cli\migrate.py --status               # database migrations
 ```
 
 ## Components
 
 * **WordPress** — `docs/wordpress.md`. Dynamic discovery of post types & taxonomies; Yoast metadata captured; GET only.
 * **Crawler** — robots.txt via `protego`, sitemap-index seeding, BFS over same-site links, cap + concurrency 2 + 1 s delay; per URL: status, redirect chain, title, meta description, H1/H2, canonical, robots meta, X-Robots-Tag, indexability, word count, language, images/alt, internal/external links (nav vs body), ld+json schema, content hash, response time.
-* **URL normalizer** — `src/normalizer/url.py` (+ tests): scheme/host/trailing slash/fragments/duplicate slashes/percent-encoding (Persian slugs)/tracking params.
+* **URL normalizer** — `backend/seo_brain/normalizer/url.py` (+ tests): scheme/host/trailing slash/fragments/duplicate slashes/percent-encoding (Persian slugs)/tracking params.
 * **GSC** — `docs/gsc.md`. Official client, refresh token in `tokens/`, 1-day → 30-day lookback, incremental upserts, aggregation, importance flag; Claude never calls GSC.
 * **Graph** — `docs/graph-schema.md`. Node/edge types per spec; only real relationships; PageRank + Louvain; FTS5 search.
 * **Obsidian** — `docs/obsidian.md`. Vault layout `00-Sites … 99-Reports`; wikilinks == real edges; frontmatter == real data.
 * **MCP** — `docs/mcp.md`. `mcp` SDK 2.0, stdio, 21 read-only tools, Claude Desktop config format verified.
 * **SEO analysis** — orphans / zero & low inbound / high outbound / positions 4–15 / high-impression-low-CTR / duplicate titles & H1 / missing & multiple H1 / missing canonical / important non-indexable / thin content / cannibalization candidates / internal-link opportunities — each with an explainable `detail` or `score_breakdown`.
-* **Dashboard** — Overview, Pages, Categories, Graph, GSC, Internal Links, SEO Problems, SEO Opportunities, Entities, JSON API (`/api/docs`).
+* **API (SEO Brain)** — `docs/seo-brain/02-phase1-implementation.md`: `/api/v1/{health,sites,sites/{id}/graph/*,sites/{id}/memory,ai/*,jobs}`; OpenAPI at `/api/docs`.
+* **Legacy dashboard** — mounted at `/legacy` (also `backend/cli/dashboard.py`): Overview, Pages, Categories, Graph, GSC, Internal Links, SEO Problems, SEO Opportunities, Entities.
 
 ## Testing
 
 ```powershell
-.venv\Scripts\python -m pytest -q tests\unit          # normalizer, parser, GSC storage/aggregation
-.venv\Scripts\python -m pytest -q tests\integration   # MCP server over stdio (tool list, read-only annotations, no secrets)
-.venv\Scripts\python -m pytest -q tests\e2e           # acceptance tests 1-10 (spec §65)
+cd backend
+..\.venv\Scripts\python -m pytest -q      # 46 tests: unit (normalizer, parser, GSC, migrations, graph store, AI orchestrator),
+                                           # api (FastAPI v1), integration (MCP stdio), e2e (acceptance tests 1-10)
 ```
 
 ## Troubleshooting

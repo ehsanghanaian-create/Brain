@@ -12,8 +12,8 @@ Status (2026-08-17): **LIVE — connected to `sc-domain:emdadmodiran.com` (siteO
    GOOGLE_CLIENT_SECRET=...
    GSC_PROPERTY=https://emdadmodiran.com/      # or sc-domain:emdadmodiran.com
    ```
-4. `python scripts/sync-gsc.py --auth-only` → a browser opens once (loopback `127.0.0.1`, random port), you consent, the refresh token is written to `tokens/gsc_token.json` (git-ignored).
-5. `python scripts/sync-gsc.py --list-sites` shows the properties the account can see; `resolve_property()` accepts URL-prefix or Domain form automatically.
+4. `python backend/cli/sync-gsc.py --auth-only` → a browser opens once (loopback `127.0.0.1`, random port), you consent, the refresh token is written to `tokens/gsc_token.json` (git-ignored).
+5. `python backend/cli/sync-gsc.py --list-sites` shows the properties the account can see; `resolve_property()` accepts URL-prefix or Domain form automatically.
 
 ## Sync behaviour
 
@@ -26,7 +26,7 @@ Status (2026-08-17): **LIVE — connected to `sc-domain:emdadmodiran.com` (siteO
 
 ## Quota strategy
 
-Claude never calls GSC. All tools (`get_gsc_page_data`, `get_gsc_query_data`, cannibalization, striking distance, CTR) read SQLite. Run the sync on a schedule (e.g. Windows Task Scheduler daily: `.venv\Scripts\python scripts\sync-gsc.py --days 30 --non-interactive` followed by `build-graph.py`).
+Claude never calls GSC. All tools (`get_gsc_page_data`, `get_gsc_query_data`, cannibalization, striking distance, CTR) read SQLite. Run the sync on a schedule (e.g. Windows Task Scheduler daily: `.venv\Scripts\python backend\cli\sync-gsc.py --days 30 --non-interactive` followed by `build-graph.py`).
 
 ## Not implemented (hooks only)
 

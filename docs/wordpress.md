@@ -22,5 +22,5 @@ Public endpoints need no auth. Optional `WP_USERNAME` + `WP_APP_PASSWORD` (WordP
 
 ## Guarantees
 
-* Only `GET` requests exist in `src/common/http.py` / `src/wordpress/client.py`.
+* Only `GET` requests exist in `backend/seo_brain/common/http.py` / `backend/seo_brain/wordpress/client.py`.
 * Rate limit 0.7 s between requests, retry with exponential backoff on 429/5xx, stop on 401/403.

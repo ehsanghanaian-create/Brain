@@ -16,29 +16,29 @@
 cd C:\Users\Lenovo\Documents\Plan\seo-knowledge-graph
 python -m venv .venv
 .venv\Scripts\python -m pip install -e .[dev]
-.venv\Scripts\python scripts\setup.py --env --vault --db      # .env from template, vault folders, schema
+.venv\Scripts\python backend\cli\setup.py --env --vault --db      # .env from template, vault folders, schema
 notepad .env                                                   # fill credentials (never commit)
-.venv\Scripts\python scripts\preflight.py                      # PASS/WARNING/FAIL table
+.venv\Scripts\python backend\cli\preflight.py                      # PASS/WARNING/FAIL table
 ```
 
 Data pipeline (in order):
 
 ```powershell
-.venv\Scripts\python scripts\sync-wordpress.py
-.venv\Scripts\python scripts\crawl.py --max-urls 20            # validation crawl
-.venv\Scripts\python scripts\crawl.py --full                   # after validation
-.venv\Scripts\python scripts\sync-gsc.py --auth-only           # one-time browser consent (needs GOOGLE_CLIENT_ID/SECRET)
-.venv\Scripts\python scripts\sync-gsc.py --days 1              # validation sync
-.venv\Scripts\python scripts\sync-gsc.py --days 30             # after validation
-.venv\Scripts\python scripts\build-graph.py --limit-pages 15   # first graph
-.venv\Scripts\python scripts\build-graph.py                    # full graph (entities + analysis + Obsidian)
+.venv\Scripts\python backend\cli\sync-wordpress.py
+.venv\Scripts\python backend\cli\crawl.py --max-urls 20            # validation crawl
+.venv\Scripts\python backend\cli\crawl.py --full                   # after validation
+.venv\Scripts\python backend\cli\sync-gsc.py --auth-only           # one-time browser consent (needs GOOGLE_CLIENT_ID/SECRET)
+.venv\Scripts\python backend\cli\sync-gsc.py --days 1              # validation sync
+.venv\Scripts\python backend\cli\sync-gsc.py --days 30             # after validation
+.venv\Scripts\python backend\cli\build-graph.py --limit-pages 15   # first graph
+.venv\Scripts\python backend\cli\build-graph.py                    # full graph (entities + analysis + Obsidian)
 ```
 
 Interfaces:
 
 ```powershell
-.venv\Scripts\python scripts\setup.py --claude-config          # registers MCP server (backs up config)
-.venv\Scripts\python scripts\dashboard.py                      # http://127.0.0.1:3000/
+.venv\Scripts\python backend\cli\setup.py --claude-config          # registers MCP server (backs up config)
+.venv\Scripts\python backend\cli\dashboard.py                      # http://127.0.0.1:3000/
 .venv\Scripts\python -m pytest -q                              # unit + integration tests
 ```
 
@@ -47,3 +47,5 @@ Open the vault in Obsidian: *Open folder as vault* → `obsidian\SEO-Knowledge-G
 ## Refresh cycle
 
 Re-run `sync-wordpress` → `crawl --full` → `sync-gsc --days 30` → `build-graph`. All steps are idempotent (upserts). Vault notes are regenerated (manual edits inside generated files are overwritten).
+
+> **Note (2026-08-17):** paths in this document were rewritten after the SEO Brain Phase 1 restructure (`backend/seo_brain/`→`backend/seo_brain/`, `backend/cli/`→`backend/cli/`, `mcp/`→`backend/mcp_server/`). Historical commit references are unchanged.

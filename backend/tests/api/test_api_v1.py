@@ -1,0 +1,129 @@
+"""API tests against an isolated temporary database (no dependency on data/seo.db)."""
+import pytest
+from fastapi.testclient import TestClient
+
+from seo_brain.api import deps
+from seo_brain.api.main import create_app
+from seo_brain.api.routers import graph as graph_router
+from seo_brain.api.routers import sites as sites_router
+from seo_brain.database.db import connect as legacy_connect
+from seo_brain.db.engine import make_engine
+from seo_brain.db.migrate import migrate
+from seo_brain.graph.model import GraphEdge, GraphNode
+from seo_brain.graph.store import SqlGraphStore
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    dbfile = tmp_path / "api.db"
+    eng = make_engine("sqlite:///" + dbfile.as_posix())
+    migrate(eng)
+    monkeypatch.delenv("API_TOKEN", raising=False)
+    monkeypatch.setattr(graph_router, "connect", lambda: legacy_connect(dbfile))   # legacy analytics → same temp DB
+    monkeypatch.setattr(sites_router, "PROJECT_ROOT", tmp_path)                       # workspaces under tmp, not data/
+    app = create_app()
+    app.dependency_overrides[deps.engine] = lambda: eng
+    c = TestClient(app)
+    c.eng = eng  # type: ignore[attr-defined]
+    return c
+
+
+def _seed(c: TestClient):
+    r = c.post("/api/v1/sites", json={"site_id": "demo", "name": "Demo", "canonical_url": "https://demo.example/",
+                                       "wp_url": "https://demo.example", "business_type": "auto-service"})
+    assert r.status_code == 201, r.text
+    store = SqlGraphStore(c.eng)
+    store.upsert_nodes([GraphNode("site:demo", "demo", "SITE", {"label": "Demo"}),
+                        GraphNode("page:https://demo.example/a", "demo", "PAGE", {"label": "A", "url": "https://demo.example/a"}),
+                        GraphNode("query:امداد", "demo", "QUERY", {"label": "امداد"})])
+    store.upsert_edges([GraphEdge("site:demo", "page:https://demo.example/a", "HAS_PAGE", site_id="demo"),
+                        GraphEdge("page:https://demo.example/a", "query:امداد", "RANKS_FOR", 0.5, {"props": {"position": 8}}, "demo")])
+
+
+def test_health_reports_migrations(client):
+    r = client.get("/api/v1/health")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok" and "0002" in body["migrations"]["applied"] and body["migrations"]["pending"] == []
+
+
+def test_sites_crud_and_workspace(client):
+    assert client.get("/api/v1/sites").json() == []
+    _seed(client)
+    sites = client.get("/api/v1/sites").json()
+    assert [s["site_id"] for s in sites] == ["demo"] and sites[0]["mode"] == "manual"
+    assert sites[0]["workspace_path"] == "data/sites/demo"
+    r = client.patch("/api/v1/sites/demo", json={"mode": "assisted", "country": "IR"})
+    assert r.status_code == 200 and r.json()["mode"] == "assisted" and r.json()["country"] == "IR"
+    assert client.post("/api/v1/sites", json={"site_id": "demo", "name": "x", "canonical_url": "https://x.example/"}).status_code == 409
+    assert client.get("/api/v1/sites/nope").status_code == 404
+    assert client.post("/api/v1/sites", json={"site_id": "Bad Slug", "name": "x", "canonical_url": "https://x.example/"}).status_code == 422
+
+
+def test_graph_endpoints_neo4j_shape(client):
+    _seed(client)
+    s = client.get("/api/v1/sites/demo/graph/summary").json()
+    assert s["nodes"] == 3 and s["edges"] == 2 and s["by_relation_type"]["RANKS_FOR"] == 1
+    n = client.get("/api/v1/sites/demo/graph/node/page:https://demo.example/a").json()
+    assert set(n) == {"id", "site_id", "type", "metadata"} and n["type"] == "PAGE"
+    sg = client.get("/api/v1/sites/demo/graph/subgraph", params={"center": "site:demo", "hops": 2}).json()
+    assert len(sg["nodes"]) == 3 and len(sg["edges"]) == 2
+    e = sg["edges"][0]
+    assert set(e) == {"source", "target", "relation_type", "weight", "metadata", "site_id"}
+    nb = client.get("/api/v1/sites/demo/graph/neighbors/query:امداد", params={"direction": "in"}).json()
+    assert len(nb["edges"]) == 1
+    assert client.get("/api/v1/sites/demo/graph/nodes", params={"types": "query"}).json()[0]["id"] == "query:امداد"
+    sr = client.get("/api/v1/sites/demo/graph/search", params={"q": "امداد"}).json()
+    assert [x["id"] for x in sr["nodes"]] == ["query:امداد"] and "fts" in sr
+    assert client.get("/api/v1/sites/demo/graph/node/nope").status_code == 404
+    assert client.get("/api/v1/sites/demo/graph/orphans").status_code == 200
+
+
+def test_memory_and_ai_orchestrator_endpoints(client):
+    _seed(client)
+    m = client.get("/api/v1/sites/demo/memory").json()
+    assert m["business_rules"] == [] and m["tone"] == {}
+    r = client.put("/api/v1/sites/demo/memory", json={"business_rules": ["فقط تهران"], "tone": {"voice": "friendly"}})
+    assert r.status_code == 200 and r.json()["business_rules"] == ["فقط تهران"]
+    ctx = client.get("/api/v1/sites/demo/memory/context").json()["messages"]
+    assert ctx and ctx[0]["role"] == "system" and "فقط تهران" in ctx[0]["content"]
+
+    assert client.get("/api/v1/ai/routes").json()["providers"] == ["echo"]
+    r = client.post("/api/v1/ai/sites/demo/run", json={"kind": "brief", "prompt": "write", "json_keys": ["title", "h1"],
+                                                       "learn_pattern": "brief ok", "learn_evidence": "test"})
+    body = r.json()
+    assert r.status_code == 200 and body["ok"] and body["memory_used"] and body["response"]["parsed"] == {"title": "echo:title", "h1": "echo:h1"}
+    assert client.get("/api/v1/sites/demo/memory").json()["successful_patterns"][0]["pattern"] == "brief ok"
+    assert client.post("/api/v1/ai/sites/demo/run", json={"kind": "nope", "prompt": "x"}).status_code == 422
+
+
+def test_jobs_endpoints(client):
+    r = client.post("/api/v1/jobs", json={"type": "noop", "payload": {"site_id": "demo", "x": 1}})
+    assert r.status_code == 202
+    run_id = r.json()["run_id"]
+    import time
+    for _ in range(50):
+        st = client.get(f"/api/v1/jobs/{run_id}").json()
+        if st["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(0.02)
+    assert st["status"] == "succeeded" and st["result"] == {"echo": {"site_id": "demo", "x": 1}}
+    assert client.post("/api/v1/jobs", json={"type": "unknown"}).status_code == 422
+    assert client.get("/api/v1/jobs/none").status_code == 404
+
+
+def test_api_token_enforced_when_set(tmp_path, monkeypatch):
+    eng = make_engine("sqlite:///" + (tmp_path / "tok.db").as_posix()); migrate(eng)
+    monkeypatch.setenv("API_TOKEN", "s3cret")
+    app = create_app(); app.dependency_overrides[deps.engine] = lambda: eng
+    c = TestClient(app)
+    assert c.get("/api/v1/health").status_code == 200                # health is open
+    assert c.get("/api/v1/sites").status_code == 401
+    assert c.get("/api/v1/sites", headers={"X-API-Token": "wrong"}).status_code == 401
+    assert c.get("/api/v1/sites", headers={"X-API-Token": "s3cret"}).status_code == 200
+
+
+def test_legacy_dashboard_mounted(client):
+    r = client.get("/legacy/api/sites")
+    assert r.status_code == 200
+    assert client.get("/").json()["legacy_dashboard"] == "/legacy"

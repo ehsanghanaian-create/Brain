@@ -3,36 +3,36 @@
 Local-first, read-only SEO knowledge graph. One runtime (Python 3.13), one database (SQLite), one vault (Obsidian), one AI interface (Claude Desktop via stdio MCP).
 
 ```
-CLAUDE DESKTOP ──stdio──▶ mcp/server.py (MCPServer, read-only tools)
-                               │ src/graph/queries.py (shared read-only query API)
+CLAUDE DESKTOP ──stdio──▶ backend/mcp_server/server.py (MCPServer, read-only tools)
+                               │ backend/seo_brain/graph/queries.py (shared read-only query API)
                                ▼
-                    data/seo.db (SQLite, WAL, FTS5)  ◀── src/database/schema.sql
+                    data/seo.db (SQLite, WAL, FTS5)  ◀── backend/seo_brain/database/schema.sql
                                ▲
       ┌──────────────┬─────────┴──────────┬────────────────┐
- src/wordpress/   src/crawler/         src/gsc/        src/analysis/ (entities, seo)
- REST GET only    robots-aware BFS     OAuth+cache     src/graph/builder.py (nodes/edges, PageRank, Louvain)
-      └──────────────┴─────── src/normalizer/url.py (URL identity) ──────────┘
+ backend/seo_brain/wordpress/   backend/seo_brain/crawler/         backend/seo_brain/gsc/        backend/seo_brain/analysis/ (entities, seo)
+ REST GET only    robots-aware BFS     OAuth+cache     backend/seo_brain/graph/builder.py (nodes/edges, PageRank, Louvain)
+      └──────────────┴─────── backend/seo_brain/normalizer/url.py (URL identity) ──────────┘
                                │
-                    src/graph/obsidian_writer.py ──▶ obsidian/SEO-Knowledge-Graph/ (markdown + wikilinks)
-                    src/dashboard/app.py ──▶ http://127.0.0.1:3000/
+                    backend/seo_brain/graph/obsidian_writer.py ──▶ obsidian/SEO-Knowledge-Graph/ (markdown + wikilinks)
+                    backend/seo_brain/dashboard/app.py ──▶ http://127.0.0.1:3000/
 ```
 
 ## Layers and responsibilities
 
 | Layer | Module | Writes to | Notes |
 |---|---|---|---|
-| Config | `src/common/config.py` | — | `.env` (secrets) + `config/site.yaml` (per-site, `site_id`) |
-| Logging | `src/common/logging_setup.py` | `data/logs/*.jsonl` | run IDs (`crawl-…`, `wp-…`, `gsc-…`, `graph-…`, `analysis-…`), secret masking |
-| HTTP | `src/common/http.py` | — | GET-only client; retry, exponential backoff, rate limit |
-| Normalizer | `src/normalizer/url.py` | — | single definition of URL identity |
-| WordPress | `src/wordpress/` | `posts, categories, tags, taxonomies, post_terms, media, sync_runs` + `data/raw/wordpress` | dynamic discovery of post types/taxonomies; public endpoints; optional Application Password |
-| Crawler | `src/crawler/` | `pages, links, schemas, crawl_runs` + `data/raw/crawler` | robots.txt (protego), sitemaps, same-site only, cap, concurrency 2, 1s delay |
-| GSC | `src/gsc/` | `gsc_daily, gsc_query_page, queries, sync_runs` + `data/raw/gsc` | official client; refresh token in `tokens/`; Claude never calls GSC |
-| Analysis | `src/analysis/` | `entities, entity_mentions, seo_problems, seo_opportunities` | rule-based, evidence recorded, explainable scores |
-| Graph | `src/graph/builder.py` | `graph_nodes, graph_edges, graph_fts` | only real relationships become edges; PageRank (pure Python), Louvain (networkx) |
-| Obsidian | `src/graph/obsidian_writer.py` | vault markdown | wikilinks == real edges; frontmatter == real data |
-| MCP | `mcp/server.py` | — | 21 read-only tools, stdio |
-| Dashboard | `src/dashboard/app.py` | — | FastAPI on 127.0.0.1:3000 |
+| Config | `backend/seo_brain/common/config.py` | — | `.env` (secrets) + `config/site.yaml` (per-site, `site_id`) |
+| Logging | `backend/seo_brain/common/logging_setup.py` | `data/logs/*.jsonl` | run IDs (`crawl-…`, `wp-…`, `gsc-…`, `graph-…`, `analysis-…`), secret masking |
+| HTTP | `backend/seo_brain/common/http.py` | — | GET-only client; retry, exponential backoff, rate limit |
+| Normalizer | `backend/seo_brain/normalizer/url.py` | — | single definition of URL identity |
+| WordPress | `backend/seo_brain/wordpress/` | `posts, categories, tags, taxonomies, post_terms, media, sync_runs` + `data/raw/wordpress` | dynamic discovery of post types/taxonomies; public endpoints; optional Application Password |
+| Crawler | `backend/seo_brain/crawler/` | `pages, links, schemas, crawl_runs` + `data/raw/crawler` | robots.txt (protego), sitemaps, same-site only, cap, concurrency 2, 1s delay |
+| GSC | `backend/seo_brain/gsc/` | `gsc_daily, gsc_query_page, queries, sync_runs` + `data/raw/gsc` | official client; refresh token in `tokens/`; Claude never calls GSC |
+| Analysis | `backend/seo_brain/analysis/` | `entities, entity_mentions, seo_problems, seo_opportunities` | rule-based, evidence recorded, explainable scores |
+| Graph | `backend/seo_brain/graph/builder.py` | `graph_nodes, graph_edges, graph_fts` | only real relationships become edges; PageRank (pure Python), Louvain (networkx) |
+| Obsidian | `backend/seo_brain/graph/obsidian_writer.py` | vault markdown | wikilinks == real edges; frontmatter == real data |
+| MCP | `backend/mcp_server/server.py` | — | 21 read-only tools, stdio |
+| Dashboard | `backend/seo_brain/dashboard/app.py` | — | FastAPI on 127.0.0.1:3000 |
 
 ## Data flow / run order
 
@@ -44,7 +44,7 @@ Every table and node carries `site_id`; `config/site.yaml` holds a list of sites
 
 ## Future integration hooks (not implemented)
 
-`src/gsc/` shows the connector pattern (client + sync + raw dir + sync_runs). GA4 / Google Ads / SERP / backlinks / PageSpeed / CWV connectors would follow the same shape and write their own tables; the graph builder would add edges from those tables. URL Inspection: would need a queue table + rate limiter + cache (see `docs/gsc.md`).
+`backend/seo_brain/gsc/` shows the connector pattern (client + sync + raw dir + sync_runs). GA4 / Google Ads / SERP / backlinks / PageSpeed / CWV connectors would follow the same shape and write their own tables; the graph builder would add edges from those tables. URL Inspection: would need a queue table + rate limiter + cache (see `docs/gsc.md`).
 
 ## Read-only guarantee
 

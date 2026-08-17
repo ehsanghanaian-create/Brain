@@ -1,6 +1,6 @@
 # SEO Brain Platform — Phase 1: Architecture Design
 
-Status: **DRAFT for approval** · Date: 2026-08-17 · Basis: the working `seo-knowledge-graph` v0.1 (91 nodes / 356 edges, GSC live, 27/27 tests).
+Status: **APPROVED 2026-08-17 (with adjustments, see §12) — implemented, see 02-phase1-implementation.md** · Date: 2026-08-17 · Basis: the working `seo-knowledge-graph` v0.1 (91 nodes / 356 edges, GSC live, 27/27 tests).
 
 ---
 
@@ -227,3 +227,16 @@ Recommended execution order: **1 → 2 → 3 → 4 → 5 → 9 → 10 → 11 →
 6. **DB tech**: stay on raw SQL + repositories (consistent with v0.1, Postgres-compatible) instead of introducing an ORM? — *Recommended: yes.*
 
 On approval I will implement Phase 1: restructure with shim, migrations runner (`database/migrations/0001_init.sql` = current schema), FastAPI `api/` skeleton (`/health`, `/sites`, `/graph/*` wrapping existing queries, OpenAPI at `/docs`), API tests, docs, commit — with all 27 existing tests still green.
+
+---
+
+## 12. Approved adjustments (2026-08-17) — supersede the matching items above
+
+| Topic | Decision |
+|---|---|
+| Data access | **Repository pattern on SQLAlchemy Core** (`backend/seo_brain/db/`): typed `Table` definitions, dialect-aware upserts, one repository per aggregate. No raw SQL in services/API. The v0.1 modules (`seo_brain.database`, `graph.queries`, `graph.builder`, ingestion) still use `sqlite3` and are migrated to repositories incrementally; both paths share the same DB and the same migration runner. |
+| Graph schema | Neo4j-compatible model from day one (`graph/model.py`): **Node(id, site_id, type, metadata)**, **Edge(source, target, relation_type, weight, metadata)**. Stored in the existing `graph_nodes`/`graph_edges` tables (label/url/pagerank/community/vault_path lifted into `metadata`), plus SQL views `graph_nodes_v` / `graph_edges_v` exposing exactly that shape. `GraphStore` Protocol + `SqlGraphStore`; a `Neo4jGraphStore` slots in later. |
+| AI layer | **Orchestrator**: `Task → AIRouter → AIProvider → Validator → Memory` (`seo_brain/ai/`). Router supports per-task and per-site chains with fallback (Content Writing → Claude, SEO Analysis → GPT, Research → Gemini are plain route entries). Validators run before anything is accepted or learned. Phase 1 ships the offline `EchoProvider` only. |
+| Memory layer | `site_memory` table (business_rules, tone, content_rules, successful_patterns) + `MemoryService`: injected as a system message into every task for the site; written only after validation with provenance. |
+| Kept | legacy dashboard mounted at `/legacy`; WordPress publishing disabled by default; `manual` mode is the default for every site. |
+| Before Phase 2 | report on Node.js + disk cleanup: `docs/seo-brain/phase2-prerequisites.md`. |

@@ -1,10 +1,10 @@
 # MCP server (Claude Desktop)
 
-File: `mcp/server.py` — Python `mcp` SDK **2.0.0** (`mcp.server.mcpserver.MCPServer`; verified against the installed package on 2026-08-16 — the older `mcp.server.fastmcp.FastMCP` import no longer exists in 2.x). Transport: **stdio** (no port; inherently local).
+File: `backend/mcp_server/server.py` — Python `mcp` SDK **2.0.0** (`mcp.server.mcpserver.MCPServer`; verified against the installed package on 2026-08-16 — the older `mcp.server.fastmcp.FastMCP` import no longer exists in 2.x). Transport: **stdio** (no port; inherently local).
 
 ## Claude Desktop configuration (verified format, modelcontextprotocol.io/quickstart/user)
 
-File: `%APPDATA%\Claude\claude_desktop_config.json`. `scripts/setup.py --claude-config` backs the file up (`claude_desktop_config.backup-<timestamp>.json`), preserves all existing keys/servers and adds:
+File: `%APPDATA%\Claude\claude_desktop_config.json`. `backend/cli/setup.py --claude-config` backs the file up (`claude_desktop_config.backup-<timestamp>.json`), preserves all existing keys/servers and adds:
 
 ```json
 {
@@ -46,3 +46,5 @@ Node references accept node ids, URLs (decoded or percent-encoded), or titles/la
 ## Security
 
 stdio only · no `read_any_file` · no SQL passthrough · no delete/update/publish/edit/move/rename · outputs tested for secret leakage (`tests/integration/test_mcp_stdio.py`).
+
+> **Note (2026-08-17):** paths in this document were rewritten after the SEO Brain Phase 1 restructure (`backend/seo_brain/`→`backend/seo_brain/`, `backend/cli/`→`backend/cli/`, `mcp/`→`backend/mcp_server/`). Historical commit references are unchanged.

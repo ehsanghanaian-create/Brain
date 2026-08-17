@@ -17,10 +17,10 @@ internal_links_out: 10
 external_links_out: 1
 in_sitemap: true
 depth: 0
-gsc_clicks: null
-gsc_impressions: null
-gsc_ctr: null
-gsc_position: null
+gsc_clicks: 0
+gsc_impressions: 29
+gsc_ctr: 0.0
+gsc_position: 17.5
 pagerank: 0.043785
 community: 1
 schema_types:
@@ -38,7 +38,7 @@ schema_types:
 - Organization
 - Person
 last_crawled: '2026-08-16T09:50:28.875Z'
-last_gsc_sync: null
+last_gsc_sync: '2026-08-14'
 wp_id: 561
 wp_type: post
 modified_gmt: '2026-02-25T08:23:31'
@@ -65,6 +65,10 @@ modified_gmt: '2026-02-25T08:23:31'
 ## Offers
 - [[07-Services/امداد خودرو|امداد خودرو]]
 
+## Ranks for (important queries)
+- [[09-Queries/امداد خودرو ام وی ام|امداد خودرو ام وی ام]] — pos 8.4, 14 impr, 0 clicks
+- [[09-Queries/شماره امداد خودرو ام وی ام|شماره امداد خودرو ام وی ام]] — pos 10.8, 9 impr, 0 clicks
+
 ## Internal links out (real)
 - [[01-Pages/امداد خودرو مدیران خودرو (home)|امداد خودرو مدیران خودرو]] — anchor: ,امداد خودرو مدیران خودرو,خدمات امداد خودرو MVM
 - [[01-Pages/امداد خودرو ام وی ام|امداد خودرو ام وی ام]] *(nav)* — anchor: امداد خودرو ام وی ام
@@ -87,6 +91,7 @@ modified_gmt: '2026-02-25T08:23:31'
 
 ## SEO opportunities
 - [[12-Opportunities/internal link|internal link]] (score 3.34)
+- [[12-Opportunities/striking distance|striking distance]] (score 0.16)
 
 ## Suggested internal links (semantic — not real links yet)
 - → https://emdadmodiran.com/category/modiran-emdad/emdad-mvm/ (score 1.00) — source mentions MVM but does not link to the target page about it

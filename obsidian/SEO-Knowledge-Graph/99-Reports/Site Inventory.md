@@ -21,6 +21,6 @@ report: site-inventory
 - **canonical targets:** 19
 - **duplicate content hashes:** 0
 - **orphan pages:** 3
-- **graph nodes:** 45
-- **graph edges:** 298
-- **gsc rows:** 0
+- **graph nodes:** 91
+- **graph edges:** 356
+- **gsc rows:** 731

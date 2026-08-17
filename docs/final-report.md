@@ -8,10 +8,10 @@ A local-first, read-only SEO knowledge graph, per the plan's 13 phases:
 
 | Layer | Delivered | Evidence |
 |---|---|---|
-| Ingestion | WordPress REST snapshot (GET only), robots-aware crawler, URL normalizer, GSC connector (code complete, live sync blocked — see §3) | `src/wordpress`, `src/crawler`, `src/normalizer`, `src/gsc`; `data/raw/` |
+| Ingestion | WordPress REST snapshot (GET only), robots-aware crawler, URL normalizer, GSC connector (**live since 2026-08-17**, see `gsc-integration-report.md`) | `src/wordpress`, `src/crawler`, `src/normalizer`, `src/gsc`; `data/raw/` |
 | Storage | SQLite with FTS5, 28 tables, `site_id` on every row, sync/crawl run tables | `src/database/schema.sql`, `data/seo.db` |
 | Analysis | Entity extraction from real content (3 brands, 3 models, 1 service, 1 location) and 9 SEO problem types + internal-link opportunities, each explainable | `src/analysis` |
-| Graph | networkx builder with PageRank + Louvain; **45 nodes / 298 edges** built only from real relationships | `src/graph/builder.py`, `graph_nodes`/`graph_edges` |
+| Graph | networkx builder with PageRank + Louvain; **91 nodes / 356 edges** (45/298 before GSC) built only from real relationships | `src/graph/builder.py`, `graph_nodes`/`graph_edges` |
 | Obsidian | Vault with 14 folders, 49 notes; wikilinks == graph edges; Obsidian 1.13.7 installed, vault registered, Dataview installed, Graph View verified | `obsidian/SEO-Knowledge-Graph`, `docs/screenshots/obsidian-graph-view.png` |
 | MCP | `mcp` SDK 2.0 stdio server, 21 read-only tools, registered in Claude Desktop config (with backup) | `mcp/server.py`, `docs/mcp.md` |
 | Dashboard | FastAPI on 127.0.0.1:3000, 9 pages + JSON API | `src/dashboard/app.py` |
@@ -26,18 +26,11 @@ A local-first, read-only SEO knowledge graph, per the plan's 13 phases:
 * Edges: LINKS_TO 88, HAS_PROBLEM 57, HAS_SCHEMA 44, ABOUT 29, BELONGS_TO 24, OFFERS 14, HAS_OPPORTUNITY 14, HAS_POST 11, TARGETS 9, HAS_PAGE 4, HAS_CATEGORY 4
 * SEO problems: 57 — images_missing_alt 19, multiple_h1 11, missing_meta_description 8, duplicate_h1 4, duplicate_title 4, no_body_inbound_links 4, orphan 3, low_inbound_links 3, missing_h1 1
 * Internal-link opportunities: 86 (scored, with breakdown)
-* GSC rows: 0 (blocked, §3) → QUERY nodes 0; GSC-based analyses report `NO_GSC_DATA` explicitly rather than guessing.
+* GSC: 731 daily rows (2026-07-16→08-14), 66 queries → 43 QUERY nodes, 49 RANKS_FOR edges; 4 striking-distance, 6 cannibalization-candidate, 2 CTR opportunities.
 
 ## 3. Blocked / requires the user
 
-1. **Google Search Console (Phase 8 live sync)** — needs a Google Cloud OAuth *Desktop* client. Put `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` in `.env`, then:
-   ```powershell
-   .venv\Scripts\python scripts\sync-gsc.py --auth-only     # browser consent, refresh token saved to tokens/
-   .venv\Scripts\python scripts\sync-gsc.py --days 1        # validation
-   .venv\Scripts\python scripts\sync-gsc.py --days 30
-   .venv\Scripts\python scripts\build-graph.py              # adds QUERY nodes, TARGETS/RANKS_FOR edges, GSC analyses
-   ```
-   Full walkthrough: `docs/gsc.md`.
+1. ~~Google Search Console~~ — DONE 2026-08-17 (`docs/gsc-integration-report.md`). Note: OAuth app is in Testing mode → refresh token expires after 7 days; rerun `sync-gsc.py --auth-only` or publish the app.
 2. **Claude Desktop restart** — the MCP server is registered; Claude Desktop must be restarted once to load it. Then ask Claude e.g. "list orphan pages on emdadmodiran" (tools: `docs/mcp.md`).
 3. **Obsidian first-open prompt** — Obsidian may ask to trust community plugins (Dataview) for this vault; click *Trust*. The optional Local REST API plugin was not installed (needs an in-app generated key; nothing depends on it).
 4. **WordPress app password (optional)** — without it only public REST endpoints are used (menus/authors unavailable). Add `WP_USERNAME`/`WP_APP_PASSWORD` to `.env` if wanted.
@@ -58,14 +51,14 @@ A local-first, read-only SEO knowledge graph, per the plan's 13 phases:
 ## 6. Environment risks noticed
 
 * **Disk space on C: is critically low** (observed between 82 MB and 2.6 GB free during this work). Project footprint is ~250 MB (venv). Consider freeing space before running larger crawls or long GSC histories.
-* Preflight: `python scripts\preflight.py` → 18 PASS / 9 WARNING / 1 FAIL (the FAIL is the missing GSC client credentials).
+* Preflight: `python scripts\preflight.py` → 22 PASS / 7 WARNING / 0 FAIL after GSC connection (2026-08-17).
 
 ## 7. How to keep it fresh
 
 ```powershell
 .venv\Scripts\python scripts\sync-wordpress.py
 .venv\Scripts\python scripts\crawl.py --full
-.venv\Scripts\python scripts\sync-gsc.py --days 30      # once credentials exist
+.venv\Scripts\python scripts\sync-gsc.py --days 30      # token in tokens/; re-auth with --auth-only if AUTH_FAILED
 .venv\Scripts\python scripts\build-graph.py             # rebuilds graph, vault notes, reports
 ```
 Everything is idempotent (upserts keyed by URL/ID and `site_id`); a second site is a new entry in `config/site.yaml`.

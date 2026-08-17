@@ -1,6 +1,6 @@
 # Google Search Console connector
 
-Status (2026-08-16): **implemented and unit-tested; live sync BLOCKED until OAuth credentials are provided.**
+Status (2026-08-17): **LIVE — connected to `sc-domain:emdadmodiran.com` (siteOwner), 30-day sync done, graph rebuilt.** See `gsc-integration-report.md`.
 
 ## One-time setup (you)
 

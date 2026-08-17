@@ -239,7 +239,9 @@ def get_gsc_page_data(conn, sid, page: str | None = None, min_position: float | 
         url = one(conn, "SELECT url FROM graph_nodes WHERE site_id=? AND node_id=?", (sid, nid))["url"] if nid else page
         sql += " AND page=?"
         params.append(url)
-    sql += " GROUP BY page HAVING impressions>=?"
+    # Filter on the aggregated subquery: inside HAVING, SQLite would resolve bare `position`/`impressions`
+    # to the raw per-row column instead of the weighted aggregate alias (surfaced by acceptance test 4).
+    sql = f"SELECT * FROM ({sql} GROUP BY page) agg WHERE impressions>=?"
     params.append(min_impressions)
     if min_position is not None:
         sql += " AND position>=?"

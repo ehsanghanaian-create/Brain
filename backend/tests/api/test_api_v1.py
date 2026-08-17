@@ -127,3 +127,28 @@ def test_legacy_dashboard_mounted(client):
     r = client.get("/legacy/api/sites")
     assert r.status_code == 200
     assert client.get("/").json()["legacy_dashboard"] == "/legacy"
+
+
+def test_error_envelope_and_request_id(client):
+    r = client.get("/api/v1/sites/nope", headers={"X-Request-ID": "req-1"})
+    assert r.status_code == 404 and r.headers["X-Request-ID"] == "req-1"
+    assert r.json() == {"error": {"code": "not_found", "message": "unknown site_id 'nope'", "details": None, "request_id": "req-1"}}
+    r = client.post("/api/v1/sites", json={"site_id": "BAD", "name": "x", "canonical_url": "nope"})
+    body = r.json()["error"]
+    assert r.status_code == 422 and body["code"] == "validation_error" and isinstance(body["details"], list) and body["details"][0]["loc"]
+    assert client.get("/api/v1/health").headers.get("X-Request-ID")
+
+
+def test_delete_site_refuses_then_forces(client):
+    _seed(client)
+    client.put("/api/v1/sites/demo/memory", json={"tone": {"voice": "x"}})
+    r = client.delete("/api/v1/sites/demo")
+    assert r.status_code == 409 and r.json()["error"]["code"] == "site_has_data"
+    assert r.json()["error"]["details"]["graph_nodes"] == 3 and r.json()["error"]["details"]["site_memory"] == 1
+    r = client.delete("/api/v1/sites/demo?force=true")
+    assert r.status_code == 200 and r.json()["deleted"] == "demo" and r.json()["related_rows_deleted"]["graph_edges"] == 2
+    assert client.get("/api/v1/sites/demo").status_code == 404
+    assert client.get("/api/v1/sites").json() == []
+    # a site without data deletes without force
+    client.post("/api/v1/sites", json={"site_id": "empty", "name": "E", "canonical_url": "https://e.example/"})
+    assert client.delete("/api/v1/sites/empty").status_code == 200

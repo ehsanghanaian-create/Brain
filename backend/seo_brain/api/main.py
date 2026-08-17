@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from ..automation import get_job_queue
 from ..common.config import env
 from .deps import require_token
+from .errors import install_error_handlers
 from .routers import ai, graph, health, jobs, memory, sites
 
 API_PREFIX = "/api/v1"
@@ -60,7 +61,8 @@ def create_app() -> FastAPI:
     app = FastAPI(title="SEO Brain API", version="0.2.0", docs_url="/api/docs", redoc_url=None,
                   openapi_url="/api/openapi.json")
     origins = [o.strip() for o in (env("FRONTEND_ORIGIN", "http://localhost:3000,http://127.0.0.1:3000") or "").split(",") if o.strip()]
-    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"], expose_headers=["X-Request-ID"])
+    install_error_handlers(app)
 
     deps = [Depends(require_token)]
     app.include_router(health.router, prefix=API_PREFIX)

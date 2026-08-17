@@ -1,18 +1,26 @@
-import { RoadmapPage } from '@/components/seo-brain/roadmap-page';
+import PageContainer from '@/components/layout/page-container';
+import { BackendError } from '@/components/seo-brain/backend-error';
+import { CommandCenter } from '@/features/graph/components/command-center';
+import { endpoints, settle } from '@/lib/api/client';
 
+export const dynamic = 'force-dynamic';
 export const metadata = { title: 'گراف دانش' };
 
-export default function Page() {
+export default async function GraphPage({ searchParams }: { searchParams: Promise<{ site?: string }> }) {
+  const { site } = await searchParams;
+  const sites = await settle(endpoints.sites());
+  if (sites.error) {
+    return (
+      <PageContainer pageTitle='گراف دانش'>
+        <BackendError error={sites.error} />
+      </PageContainer>
+    );
+  }
+  const list = sites.data!;
+  const initial = list.find((s) => s.site_id === site)?.site_id ?? list[0]?.site_id;
   return (
-    <RoadmapPage
-      title='گراف دانش'
-      description='نمایش تعاملی گراف با React Flow — جست‌وجو، فیلتر، زوم و جزئیات هر گره در سایدبار'
-      phase='فاز ۴'
-      features={[
-        'نمایش گره‌های صفحه، کوئری، موجودیت، اسکیما و محتوا',
-        'جست‌وجو و فیلتر بر اساس نوع گره و رابطه',
-        'کلیک روی گره: جایگاه، CTR، ایمپرشن، کلیک، اینتنت، صفحه هدف'
-      ]}
-    />
+    <PageContainer pageTitle='گراف دانش — مرکز فرماندهی سئو' pageDescription='نقشه سئو، نقشه محتوا و نقشه لینک داخلی؛ روی هر گره کلیک کنید تا داده‌های سئوی آن را ببینید.'>
+      {!initial ? <p className='text-muted-foreground text-sm'>ابتدا یک سایت بسازید.</p> : <CommandCenter sites={list} initialSiteId={initial} />}
+    </PageContainer>
   );
 }

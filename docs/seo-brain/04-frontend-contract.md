@@ -100,3 +100,13 @@ Breaking changes to any shape above require a new prefix (`/api/v2`) or an addit
 | `POST /sites` / `PATCH /sites/{id}` | + `timezone` | Site + `timezone` |
 
 UI rule for `ConnectionResult`: show `message` verbatim; badge by `status` (`ok`→success, `not_configured`→neutral, others→destructive); never render `detail` keys that look like tokens (the backend never sends them, but the UI must not either).
+
+## 9. Phase 4 additions (2026-08-17, additive)
+
+| Endpoint | Response |
+|---|---|
+| `GET /sites/{id}/graph/modes` | `[{key: seo|content|links, title_fa, description_fa, layout, group_by, node_types[], relation_types[]}]` |
+| `GET /sites/{id}/graph/view?mode=&types=&relation_types=&limit=&include_isolated=` | `{mode: <GraphMode>, nodes: GraphNode[], edges: GraphEdge[], truncated, total_nodes, stats:{by_type, by_relation}}` — bad mode → 422 |
+| `GET /sites/{id}/graph/node-details/{node_id}` | `{id, type, label, url, pagerank, community, props, degree, …one of: page{…}, keyword{…}, problem{…}, opportunity{…}, entity{…}, schema{…}, site{…}, neighbors[]}` — see `07-phase4-graph.md §1` for the per-kind fields; unknown → 404 |
+
+Client rule: node ids go into the path as **one `encodeURIComponent` segment** (`/graph/node-details/page%3Ahttps%3A%2F%2F…`); Next.js collapses `//` inside multi-segment paths.

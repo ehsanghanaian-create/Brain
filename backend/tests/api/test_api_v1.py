@@ -152,3 +152,31 @@ def test_delete_site_refuses_then_forces(client):
     # a site without data deletes without force
     client.post("/api/v1/sites", json={"site_id": "empty", "name": "E", "canonical_url": "https://e.example/"})
     assert client.delete("/api/v1/sites/empty").status_code == 200
+
+
+def test_graph_modes_view_and_details(client):
+    _seed(client)
+    modes = client.get("/api/v1/sites/demo/graph/modes").json()
+    assert [m["key"] for m in modes] == ["seo", "content", "links"] and all(m["title_fa"] for m in modes)
+    v = client.get("/api/v1/sites/demo/graph/view", params={"mode": "seo"}).json()
+    assert v["mode"]["key"] == "seo" and {n["id"] for n in v["nodes"]} == {"site:demo", "page:https://demo.example/a", "query:امداد"}
+    assert {(e["source"], e["relation_type"], e["target"]) for e in v["edges"]} == {("site:demo", "HAS_PAGE", "page:https://demo.example/a"), ("page:https://demo.example/a", "RANKS_FOR", "query:امداد")}
+    assert v["stats"]["by_type"] == {"SITE": 1, "PAGE": 1, "QUERY": 1} and v["truncated"] is False
+    # links mode: only page-ish nodes and LINKS_TO edges (none seeded) → nodes without edges dropped when include_isolated=false
+    lv = client.get("/api/v1/sites/demo/graph/view", params={"mode": "links", "include_isolated": "false"}).json()
+    assert lv["nodes"] == [] and lv["edges"] == []
+    lv2 = client.get("/api/v1/sites/demo/graph/view", params={"mode": "links"}).json()
+    assert [n["id"] for n in lv2["nodes"]] == ["page:https://demo.example/a"]
+    # types filter narrows within the mode; unknown mode → 422; limit → truncated flag
+    tv = client.get("/api/v1/sites/demo/graph/view", params={"mode": "seo", "types": "QUERY"}).json()
+    assert [n["type"] for n in tv["nodes"]] == ["QUERY"] and tv["edges"] == []
+    assert client.get("/api/v1/sites/demo/graph/view", params={"mode": "nope"}).status_code == 422
+    assert client.get("/api/v1/sites/demo/graph/view", params={"mode": "seo", "limit": 1}).json()["truncated"] is True
+    # details per node kind
+    d = client.get("/api/v1/sites/demo/graph/node-details/query:امداد").json()
+    assert d["type"] == "QUERY" and d["keyword"]["related_pages"][0]["id"] == "page:https://demo.example/a" and d["degree"] == 1
+    p = client.get("/api/v1/sites/demo/graph/node-details/page:https://demo.example/a").json()
+    assert p["type"] == "PAGE" and "page" in p and p["page"]["content_status"] == "unknown" and p["related"]["queries"][0]["label"] == "امداد"
+    s = client.get("/api/v1/sites/demo/graph/node-details/site:demo").json()
+    assert s["type"] == "SITE" and "site" in s
+    assert client.get("/api/v1/sites/demo/graph/node-details/nope:x").status_code == 404

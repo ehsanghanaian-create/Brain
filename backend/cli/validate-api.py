@@ -94,6 +94,15 @@ def main() -> int:
     check("graph orphans", "GET", api + f"/sites/{sid}/graph/orphans", 200, lambda r: isinstance(r.json(), list), headers=H)
     check("graph on unknown site → 404", "GET", api + "/sites/nope-nope/graph/summary", 404, headers=H)
 
+    # ---- phase 4: graph modes / view / node details (real site, read-only)
+    check("graph modes", "GET", api + f"/sites/{sid}/graph/modes", 200, lambda r: [m["key"] for m in r.json()] == ["seo", "content", "links"], headers=H)
+    check("graph view seo", "GET", api + f"/sites/{sid}/graph/view?mode=seo", 200, lambda r: len(r.json()["nodes"]) > 0 and len(r.json()["edges"]) > 0 and r.json()["mode"]["key"] == "seo", headers=H)
+    check("graph view links (no isolated)", "GET", api + f"/sites/{sid}/graph/view?mode=links&include_isolated=false", 200, lambda r: all(e["relation_type"] in ("LINKS_TO", "SUGGESTED_LINK") for e in r.json()["edges"]), headers=H)
+    check("graph view content types filter", "GET", api + f"/sites/{sid}/graph/view?mode=content&types=SCHEMA,PAGE", 200, lambda r: set(n["type"] for n in r.json()["nodes"]) <= {"SCHEMA", "PAGE"}, headers=H)
+    check("graph view bad mode → 422", "GET", api + f"/sites/{sid}/graph/view?mode=nope", 422, headers=H)
+    check("node details (page)", "GET", api + f"/sites/{sid}/graph/node-details/{node_id}", 200, lambda r: r.json()["type"] in ("PAGE", "POST") and "page" in r.json() and "content_status" in r.json()["page"], headers=H)
+    check("node details 404", "GET", api + f"/sites/{sid}/graph/node-details/nope:x", 404, headers=H)
+
     # ---- memory (temporary site only)
     check("memory get (empty)", "GET", api + f"/sites/{tmp}/memory", 200, lambda r: r.json()["business_rules"] == [] and r.json()["tone"] == {}, headers=H)
     check("memory put", "PUT", api + f"/sites/{tmp}/memory", 200, lambda r: r.json()["business_rules"] == ["فقط تهران"] and r.json()["tone"]["voice"] == "formal" and bool(r.json()["updated_at"]), headers=H,

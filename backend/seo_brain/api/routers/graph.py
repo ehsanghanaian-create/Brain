@@ -10,7 +10,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ...database.db import connect
 from ...graph import queries as Q
 from ...graph.store import GraphStore
-from ..deps import graph_store, require_site
+from ...graph.details import node_details
+from ...graph.views import MODES, graph_view
+from ...db.repositories import GraphRepository
+from ..deps import graph_repo, graph_store, require_site
 
 router = APIRouter(prefix="/sites/{site_id}/graph", tags=["graph"], dependencies=[Depends(require_site)])
 
@@ -90,3 +93,32 @@ def orphans(site_id: str, include_nav_only: bool = False, limit: int = Query(100
         return Q.find_orphans(conn, site_id, include_nav_only, limit)
     finally:
         conn.close()
+
+
+# ----------------------------------------------------------------------------- phase 4: command-center views + node details
+@router.get("/modes")
+def modes(site_id: str) -> list[dict]:
+    """Available graph modes (SEO map / content map / internal-link map) with their node & relation types."""
+    return [{"key": m.key, "title_fa": m.title_fa, "description_fa": m.description_fa, "layout": m.layout, "group_by": m.group_by,
+             "node_types": list(m.node_types), "relation_types": list(m.relation_types)} for m in MODES.values()]
+
+
+@router.get("/view")
+def view(site_id: str, mode: str = Query("seo", pattern="^(seo|content|links)$"), types: str | None = None,
+         relation_types: str | None = None, limit: int = Query(400, ge=1, le=2000), include_isolated: bool = True,
+         repo: GraphRepository = Depends(graph_repo)) -> dict:
+    """Mode-filtered graph slice for React Flow (nodes ranked by PageRank, edges among them)."""
+    return graph_view(repo, site_id, mode, _types(types), _types(relation_types), limit, include_isolated).to_dict()
+
+
+@router.get("/node-details/{node_id:path}")
+def details(site_id: str, node_id: str, repo: GraphRepository = Depends(graph_repo)) -> dict:
+    """SEO detail bundle for the side panel (page/keyword/problem/opportunity/entity/schema/site)."""
+    conn = connect()
+    try:
+        d = node_details(repo, conn, site_id, node_id)
+    finally:
+        conn.close()
+    if not d:
+        raise HTTPException(404, f"node not found: {node_id}")
+    return d

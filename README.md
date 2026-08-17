@@ -6,13 +6,13 @@ A local SEO knowledge graph for **emdadmodiran.com** (امداد مدیران), 
 |---|---|
 | **What it does** | Snapshots WordPress (REST, read-only), crawls the site (robots-aware), caches Google Search Console, extracts entities (brands / models / services / locations) from real content, runs SEO analyses, materialises a graph in SQLite, writes an Obsidian vault, and exposes 21 read-only MCP tools to Claude Desktop plus a local dashboard. |
 | **Guarantee** | The target website is never modified: the codebase contains no HTTP write verbs; MCP tools are read-only; acceptance test 10 checks both. |
-| **Runtime** | Python 3.13 (single runtime; Node.js not needed). SQLite (FTS5). Obsidian for humans, Claude Desktop (stdio MCP) for AI. |
-| **Status** | v0.1 knowledge graph complete (`docs/final-report.md`, GSC live). **SEO Brain Phase 1 done** (`docs/seo-brain/`): restructured into `backend/` (FastAPI `/api/v1`, SQLAlchemy Core repositories, migrations, GraphStore, AI orchestrator + site memory, JobQueue). Phase 2 (Next.js UI) blocked on Node.js + disk space — `docs/seo-brain/phase2-prerequisites.md`. |
+| **Runtime** | Python 3.13 backend · Node 24 LTS + pnpm for `frontend/` (see `frontend/README.md`). SQLite (FTS5). Obsidian for humans, Claude Desktop (stdio MCP) for AI. |
+| **Status** | v0.1 knowledge graph complete (`docs/final-report.md`, GSC live). **SEO Brain Phase 1 done** (`docs/seo-brain/`): restructured into `backend/` (FastAPI `/api/v1`, SQLAlchemy Core repositories, migrations, GraphStore, AI orchestrator + site memory, JobQueue). **Phase 1.5 + Phase 2 done**: API validated live (47/47), frontend contract, Next.js RTL/Persian dashboard foundation in `frontend/` (`docs/seo-brain/05-phase2-foundation.md`). Next: Phase 3 sites wizard. |
 
 ## Architecture
 
 ```
-Next.js UI (Phase 2) ─HTTP─▶ backend/seo_brain/api (FastAPI /api/v1) ─▶ services ─▶ repositories ─▶ data/seo.db (SQLite)
+frontend/ (Next.js, RTL/fa) ─HTTP─▶ backend/seo_brain/api (FastAPI /api/v1) ─▶ services ─▶ repositories ─▶ data/seo.db (SQLite)
 Claude Desktop ─stdio─▶ backend/mcp_server/server.py ─▶ seo_brain/graph/queries.py ─┘
                                                                    ▲
        WordPress REST (GET) ─┐                                     │

@@ -62,6 +62,86 @@ export interface paths {
         patch: operations["update_site_api_v1_sites__site_id__patch"];
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Connections
+         * @description Last known status per connection kind (gsc | ga4 | wordpress) + what is configured on the site.
+         */
+        get: operations["get_connections_api_v1_sites__site_id__connections_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/connections/{kind}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Connection
+         * @description Run a read-only permission test. If `property` is given and the test passes, it is stored on the site.
+         */
+        post: operations["test_connection_api_v1_sites__site_id__connections__kind__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/initialize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Initialize Site
+         * @description Wizard step 3: workspace + site memory + graph namespace (idempotent).
+         */
+        post: operations["initialize_site_api_v1_sites__site_id__initialize_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connections/gsc/properties": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Gsc Properties
+         * @description Properties visible to the connected Google account (for the wizard's dropdown).
+         */
+        get: operations["gsc_properties_api_v1_connections_gsc_properties_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites/{site_id}/graph/summary": {
         parameters: {
             query?: never;
@@ -345,6 +425,14 @@ export interface components {
             /** Learn Evidence */
             learn_evidence?: string | null;
         };
+        /**
+         * ConnectionTestRequest
+         * @description Optional override of the property to test; when omitted the site's stored property is used.
+         */
+        ConnectionTestRequest: {
+            /** Property */
+            property?: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -359,7 +447,10 @@ export interface components {
                 [key: string]: unknown;
             };
         };
-        /** MemoryUpdate */
+        /**
+         * MemoryUpdate
+         * @description Site Brain configuration (all optional â†’ partial update).
+         */
         MemoryUpdate: {
             /** Business Rules */
             business_rules?: string[] | null;
@@ -367,8 +458,16 @@ export interface components {
             tone?: {
                 [key: string]: unknown;
             } | null;
+            /** Audience */
+            audience?: {
+                [key: string]: unknown;
+            } | null;
+            /** Cta Rules */
+            cta_rules?: string[] | null;
             /** Content Rules */
             content_rules?: string[] | null;
+            /** Forbidden Claims */
+            forbidden_claims?: string[] | null;
             /** Successful Patterns */
             successful_patterns?: {
                 [key: string]: unknown;
@@ -381,6 +480,11 @@ export interface components {
              * @description stable slug, e.g. emdadmodiran
              */
             site_id: string;
+            /**
+             * Timezone
+             * @default Asia/Tehran
+             */
+            timezone: string | null;
             /** Name */
             name: string;
             /**
@@ -417,6 +521,8 @@ export interface components {
         SiteUpdate: {
             /** Name */
             name?: string | null;
+            /** Timezone */
+            timezone?: string | null;
             /** Wp Url */
             wp_url?: string | null;
             /** Language */
@@ -635,6 +741,149 @@ export interface operations {
                 "application/json": components["schemas"]["SiteUpdate"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_connections_api_v1_sites__site_id__connections_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_connection_api_v1_sites__site_id__connections__kind__test_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+                kind: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ConnectionTestRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    initialize_site_api_v1_sites__site_id__initialize_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gsc_properties_api_v1_connections_gsc_properties_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

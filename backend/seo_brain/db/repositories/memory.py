@@ -17,7 +17,12 @@ class SiteMemory:
     tone: dict[str, Any] = field(default_factory=dict)          # {voice, formality, audience, language_notes}
     content_rules: list[str] = field(default_factory=list)
     successful_patterns: list[dict[str, Any]] = field(default_factory=list)  # {pattern, evidence, source, run_id, created_at}
+    audience: dict[str, Any] = field(default_factory=dict)      # {segments[], pains[], intent_notes}
+    cta_rules: list[str] = field(default_factory=list)
+    forbidden_claims: list[str] = field(default_factory=list)
     updated_at: str | None = None
+
+    EDITABLE = ("business_rules", "tone", "audience", "cta_rules", "content_rules", "forbidden_claims", "successful_patterns")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -32,11 +37,13 @@ class SiteMemoryRepository(Repository):
         m = r._mapping
         return SiteMemory(site_id=site_id, business_rules=loads(m["business_rules"], []), tone=loads(m["tone"], {}),
                           content_rules=loads(m["content_rules"], []), successful_patterns=loads(m["successful_patterns"], []),
-                          updated_at=m["updated_at"])
+                          audience=loads(m["audience"], {}), cta_rules=loads(m["cta_rules"], []),
+                          forbidden_claims=loads(m["forbidden_claims"], []), updated_at=m["updated_at"])
 
     def save(self, mem: SiteMemory) -> SiteMemory:
         values = {"site_id": mem.site_id, "business_rules": dumps(mem.business_rules), "tone": dumps(mem.tone),
                   "content_rules": dumps(mem.content_rules), "successful_patterns": dumps(mem.successful_patterns),
+                  "audience": dumps(mem.audience), "cta_rules": dumps(mem.cta_rules), "forbidden_claims": dumps(mem.forbidden_claims),
                   "updated_at": utcnow()}
         with self.engine.begin() as cx:
             self.upsert(cx, site_memory, values, conflict=["site_id"])

@@ -340,6 +340,267 @@
     }
    }
   },
+  "/api/v1/sites/{site_id}/connections": {
+   "get": {
+    "tags": [
+     "sites"
+    ],
+    "summary": "Get Connections",
+    "description": "Last known status per connection kind (gsc | ga4 | wordpress) + what is configured on the site.",
+    "operationId": "get_connections_api_v1_sites__site_id__connections_get",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Get Connections Api V1 Sites  Site Id  Connections Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sites/{site_id}/connections/{kind}/test": {
+   "post": {
+    "tags": [
+     "sites"
+    ],
+    "summary": "Test Connection",
+    "description": "Run a read-only permission test. If `property` is given and the test passes, it is stored on the site.",
+    "operationId": "test_connection_api_v1_sites__site_id__connections__kind__test_post",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "kind",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Kind"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/ConnectionTestRequest"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Test Connection Api V1 Sites  Site Id  Connections  Kind  Test Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sites/{site_id}/initialize": {
+   "post": {
+    "tags": [
+     "sites"
+    ],
+    "summary": "Initialize Site",
+    "description": "Wizard step 3: workspace + site memory + graph namespace (idempotent).",
+    "operationId": "initialize_site_api_v1_sites__site_id__initialize_post",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Initialize Site Api V1 Sites  Site Id  Initialize Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/connections/gsc/properties": {
+   "get": {
+    "tags": [
+     "sites"
+    ],
+    "summary": "Gsc Properties",
+    "description": "Properties visible to the connected Google account (for the wizard's dropdown).",
+    "operationId": "gsc_properties_api_v1_connections_gsc_properties_get",
+    "parameters": [
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Gsc Properties Api V1 Connections Gsc Properties Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/v1/sites/{site_id}/graph/summary": {
    "get": {
     "tags": [
@@ -1687,6 +1948,24 @@
     ],
     "title": "AIRunRequest"
    },
+   "ConnectionTestRequest": {
+    "properties": {
+     "property": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Property"
+     }
+    },
+    "type": "object",
+    "title": "ConnectionTestRequest",
+    "description": "Optional override of the property to test; when omitted the site's stored property is used."
+   },
    "HTTPValidationError": {
     "properties": {
      "detail": {
@@ -1746,6 +2025,32 @@
       ],
       "title": "Tone"
      },
+     "audience": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Audience"
+     },
+     "cta_rules": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cta Rules"
+     },
      "content_rules": {
       "anyOf": [
        {
@@ -1759,6 +2064,20 @@
        }
       ],
       "title": "Content Rules"
+     },
+     "forbidden_claims": {
+      "anyOf": [
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Forbidden Claims"
      },
      "successful_patterns": {
       "anyOf": [
@@ -1777,7 +2096,8 @@
      }
     },
     "type": "object",
-    "title": "MemoryUpdate"
+    "title": "MemoryUpdate",
+    "description": "Site Brain configuration (all optional â†’ partial update)."
    },
    "SiteCreate": {
     "properties": {
@@ -1786,6 +2106,18 @@
       "pattern": "^[a-z0-9][a-z0-9\\-]{1,62}$",
       "title": "Site Id",
       "description": "stable slug, e.g. emdadmodiran"
+     },
+     "timezone": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Timezone",
+      "default": "Asia/Tehran"
      },
      "name": {
       "type": "string",
@@ -1900,6 +2232,17 @@
        }
       ],
       "title": "Name"
+     },
+     "timezone": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Timezone"
      },
      "wp_url": {
       "anyOf": [

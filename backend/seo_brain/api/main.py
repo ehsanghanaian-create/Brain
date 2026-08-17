@@ -66,7 +66,7 @@ def create_app() -> FastAPI:
 
     deps = [Depends(require_token)]
     app.include_router(health.router, prefix=API_PREFIX)
-    for r in (sites.router, graph.router, memory.router, ai.router, jobs.router):
+    for r in (sites.router, sites.gsc_router, graph.router, memory.router, ai.router, jobs.router):
         app.include_router(r, prefix=API_PREFIX, dependencies=deps)
 
     # legacy dashboard (v0.1) mounted read-only until UI parity

@@ -2,7 +2,9 @@ import PageContainer from '@/components/layout/page-container';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { BackendError } from '@/components/seo-brain/backend-error';
+import { Button } from '@/components/ui/button';
 import { endpoints, settle } from '@/lib/api/client';
+import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'سایت‌ها' };
@@ -14,7 +16,8 @@ export default async function SitesPage() {
   return (
     <PageContainer
       pageTitle='سایت‌ها'
-      pageDescription='هر سایت یک فضای کاری مستقل دارد (داده، گراف، حافظه، تنظیمات). ویزارد افزودن سایت در فاز ۳ اضافه می‌شود.'
+      pageDescription='هر سایت یک فضای کاری مستقل دارد (داده، گراف، حافظه، اتصال‌ها، حالت انتشار).'
+      pageHeaderAction={<Button render={<Link href='/dashboard/sites/new' />}>افزودن سایت</Button>}
     >
       {sites.error ? (
         <BackendError error={sites.error} />
@@ -35,7 +38,9 @@ export default async function SitesPage() {
               {sites.data!.map((s) => (
                 <TableRow key={s.site_id}>
                   <TableCell className='font-medium'>
-                    {s.name}
+                    <Link href={`/dashboard/sites/${s.site_id}`} className='hover:underline'>
+                      {s.name}
+                    </Link>
                     <div className='text-muted-foreground text-xs' dir='ltr'>
                       {s.site_id}
                     </div>

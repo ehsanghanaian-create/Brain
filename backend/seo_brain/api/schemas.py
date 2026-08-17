@@ -10,6 +10,7 @@ Mode = Literal["manual", "assisted", "autopilot"]
 
 class SiteCreate(BaseModel):
     site_id: str = Field(pattern=r"^[a-z0-9][a-z0-9\-]{1,62}$", description="stable slug, e.g. emdadmodiran")
+    timezone: str | None = "Asia/Tehran"
     name: str
     canonical_url: HttpUrl
     wp_url: HttpUrl | None = None
@@ -23,6 +24,7 @@ class SiteCreate(BaseModel):
 
 class SiteUpdate(BaseModel):
     name: str | None = None
+    timezone: str | None = None
     wp_url: HttpUrl | None = None
     language: str | None = None
     country: str | None = None
@@ -33,10 +35,19 @@ class SiteUpdate(BaseModel):
 
 
 class MemoryUpdate(BaseModel):
+    """Site Brain configuration (all optional → partial update)."""
     business_rules: list[str] | None = None
-    tone: dict[str, Any] | None = None
+    tone: dict[str, Any] | None = None            # {voice, formality, person, language_notes}
+    audience: dict[str, Any] | None = None        # {segments[], pains[], intent_notes}
+    cta_rules: list[str] | None = None
     content_rules: list[str] | None = None
+    forbidden_claims: list[str] | None = None
     successful_patterns: list[dict[str, Any]] | None = None
+
+
+class ConnectionTestRequest(BaseModel):
+    """Optional override of the property to test; when omitted the site's stored property is used."""
+    property: str | None = None
 
 
 class AIRunRequest(BaseModel):

@@ -24,6 +24,7 @@ class Site:
     mode: str = "manual"
     ga4_property: str | None = None
     workspace_path: str | None = None
+    timezone: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -56,6 +57,19 @@ class SitesRepository(Repository):
             self.upsert(cx, sites, values, conflict=["site_id"],
                         update=[k for k in values if k not in ("site_id", "created_at")])
         return self.get(site.site_id)  # type: ignore[return-value]
+
+    def set_fields(self, site_id: str, **fields) -> Site:
+        """Targeted UPDATE of specific columns (safe under concurrent requests — no full-row overwrite)."""
+        allowed = {k: v for k, v in fields.items() if k in Site.__dataclass_fields__ and k not in ("site_id", "created_at", "updated_at")}
+        if "mode" in allowed and allowed["mode"] not in MODES:
+            raise ValueError(f"mode must be one of {MODES}")
+        if allowed:
+            with self.engine.begin() as cx:
+                cx.execute(sites.update().where(sites.c.site_id == site_id).values(**allowed, updated_at=utcnow()))
+        s = self.get(site_id)
+        if not s:
+            raise KeyError(site_id)
+        return s
 
     def set_mode(self, site_id: str, mode: str) -> Site:
         if mode not in MODES:

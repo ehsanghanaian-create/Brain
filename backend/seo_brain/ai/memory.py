@@ -23,7 +23,7 @@ class MemoryService:
     def update(self, site_id: str, **fields: Any) -> SiteMemory:
         mem = self.repo.get(site_id)
         for k, v in fields.items():
-            if k in ("business_rules", "tone", "content_rules", "successful_patterns") and v is not None:
+            if k in SiteMemory.EDITABLE and v is not None:
                 setattr(mem, k, v)
         return self.repo.save(mem)
 
@@ -34,8 +34,22 @@ class MemoryService:
             parts.append("Business rules:\n- " + "\n- ".join(mem.business_rules))
         if mem.tone:
             parts.append("Tone: " + "; ".join(f"{k}={v}" for k, v in mem.tone.items()))
+        if mem.audience:
+            aud = []
+            if mem.audience.get("segments"):
+                aud.append("segments: " + ", ".join(map(str, mem.audience["segments"])))
+            if mem.audience.get("pains"):
+                aud.append("pains: " + ", ".join(map(str, mem.audience["pains"])))
+            if mem.audience.get("intent_notes"):
+                aud.append("intent: " + str(mem.audience["intent_notes"]))
+            if aud:
+                parts.append("Audience: " + "; ".join(aud))
+        if mem.cta_rules:
+            parts.append("CTA rules:\n- " + "\n- ".join(mem.cta_rules))
         if mem.content_rules:
             parts.append("Content rules:\n- " + "\n- ".join(mem.content_rules))
+        if mem.forbidden_claims:
+            parts.append("NEVER claim (forbidden):\n- " + "\n- ".join(mem.forbidden_claims))
         if mem.successful_patterns:
             recent = mem.successful_patterns[-5:]
             parts.append("Patterns that worked before:\n- " + "\n- ".join(p.get("pattern", "") for p in recent))

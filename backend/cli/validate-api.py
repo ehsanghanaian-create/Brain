@@ -124,18 +124,32 @@ def main() -> int:
     check("job unknown type → 422", "POST", api + "/jobs", 422, headers=H, json={"type": "does-not-exist"})
     check("job unknown run → 404", "GET", api + "/jobs/none", 404, headers=H)
 
+    # ---- phase 3: connections + initialize + site brain
+    check("connections status (empty)", "GET", api + f"/sites/{tmp}/connections", 200, lambda r: r.json()["status"] == {} and "configured" in r.json(), headers=H)
+    check("gsc test without property → not_configured", "POST", api + f"/sites/{tmp}/connections/gsc/test", 200, lambda r: r.json()["status"] == "not_configured" and r.json()["ok"] is False, headers=H, json={})
+    check("ga4 test bad id → not_configured", "POST", api + f"/sites/{tmp}/connections/ga4/test", 200, lambda r: r.json()["status"] == "not_configured", headers=H, json={"property": "abc"})
+    check("wordpress test (real site, read-only)", "POST", api + f"/sites/{tmp}/connections/wordpress/test", 200, lambda r: r.json()["status"] in ("ok", "error", "not_found"), headers=H, json={"property": "https://emdadmodiran.com"})
+    check("connections status (3 kinds)", "GET", api + f"/sites/{tmp}/connections", 200, lambda r: set(r.json()["status"]) == {"gsc", "ga4", "wordpress"}, headers=H)
+    check("gsc properties listing", "GET", api + "/connections/gsc/properties", 200, lambda r: r.json()["status"] in ("ok", "not_configured", "not_authorized", "error"), headers=H)
+    check("unknown connection kind → 404", "POST", api + f"/sites/{tmp}/connections/nope/test", 404, headers=H, json={})
+    check("initialize", "POST", api + f"/sites/{tmp}/initialize", 200, lambda r: r.json()["graph"]["site_node"] == f"site:{tmp}" and r.json()["memory"]["existed"] is True, headers=H)
+    check("initialize idempotent", "POST", api + f"/sites/{tmp}/initialize", 200, lambda r: r.json()["graph"]["existed"] is True, headers=H)
+    check("site brain put (audience/cta/forbidden)", "PUT", api + f"/sites/{tmp}/memory", 200, lambda r: r.json()["forbidden_claims"] == ["ارزان‌ترین"] and r.json()["audience"]["segments"] == ["مالکان MVM"], headers=H,
+          json={"audience": {"segments": ["مالکان MVM"], "pains": [], "intent_notes": ""}, "cta_rules": ["تماس در پاراگراف اول"], "forbidden_claims": ["ارزان‌ترین"]})
+    check("site brain in AI context", "GET", api + f"/sites/{tmp}/memory/context", 200, lambda r: "NEVER claim" in r.json()["messages"][0]["content"], headers=H)
+
     # ---- legacy + cleanup
     check("legacy dashboard", "GET", BASE + "/legacy/", 200)
     check("legacy api", "GET", BASE + "/legacy/api/sites", 200)
-    check("site delete refused (has memory) → 409", "DELETE", api + f"/sites/{tmp}", 409, lambda r: r.json()["error"]["code"] == "site_has_data" and "site_memory" in r.json()["error"]["details"], headers=H)
-    check("site delete force", "DELETE", api + f"/sites/{tmp}?force=true", 200, lambda r: r.json()["deleted"] == tmp and r.json()["related_rows_deleted"].get("site_memory") == 1, headers=H)
+    check("site delete refused (has data) → 409", "DELETE", api + f"/sites/{tmp}", 409, lambda r: r.json()["error"]["code"] == "site_has_data" and {"site_memory", "site_connections", "graph_nodes"} <= set(r.json()["error"]["details"]), headers=H)
+    check("site delete force", "DELETE", api + f"/sites/{tmp}?force=true", 200, lambda r: r.json()["deleted"] == tmp and r.json()["related_rows_deleted"].get("site_connections") == 3, headers=H)
     check("site gone → 404", "GET", api + f"/sites/{tmp}", 404, headers=H)
     check("real site untouched", "GET", api + f"/sites/{sid}/graph/summary", 200, lambda r: r.json()["nodes"] > 0, headers=H)
 
     # tidy: remove the (empty) workspace folders the temp site created; the API itself never deletes files
     import shutil
     ws = _bootstrap.ROOT / "data" / "sites" / tmp
-    if ws.exists() and not any(p.is_file() for p in ws.rglob("*")):
+    if ws.exists() and all(p.name == "README.md" for p in ws.rglob("*") if p.is_file()):   # only initializer artefacts
         shutil.rmtree(ws, ignore_errors=True)
     passed = sum(1 for c in CHECKS if c["ok"]); total = len(CHECKS)
     lines = [f"# Phase 1.5 — live API validation report", "",
@@ -146,6 +160,7 @@ def main() -> int:
         lines.append(f"| {i} | {c['name']} | {c['method']} | `{c['url']}` | {c['status']} | {c['expect']} | {c['ms']} | {'✅' if c['ok'] else '❌'} | {c['note'].replace('|', '/')} |")
     lines += ["", "## Coverage", "",
               "* health / openapi / docs / request-id · error envelope (404, 409, 422) · sites CRUD (create, get, list, patch, delete-refuse, delete-force, 404 after) ·",
+              "  phase 3: connections status/tests (gsc/ga4/wordpress + 404 kind), gsc properties listing, initialize (idempotent), site brain fields + AI context ·",
               "  graph (summary, nodes, node, 404, neighbors, filtered neighbors, subgraph, 422, search, path, orphans, unknown site) ·",
               "  memory (get, put, context, learned pattern) · AI orchestrator (routes, providers, text run, JSON run + learn, 422) · jobs (enqueue, poll, list, 422, 404) · legacy mount.",
               "* All checks ran over real HTTP against uvicorn (not TestClient). Read-only on the real site; writes only on the temporary site."]

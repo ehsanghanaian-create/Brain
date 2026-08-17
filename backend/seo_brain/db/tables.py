@@ -27,6 +27,7 @@ sites = Table(
     Column("mode", String, nullable=False, server_default="manual"),   # manual | assisted | autopilot
     Column("ga4_property", String),
     Column("workspace_path", String),
+    Column("timezone", String),
 )
 
 site_memory = Table(
@@ -37,6 +38,19 @@ site_memory = Table(
     Column("content_rules", Text, nullable=False, server_default="[]"),
     Column("successful_patterns", Text, nullable=False, server_default="[]"),
     Column("updated_at", String, nullable=False),
+    # phase 3 (migration 0003)
+    Column("audience", Text, nullable=False, server_default="{}"),
+    Column("cta_rules", Text, nullable=False, server_default="[]"),
+    Column("forbidden_claims", Text, nullable=False, server_default="[]"),
+)
+
+site_connections = Table(
+    "site_connections", metadata,
+    Column("site_id", String, primary_key=True),
+    Column("kind", String, primary_key=True),          # gsc | ga4 | wordpress
+    Column("status", String, nullable=False),          # ok | not_configured | not_authorized | not_found | error
+    Column("detail", Text),
+    Column("tested_at", String, nullable=False),
 )
 
 graph_nodes = Table(

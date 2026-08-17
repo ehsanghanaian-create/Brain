@@ -87,3 +87,16 @@ Every response carries **`X-Request-ID`** (echoed if sent) — the frontend gene
 ## 7. Change control
 
 Breaking changes to any shape above require a new prefix (`/api/v2`) or an additive field. `openapi.v1.json` is committed with every backend change and CI (later) diffs it; the frontend regenerates its client from it.
+
+## 8. Phase 3 additions (2026-08-17, additive — no existing shape changed)
+
+| Endpoint | Request | Response |
+|---|---|---|
+| `GET /sites/{id}/connections` | — | `{site_id, configured:{gsc,ga4,wordpress: string|null}, status:{[kind]: ConnectionResult}}` |
+| `POST /sites/{id}/connections/{kind}/test` (`kind` ∈ `gsc|ga4|wordpress`) | `{property?: string}` (omit → use the site's stored value) | **ConnectionResult** `{kind, status: ok|not_configured|not_authorized|not_found|error, ok, message (fa), detail: object (never secrets), tested_at}`; on `ok` with an explicit `property` the value is stored on the site. Unknown kind → `404 not_found` |
+| `GET /connections/gsc/properties` | — | `{status, message?, properties:[{property, permission}]}` |
+| `POST /sites/{id}/initialize` | — | `{site_id, workspace:{path, created[], existed}, memory:{initialized, existed, updated_at}, graph:{site_node, existed, nodes, edges}}` — idempotent |
+| `PUT /sites/{id}/memory` | `MemoryUpdate` now also: `audience:{segments[],pains[],intent_notes}`, `cta_rules[]`, `forbidden_claims[]` | **SiteMemory** with the same new fields |
+| `POST /sites` / `PATCH /sites/{id}` | + `timezone` | Site + `timezone` |
+
+UI rule for `ConnectionResult`: show `message` verbatim; badge by `status` (`ok`→success, `not_configured`→neutral, others→destructive); never render `detail` keys that look like tokens (the backend never sends them, but the UI must not either).

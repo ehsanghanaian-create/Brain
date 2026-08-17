@@ -63,14 +63,58 @@ function safeJson(text: string): unknown {
 // ---- typed helpers for the endpoints the foundation uses (more are added per phase) --------------
 export type Health = { status: string; version: string; database: string; migrations: { applied: string[]; pending: string[] } };
 export type GraphSummary = { site_id: string; nodes: number; edges: number; by_node_type: Record<string, number>; by_relation_type: Record<string, number>; site: Record<string, unknown> };
-export type SiteMemory = { site_id: string; business_rules: string[]; tone: Record<string, unknown>; content_rules: string[]; successful_patterns: Record<string, unknown>[]; updated_at: string | null };
+export type SiteMemory = {
+  site_id: string;
+  business_rules: string[];
+  tone: Record<string, unknown>;
+  audience: Record<string, unknown>;
+  cta_rules: string[];
+  content_rules: string[];
+  forbidden_claims: string[];
+  successful_patterns: Record<string, unknown>[];
+  updated_at: string | null;
+};
+export type ConnectionKind = 'gsc' | 'ga4' | 'wordpress';
+export type ConnectionResult = {
+  kind: ConnectionKind;
+  status: 'ok' | 'not_configured' | 'not_authorized' | 'not_found' | 'error';
+  ok: boolean;
+  message: string;
+  detail: Record<string, unknown>;
+  tested_at: string;
+};
+export type ConnectionsStatus = {
+  site_id: string;
+  configured: { gsc: string | null; ga4: string | null; wordpress: string | null };
+  status: Partial<Record<ConnectionKind, ConnectionResult>>;
+};
+export type GscProperties = { status: string; message?: string; properties: { property: string; permission: string }[] };
+export type InitializeResult = {
+  site_id: string;
+  workspace: { path: string; created: string[]; existed: boolean };
+  memory: { initialized: boolean; existed: boolean; updated_at: string | null };
+  graph: { site_node: string; existed: boolean; nodes: number; edges: number };
+};
+export type SiteCreateBody = Schemas['SiteCreate'];
+export type SiteUpdateBody = Schemas['SiteUpdate'];
+export type MemoryUpdateBody = Schemas['MemoryUpdate'];
 
 export const endpoints = {
   health: () => api<Health>('/health'),
   sites: () => api<Site[]>('/sites'),
   site: (id: string) => api<Site>(`/sites/${encodeURIComponent(id)}`),
   graphSummary: (id: string) => api<GraphSummary>(`/sites/${encodeURIComponent(id)}/graph/summary`),
-  memory: (id: string) => api<SiteMemory>(`/sites/${encodeURIComponent(id)}/memory`)
+  memory: (id: string) => api<SiteMemory>(`/sites/${encodeURIComponent(id)}/memory`),
+  // phase 3 — sites management
+  createSite: (body: SiteCreateBody) => api<Site>('/sites', { method: 'POST', json: body }),
+  updateSite: (id: string, body: SiteUpdateBody) => api<Site>(`/sites/${encodeURIComponent(id)}`, { method: 'PATCH', json: body }),
+  deleteSite: (id: string, force = false) => api<{ deleted: string }>(`/sites/${encodeURIComponent(id)}${force ? '?force=true' : ''}`, { method: 'DELETE' }),
+  connections: (id: string) => api<ConnectionsStatus>(`/sites/${encodeURIComponent(id)}/connections`),
+  testConnection: (id: string, kind: ConnectionKind, property?: string | null) =>
+    api<ConnectionResult>(`/sites/${encodeURIComponent(id)}/connections/${kind}/test`, { method: 'POST', json: { property: property || null } }),
+  gscProperties: () => api<GscProperties>('/connections/gsc/properties'),
+  initializeSite: (id: string) => api<InitializeResult>(`/sites/${encodeURIComponent(id)}/initialize`, { method: 'POST' }),
+  putMemory: (id: string, body: MemoryUpdateBody) => api<SiteMemory>(`/sites/${encodeURIComponent(id)}/memory`, { method: 'PUT', json: body })
 };
 
 /** Resolve a value or an ApiError without throwing — for server components that render partial data. */

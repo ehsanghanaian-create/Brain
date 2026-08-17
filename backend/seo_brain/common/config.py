@@ -87,28 +87,48 @@ def _dc(cls, d: dict[str, Any] | None):
     return cls(**{k: v for k, v in d.items() if k in allowed})
 
 
-def load_sites(path: str | Path | None = None) -> list[SiteConfig]:
+def _sites_from_db() -> list[SiteConfig]:
+    """Sites created through the API/wizard live only in the DB; expose them with default crawler/gsc/graph settings."""
+    import sqlite3
+    p = database_path()
+    if not p.exists():
+        return []
+    try:
+        cx = sqlite3.connect(str(p)); cx.row_factory = sqlite3.Row
+        rows = cx.execute("SELECT site_id, name, canonical_url, wp_url, language, gsc_property FROM sites ORDER BY site_id").fetchall()
+        cx.close()
+    except sqlite3.Error:
+        return []
+    return [SiteConfig(site_id=r["site_id"], name=r["name"], canonical_url=r["canonical_url"],
+                       wp_url=r["wp_url"] or r["canonical_url"].rstrip("/"), language=r["language"] or "en",
+                       gsc_property=r["gsc_property"] or "") for r in rows]
+
+
+def load_sites(path: str | Path | None = None, include_db: bool = True) -> list[SiteConfig]:
+    """config/site.yaml sites first (they carry tuned crawler/gsc settings), then DB-only sites with defaults."""
     path = resolve_path(path or "config/site.yaml")
-    if not path.exists():
-        raise FileNotFoundError(f"site config not found: {path} (copy config/site.example.yaml)")
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    sites = []
-    for s in raw.get("sites", []):
-        sites.append(
-            SiteConfig(
-                site_id=s["site_id"],
-                name=s.get("name", s["site_id"]),
-                canonical_url=s["canonical_url"],
-                wp_url=s.get("wp_url", s["canonical_url"].rstrip("/")),
-                language=s.get("language", "en"),
-                gsc_property=s.get("gsc_property", ""),
-                crawler=_dc(CrawlerConfig, s.get("crawler")),
-                gsc=_dc(GscConfig, s.get("gsc")),
-                graph=_dc(GraphConfig, s.get("graph")),
+    sites: list[SiteConfig] = []
+    if path.exists():
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for s in raw.get("sites", []):
+            sites.append(
+                SiteConfig(
+                    site_id=s["site_id"],
+                    name=s.get("name", s["site_id"]),
+                    canonical_url=s["canonical_url"],
+                    wp_url=s.get("wp_url", s["canonical_url"].rstrip("/")),
+                    language=s.get("language", "en"),
+                    gsc_property=s.get("gsc_property", ""),
+                    crawler=_dc(CrawlerConfig, s.get("crawler")),
+                    gsc=_dc(GscConfig, s.get("gsc")),
+                    graph=_dc(GraphConfig, s.get("graph")),
+                )
             )
-        )
+    if include_db:
+        known = {s.site_id for s in sites}
+        sites.extend(s for s in _sites_from_db() if s.site_id not in known)
     if not sites:
-        raise ValueError("no sites defined in config")
+        raise ValueError(f"no sites defined (config: {path}, db: {database_path()})")
     return sites
 
 

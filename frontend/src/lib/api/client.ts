@@ -147,6 +147,12 @@ export type ScoringSettings = { weights: Record<string, number>; thresholds: { r
 export type AnalyticsSettings = { min_impressions: number; min_clicks: number; min_age_days: number; windows: string[] };
 export type ContentInsight = { id: number; category: string; feature: string; value: string; metric: string; effect: number; baseline: number | null; n: number; impressions: number; clicks: number; confidence: number | null; message_fa: string; evidence: Record<string, unknown>; status: string; memory_pattern_ref: string | null; created_at: string };
 export type AnalyticsOverview = { window: string; rows: { content_id: number; title: string; status: string; publish_date: string | null; url: string; date: string; clicks: number; impressions: number; ctr: number; position: number | null; delta: Record<string, number | null>; top_queries: { query: string; impressions: number }[] }[]; totals: { contents: number; clicks: number; impressions: number; ctr: number }; gates: AnalyticsSettings };
+// phase 8 — internal linking
+export type LinkSuggestion = { id: number; scope: string; kind: string; kind_fa: string; source_node_id: string; source_url: string | null; source_title: string | null; source_stage: string | null; target_node_id: string; target_url: string | null; target_title: string | null; target_stage: string | null; anchor: string | null; anchor_alternatives: string[]; placement_hint: string | null; score: number; confidence: 'low' | 'recommended' | 'high'; confidence_fa: string; score_breakdown: Record<string, any>; reason_fa: string | null; evidence: Record<string, any>; status: 'new' | 'accepted' | 'dismissed' | 'done'; content_task_id: number | null; run_id: string | null; created_at: string; updated_at: string };
+export type LinkPageStat = { node_id: string; url: string | null; title: string | null; stage: string | null; inbound_total: number; inbound_body: number; inbound_nav_only: number; unique_sources: number; outbound_body: number; outbound_total: number; anchor_distribution: { anchor: string; count: number }[]; exact_match_ratio: number; generic_ratio: number; flags: string[]; flags_fa?: string[]; pagerank: number | null; health_score: number; health_breakdown: Record<string, number>; computed_at: string };
+export type LinkPattern = { id: number; pattern_key: string; feature: Record<string, string>; accepted: number; dismissed: number; done: number; acceptance_rate: number; message_fa: string; status: string; memory_pattern_ref: string | null };
+export type LinkSummary = { by_status: Record<string, number>; by_kind: Record<string, number>; by_confidence: Record<string, number>; pages: number; flags: Record<string, number>; avg_health: number | null; settings: Record<string, any> };
+export type LinkAnalyzeResult = { mode: 'sync' | 'job'; run_id: string; pages?: number; targets?: number; suggestions?: number; by_confidence?: Record<string, number>; supports_edges?: number; created?: number; graph?: Record<string, number>; stats?: Record<string, number | null>; status?: string };
 export type SiteCreateBody = Schemas['SiteCreate'];
 export type SiteUpdateBody = Schemas['SiteUpdate'];
 export type MemoryUpdateBody = Schemas['MemoryUpdate'];
@@ -241,6 +247,26 @@ export const endpoints = {
   analyticsSettings: (id: string) => api<AnalyticsSettings>(`/sites/${encodeURIComponent(id)}/content/analytics/settings`),
   putAnalyticsSettings: (id: string, body: Partial<AnalyticsSettings>) => api<AnalyticsSettings>(`/sites/${encodeURIComponent(id)}/content/analytics/settings`, { method: 'PUT', json: body }),
   contentMetrics: (id: string, cid: number, window = '28d') => api<Record<string, unknown>[]>(`/sites/${encodeURIComponent(id)}/content/${cid}/metrics?window=${window}`),
+  // phase 8 — internal linking
+  linksAnalyze: (id: string) => api<LinkAnalyzeResult>(`/sites/${encodeURIComponent(id)}/links/analyze`, { method: 'POST' }),
+  linksSummary: (id: string) => api<LinkSummary>(`/sites/${encodeURIComponent(id)}/links/summary`),
+  linkSuggestions: (id: string, params: Record<string, string | number | undefined> = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => v !== undefined && v !== '' && q.set(k, String(v)));
+    return api<{ items: LinkSuggestion[]; total: number }>(`/sites/${encodeURIComponent(id)}/links/suggestions?${q.toString()}`);
+  },
+  setLinkSuggestion: (id: string, sid: number, body: { status: string; anchor?: string }) => api<LinkSuggestion>(`/sites/${encodeURIComponent(id)}/links/suggestions/${sid}`, { method: 'PATCH', json: body }),
+  linkContentTask: (id: string, sid: number, body: { title?: string; note?: string }) => api<{ content_id: number; title: string; status: string; suggestion: LinkSuggestion }>(`/sites/${encodeURIComponent(id)}/links/suggestions/${sid}/content-task`, { method: 'POST', json: body }),
+  linkPages: (id: string, params: Record<string, string | number | undefined> = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => v !== undefined && v !== '' && q.set(k, String(v)));
+    return api<{ items: LinkPageStat[]; total: number }>(`/sites/${encodeURIComponent(id)}/links/pages?${q.toString()}`);
+  },
+  linkPage: (id: string, nodeId: string) => api<LinkPageStat & { inbound: any[]; outbound: any[]; suggestions_to: LinkSuggestion[]; suggestions_from: LinkSuggestion[]; flags_fa: string[] }>(`/sites/${encodeURIComponent(id)}/links/pages/${encodeURIComponent(nodeId)}`),
+  linkPatterns: (id: string, status?: string) => api<LinkPattern[]>(`/sites/${encodeURIComponent(id)}/links/patterns${status ? `?status=${status}` : ''}`),
+  setLinkPattern: (id: string, pid: number, status: string) => api<LinkPattern>(`/sites/${encodeURIComponent(id)}/links/patterns/${pid}`, { method: 'PATCH', json: { status } }),
+  linkSettings: (id: string) => api<Record<string, any>>(`/sites/${encodeURIComponent(id)}/links/settings`),
+  putLinkSettings: (id: string, body: Record<string, unknown>) => api<Record<string, any>>(`/sites/${encodeURIComponent(id)}/links/settings`, { method: 'PUT', json: body }),
   // phase 6 — ai providers
   providerKinds: () => api<ProviderKind[]>('/ai/provider-kinds'),
   providerConfigs: () => api<ProviderConfig[]>('/ai/provider-configs'),

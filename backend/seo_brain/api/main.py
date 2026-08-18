@@ -15,7 +15,7 @@ from ..automation import get_job_queue
 from ..common.config import env
 from .deps import require_token
 from .errors import install_error_handlers
-from .routers import ai, ai_config, content, graph, health, jobs, keywords, memory, sites
+from .routers import ai, ai_config, content, graph, health, jobs, keywords, links, memory, sites
 
 API_PREFIX = "/api/v1"
 
@@ -50,7 +50,12 @@ def _register_builtin_jobs() -> None:
     def _noop(payload: dict):
         return {"echo": payload}
 
-    for name, fn in (("sync_wordpress", _run_sync_wordpress), ("build_graph", _run_build_graph), ("noop", _noop)):
+    def _run_links_analyze(payload: dict):
+        from .deps import engine as _engine
+        from ..brain.linking import LinkEngine
+        return LinkEngine(_engine()).analyze(payload["site_id"])
+
+    for name, fn in (("sync_wordpress", _run_sync_wordpress), ("build_graph", _run_build_graph), ("noop", _noop), ("links_analyze", _run_links_analyze)):
         try:
             q.register(name, fn)
         except Exception:  # noqa: BLE001
@@ -66,7 +71,7 @@ def create_app() -> FastAPI:
 
     deps = [Depends(require_token)]
     app.include_router(health.router, prefix=API_PREFIX)
-    for r in (sites.router, sites.gsc_router, graph.router, memory.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router):
+    for r in (sites.router, sites.gsc_router, graph.router, memory.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router):
         app.include_router(r, prefix=API_PREFIX, dependencies=deps)
 
     # legacy dashboard (v0.1) mounted read-only until UI parity

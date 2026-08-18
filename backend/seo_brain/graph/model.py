@@ -19,7 +19,9 @@ NODE_TYPES = ("SITE", "PAGE", "POST", "CATEGORY", "TAG", "BRAND", "MODEL", "SERV
 RELATION_TYPES = ("HAS_PAGE", "HAS_POST", "HAS_CATEGORY", "HAS_TAG", "BELONGS_TO", "LINKS_TO", "ABOUT", "OFFERS",
                   "TARGETS", "RANKS_FOR", "HAS_SCHEMA", "HAS_PROBLEM", "HAS_OPPORTUNITY",
                   # SEO Brain additions
-                  "KEYWORD_TARGETS", "CLUSTERED_IN", "CONTENT_FOR", "SUGGESTED_LINK", "PUBLISHED_AS")
+                  "KEYWORD_TARGETS", "CLUSTERED_IN", "CONTENT_FOR", "SUGGESTED_LINK", "PUBLISHED_AS",
+                  # phase 8 internal linking
+                  "LINK_OPPORTUNITY", "SUPPORTS")
 
 
 @dataclass

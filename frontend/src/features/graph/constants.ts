@@ -48,7 +48,9 @@ export const RELATION_FA: Record<string, string> = {
   CLUSTERED_IN: 'در خوشه',
   CONTENT_FOR: 'محتوا برای',
   SUGGESTED_LINK: 'لینک پیشنهادی',
-  PUBLISHED_AS: 'منتشر شده به‌عنوان'
+  PUBLISHED_AS: 'منتشر شده به‌عنوان',
+  LINK_OPPORTUNITY: 'فرصت لینک',
+  SUPPORTS: 'پشتیبانی می‌کند'
 };
 
 export const RELATION_STYLE: Record<string, { color: string; dashed?: boolean }> = {
@@ -62,6 +64,8 @@ export const RELATION_STYLE: Record<string, { color: string; dashed?: boolean }>
   TARGETS: { color: '#34d399' },
   HAS_SCHEMA: { color: '#94a3b8', dashed: true },
   SUGGESTED_LINK: { color: '#fbbf24', dashed: true },
+  LINK_OPPORTUNITY: { color: '#f97316', dashed: true },
+  SUPPORTS: { color: '#22c55e', dashed: true },
   BELONGS_TO: { color: '#fbbf24' }
 };
 

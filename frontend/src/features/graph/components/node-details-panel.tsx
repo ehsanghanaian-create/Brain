@@ -181,6 +181,19 @@ function PageBody({ d, onFocus }: { d: NodeDetails; onFocus: (id: string) => voi
           </ul>
         </Section>
       )}
+      {(d as any).link_health && (
+        <>
+          <Separator />
+          <Section title='سلامت لینک داخلی'>
+            <KV k='امتیاز (۰–۱۰۰)' v={<Badge style={{ background: (d as any).link_health.score >= 70 ? '#16a34a' : (d as any).link_health.score >= 40 ? '#f59e0b' : '#dc2626' }}>{num((d as any).link_health.score)}</Badge>} />
+            {Object.entries((d as any).link_health.breakdown ?? {}).map(([k, v]) => <KV key={k} k={k} v={String(v)} ltr />)}
+            {(d as any).link_health.flags?.length > 0 && <div className='flex flex-wrap gap-1 pt-1'>{(d as any).link_health.flags.map((f: string) => <Badge key={f} variant='outline'>{f}</Badge>)}</div>}
+          </Section>
+          <Section title='فرصت‌های لینک'>
+            <NeighborList items={[...((d as any).link_suggestions?.to ?? []), ...((d as any).link_suggestions?.from ?? []), ...((d as any).link_suggestions?.supports ?? [])]} onFocus={onFocus} empty='پیشنهادی نیست' />
+          </Section>
+        </>
+      )}
       <Separator />
       <Section title='کوئری‌های مرتبط'><NeighborList items={rel.queries ?? []} onFocus={onFocus} /></Section>
       <Section title='موجودیت‌ها'><NeighborList items={rel.entities ?? []} onFocus={onFocus} /></Section>

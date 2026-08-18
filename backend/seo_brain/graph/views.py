@@ -38,9 +38,9 @@ MODES: dict[str, GraphMode] = {
         layout="layered", group_by="type"),
     "links": GraphMode(
         key="links", title_fa="نقشه لینک داخلی",
-        description_fa="لینک‌های داخلی بین صفحات (بدنه و ناوبری) و پیشنهادهای لینک — صفحات یتیم و ضعیف را نشان می‌دهد",
-        node_types=("PAGE", "POST", "CATEGORY"),
-        relation_types=("LINKS_TO", "SUGGESTED_LINK"),
+        description_fa="لینک‌های داخلی موجود، فرصت‌های لینک (LINK_OPPORTUNITY)، لینک‌های پذیرفته‌شده (SUGGESTED_LINK) و روابط پشتیبانی معنایی (SUPPORTS) — صفحات یتیم و ضعیف را نشان می‌دهد",
+        node_types=("PAGE", "POST", "CATEGORY", "CONTENT"),
+        relation_types=("LINKS_TO", "SUGGESTED_LINK", "LINK_OPPORTUNITY", "SUPPORTS"),
         layout="force", group_by="community"),
 }
 

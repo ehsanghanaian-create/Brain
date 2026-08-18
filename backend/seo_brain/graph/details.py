@@ -76,6 +76,16 @@ def node_details(repo: GraphRepository, conn, site_id: str, node_id: str) -> dic
             "entities": seo.get("entities") or [], "wordpress": seo.get("wordpress"),
         }
         base["related"] = {"queries": _neighbors(repo, site_id, node_id, "RANKS_FOR"), "entities": _neighbors(repo, site_id, node_id, "ABOUT")}
+        try:
+            row = conn.execute("SELECT health_score, health_breakdown, flags, inbound_body, inbound_nav_only, outbound_body, stage FROM link_page_stats WHERE site_id=? AND node_id=?", (site_id, node_id)).fetchone()
+            if row:
+                import json as _json
+                base["link_health"] = {"score": row["health_score"], "breakdown": _json.loads(row["health_breakdown"] or "{}"), "flags": _json.loads(row["flags"] or "[]"), "inbound_body": row["inbound_body"],
+                                       "inbound_nav_only": row["inbound_nav_only"], "outbound_body": row["outbound_body"], "stage": row["stage"]}
+        except Exception:  # noqa: BLE001
+            pass
+        base["link_suggestions"] = {"to": _neighbors(repo, site_id, node_id, "LINK_OPPORTUNITY", "in"), "from": _neighbors(repo, site_id, node_id, "LINK_OPPORTUNITY", "out"),
+                                    "supports": _neighbors(repo, site_id, node_id, "SUPPORTS")}
     elif t in ("QUERY", "KEYWORD"):
         label = n.label
         rows = []

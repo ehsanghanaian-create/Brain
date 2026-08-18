@@ -97,7 +97,7 @@ def main() -> int:
     # ---- phase 4: graph modes / view / node details (real site, read-only)
     check("graph modes", "GET", api + f"/sites/{sid}/graph/modes", 200, lambda r: [m["key"] for m in r.json()] == ["seo", "content", "links"], headers=H)
     check("graph view seo", "GET", api + f"/sites/{sid}/graph/view?mode=seo", 200, lambda r: len(r.json()["nodes"]) > 0 and len(r.json()["edges"]) > 0 and r.json()["mode"]["key"] == "seo", headers=H)
-    check("graph view links (no isolated)", "GET", api + f"/sites/{sid}/graph/view?mode=links&include_isolated=false", 200, lambda r: all(e["relation_type"] in ("LINKS_TO", "SUGGESTED_LINK") for e in r.json()["edges"]), headers=H)
+    check("graph view links (no isolated)", "GET", api + f"/sites/{sid}/graph/view?mode=links&include_isolated=false", 200, lambda r: all(e["relation_type"] in ("LINKS_TO", "SUGGESTED_LINK", "LINK_OPPORTUNITY", "SUPPORTS") for e in r.json()["edges"]), headers=H)
     check("graph view content types filter", "GET", api + f"/sites/{sid}/graph/view?mode=content&types=SCHEMA,PAGE", 200, lambda r: set(n["type"] for n in r.json()["nodes"]) <= {"SCHEMA", "PAGE"}, headers=H)
     check("graph view bad mode → 422", "GET", api + f"/sites/{sid}/graph/view?mode=nope", 422, headers=H)
     check("node details (page)", "GET", api + f"/sites/{sid}/graph/node-details/{node_id}", 200, lambda r: r.json()["type"] in ("PAGE", "POST") and "page" in r.json() and "content_status" in r.json()["page"], headers=H)
@@ -206,6 +206,16 @@ def main() -> int:
     check("ai route reset", "PUT", api + "/ai/task-routes/brief", 200, lambda r: r.json()["provider_id"] is None, headers=H, json={})
     check("ai provider delete", "DELETE", api + f"/ai/provider-configs/{pid}", 200, lambda r: r.json()["deleted"] == pid, headers=H)
 
+    # ---- phase 8: internal linking (real site read-only analyze is heavy → run on the temporary site; plus read checks on real site)
+    check("links meta", "GET", api + f"/sites/{sid}/links/meta", 200, lambda r: len(r.json()["confidence"]) == 3 and r.json()["future_scopes"] == ["external", "backlink", "competitor"], headers=H)
+    check("links analyze (tmp site, sync)", "POST", api + f"/sites/{tmp}/links/analyze", 200, lambda r: r.json()["mode"] == "sync" and "suggestions" in r.json(), headers=H)
+    check("links summary (real site)", "GET", api + f"/sites/{sid}/links/summary", 200, lambda r: "by_status" in r.json() and "flags" in r.json(), headers=H)
+    check("links suggestions (real site)", "GET", api + f"/sites/{sid}/links/suggestions?limit=5", 200, lambda r: all(0.45 <= i["score"] <= 1 and i["confidence"] in ("low", "recommended", "high") and i["reason_fa"] for i in r.json()["items"] if i["kind"] != "anchor_fix"), headers=H)
+    check("links pages (real site)", "GET", api + f"/sites/{sid}/links/pages?limit=5", 200, lambda r: all(0 <= p["health_score"] <= 100 for p in r.json()["items"]), headers=H)
+    check("links patterns", "GET", api + f"/sites/{tmp}/links/patterns", 200, lambda r: isinstance(r.json(), list), headers=H)
+    check("links settings", "GET", api + f"/sites/{tmp}/links/settings", 200, lambda r: r.json()["min_score"] == 0.45 and r.json()["max_per_target"] == 5 and r.json()["max_per_source"] == 3, headers=H)
+    check("links export csv", "GET", api + f"/sites/{tmp}/links/export.csv", 200, lambda r: "text/csv" in r.headers["content-type"], headers=H)
+
     # ---- legacy + cleanup
     check("legacy dashboard", "GET", BASE + "/legacy/", 200)
     check("legacy api", "GET", BASE + "/legacy/api/sites", 200)
@@ -231,6 +241,7 @@ def main() -> int:
               "  phase 3: connections status/tests (gsc/ga4/wordpress + 404 kind), gsc properties listing, initialize (idempotent), site brain fields + AI context ·",
               "  phase 6: content create/transition guard/brief/board/calendar/graph sync/delete · ai provider config (masked key)/task routes ·",
               "  phase 7: drafts v1/v2, score, review, intelligence history, scoring/analytics settings, snapshot/learn/overview/insights ·",
+              "  phase 8: links meta/analyze/summary/suggestions/pages/patterns/settings/export ·",
               "  graph (summary, nodes, node, 404, neighbors, filtered neighbors, subgraph, 422, search, path, orphans, unknown site) ·",
               "  memory (get, put, context, learned pattern) · AI orchestrator (routes, providers, text run, JSON run + learn, 422) · jobs (enqueue, poll, list, 422, 404) · legacy mount.",
               "* All checks ran over real HTTP against uvicorn (not TestClient). Read-only on the real site; writes only on the temporary site."]

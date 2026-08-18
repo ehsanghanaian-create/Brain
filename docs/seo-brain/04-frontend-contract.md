@@ -153,3 +153,20 @@ UI rules: never render/log an API key; show `••••{key_hint}`; workflow b
 | `GET /content/insights?status` · `PATCH /content/insights/{iid} {status}` | insight = `{id, category, feature, value, metric ctr|position, effect, baseline, n, impressions, clicks, confidence, message_fa, evidence, status, memory_pattern_ref}`; `accepted` writes a Site Brain pattern (idempotent) |
 
 UI rules: AI findings/suggestions are advisory — never auto-apply; show the gate reason on approval; scores/insights never change weights automatically.
+
+## 13. Phase 8 additions (2026-08-18, additive) — `/sites/{id}/links/*`
+
+| Endpoint | Notes |
+|---|---|
+| `GET /links/meta` | kinds, statuses, confidence levels (`low 0.45–0.60`, `recommended 0.60–0.80`, `high 0.80+`), flags, stages, journey order, scopes + future_scopes |
+| `POST /links/analyze` | `200 {mode:"sync", run_id, pages, targets, suggestions, by_confidence, supports_edges, created, updated, kept, removed, graph{link_opportunity,supports}, stats{orphans,low_inbound,avg_health}}` when pages ≤ `sync_threshold_pages`; else `202 {mode:"job", run_id, type:"links_analyze", status…}` → poll `/jobs/{run_id}` |
+| `GET /links/summary` | `{by_status, by_kind, by_confidence, pages, flags{orphan,nav_only_inbound,low_inbound,generic_anchors,over_optimized_anchor,single_source}, avg_health, settings}` |
+| `GET /links/suggestions?kind&status&confidence&min_score&target&source&q&sort&limit&offset` | paginated; **LinkSuggestion** `{id, scope, kind, kind_fa, source_node_id/url/title/stage, target_node_id/url/title/stage, anchor, anchor_alternatives[], placement_hint, score, confidence, confidence_fa, score_breakdown{topic,entities,intent,authority,anchor,journey,pattern_boost,penalties,top}, reason_fa, evidence{}, status, content_task_id, run_id}` |
+| `PATCH /links/suggestions/{sid} {status, anchor?}` | accept/done → `SUGGESTED_LINK` edge; dismiss → removes `LINK_OPPORTUNITY`; statuses survive re-analyze |
+| `POST /links/suggestions/{sid}/content-task {title?, note?}` → 201 | creates a **planned** Content Brain item (`metadata.link_suggestion_id`), returns `{content_id, title, status, suggestion}` |
+| `GET /links/pages?flag&sort&order&q` · `GET /links/pages/{node_id}` | **LinkPageStat** with `health_score` (0–100) + `health_breakdown{inbound_contextual,outbound_balance,anchor_diversity,orphan_risk,authority}`, `flags[]`, `anchor_distribution[]`; detail adds inbound/outbound/suggestions_to/suggestions_from |
+| `GET /links/patterns?status` · `PATCH /links/patterns/{pid} {status}` | accepted → Site Brain `successful_patterns` (source `internal_linking`) |
+| `GET/PUT /links/settings` · `GET /links/export.csv?status` | settings partial merge; CSV UTF-8 with BOM |
+
+Graph: relation types `LINK_OPPORTUNITY`, `SUPPORTS` added; links map returns them; page node details include `link_health` and `link_suggestions`.
+UI rules: always show the confidence label + score; suggestions are advisory (accept/dismiss/done are bookkeeping, nothing is written to WordPress); "Create Content Task" only on user click.

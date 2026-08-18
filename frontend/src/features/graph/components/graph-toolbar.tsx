@@ -10,7 +10,7 @@ import type { Direction, Grouping } from '../layout';
 
 export type ToolbarState = {
   siteId: string;
-  mode: 'seo' | 'content' | 'links';
+  mode: 'seo' | 'content' | 'links' | 'planner';
   query: string;
   familyOff: Set<string>;         // hidden type families
   relationOff: Set<string>;       // hidden relations

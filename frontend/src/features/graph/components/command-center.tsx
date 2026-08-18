@@ -30,24 +30,24 @@ const DEFAULT_MODES: GraphMode[] = [
   { key: 'links', title_fa: 'نقشه لینک داخلی', description_fa: '', layout: 'force', group_by: 'community', node_types: [], relation_types: [] }
 ];
 
-export function CommandCenter({ sites, initialSiteId }: { sites: Site[]; initialSiteId: string }) {
+export function CommandCenter({ sites, initialSiteId, initialMode = 'seo', focusNodeId }: { sites: Site[]; initialSiteId: string; initialMode?: ToolbarState['mode']; focusNodeId?: string | null }) {
   return (
     <ReactFlowProvider>
-      <CommandCenterInner sites={sites} initialSiteId={initialSiteId} />
+      <CommandCenterInner sites={sites} initialSiteId={initialSiteId} initialMode={initialMode} focusNodeId={focusNodeId} />
     </ReactFlowProvider>
   );
 }
 
-function CommandCenterInner({ sites, initialSiteId }: { sites: Site[]; initialSiteId: string }) {
+function CommandCenterInner({ sites, initialSiteId, initialMode = 'seo', focusNodeId }: { sites: Site[]; initialSiteId: string; initialMode?: ToolbarState['mode']; focusNodeId?: string | null }) {
   const rf = useReactFlow();
   const [state, setState] = useState<ToolbarState>({
-    siteId: initialSiteId, mode: 'seo', query: '', familyOff: new Set(), relationOff: new Set(), grouping: 'none', direction: 'TB', hideIsolated: true, limit: 400
+    siteId: initialSiteId, mode: initialMode, query: '', familyOff: new Set(), relationOff: new Set(), grouping: 'none', direction: 'TB', hideIsolated: true, limit: 400
   });
   const [modes, setModes] = useState<GraphMode[]>(DEFAULT_MODES);
   const [view, setView] = useState<GraphView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(focusNodeId ?? null);
   const [details, setDetails] = useState<NodeDetails | null>(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);

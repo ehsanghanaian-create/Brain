@@ -315,6 +315,10 @@ def categories_sync(site_id: str, brain: bool = True, min_keywords: int = 3, s: 
             out["wordpress"] = s.cats.sync_wordpress(site_id, site.wp_url)
         except Exception as e:  # noqa: BLE001
             wp_error = str(e)
+            try:   # fallback: local snapshot from the v0.1 WordPress sync
+                out["wordpress"] = s.cats.sync_from_local(site_id)
+            except ValueError:
+                pass
     else:
         wp_error = "wordpress_not_configured"
     if brain:

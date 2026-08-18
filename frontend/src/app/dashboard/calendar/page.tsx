@@ -1,6 +1,6 @@
 import PageContainer from '@/components/layout/page-container';
 import { BackendError } from '@/components/seo-brain/backend-error';
-import { CalendarPage } from '@/features/content/components/calendar-page';
+import { CalendarStandalone } from '@/features/content-planner/components/calendar-standalone';
 import { endpoints, settle } from '@/lib/api/client';
 
 export const dynamic = 'force-dynamic';
@@ -13,8 +13,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ s
   const list = sites.data!;
   const initial = list.find((s) => s.site_id === site)?.site_id ?? list[0]?.site_id;
   return (
-    <PageContainer pageTitle='تقویم محتوایی' pageDescription='نمای ماهانه (تقویم شمسی) و فهرست؛ محتوا را بین روزها بکشید تا زمان‌بندی شود. وضعیت هر آیتم با رنگ مشخص است.'>
-      {!initial ? <p className='text-muted-foreground text-sm'>ابتدا یک سایت بسازید.</p> : <CalendarPage sites={list} initialSiteId={initial} />}
+    <PageContainer pageTitle='تقویم محتوایی' pageDescription='نمای ماهانه، هفتگی و فهرست (تقویم شمسی) برای برنامه‌های محتوایی و آیتم‌های مغز محتوا؛ کارت‌ها را بین روزها بکشید تا زمان‌بندی شود؛ فیلتر دسته، وضعیت و اولویت؛ نوار رنگی = اولویت.'>
+      {!initial ? <p className='text-muted-foreground text-sm'>ابتدا یک سایت بسازید.</p> : <CalendarStandalone sites={list} initialSiteId={initial} />}
     </PageContainer>
   );
 }

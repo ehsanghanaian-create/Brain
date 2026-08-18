@@ -27,6 +27,8 @@ export const navGroups: NavGroup[] = [
   {
     label: 'محتوا',
     items: [
+      { title: 'برنامه‌ریز محتوا', url: '/dashboard/content-planner', icon: 'planner', items: [],
+        description: 'جدول برنامه‌ریزی، کانبان، تقویم، دسته‌ها، نگاشت کلمات و پیشنهادهای مغز (فاز ۸.۵)' },
       { title: 'مغز محتوا', url: '/dashboard/content', icon: 'content', items: [],
         description: 'خط لوله تولید محتوا: ایده تا انتشار (فاز ۶)' },
       { title: 'تقویم محتوایی', url: '/dashboard/calendar', icon: 'calendar', items: [],

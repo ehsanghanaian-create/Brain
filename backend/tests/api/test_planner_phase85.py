@@ -287,3 +287,19 @@ def test_import_helpers_unit():
     assert m == {"عنوان": "title", "URL": "url", "Primary Keyword": "primary_keyword", "دسته": "category", "Publish Date": "publish_date"}
     f, w = normalize_row({"عنوان": "x", "اولویت": "زیاد", "وضعیت": "بازبینی", "Publish Date": "2026/09/01", "کلمات کلیدی ثانویه": "a، b; c"}, {"عنوان": "title", "اولویت": "priority", "وضعیت": "status", "Publish Date": "publish_date", "کلمات کلیدی ثانویه": "secondary_keywords"})
     assert f["priority"] == "high" and f["status"] == "review" and f["secondary_keywords"] == ["a", "b", "c"] and f["publish_date"] is None and w
+
+
+def test_category_sync_falls_back_to_local_snapshot(c):
+    """When WordPress REST is unreachable, content_categories are seeded from the v0.1 `categories` snapshot (read-only)."""
+    with c.eng.begin() as cx:
+        cx.execute(text("INSERT INTO categories(site_id, taxonomy, wp_id, name, slug, url, parent_wp_id, count, created_at, updated_at) VALUES(:s,'category',6,'امداد خودرو مدیران','emdad',NULL,0,4,'x','x'),(:s,'category',7,'امداد MVM','mvm',NULL,6,4,'x','x')"), {"s": SID})
+    def boom(url, params):
+        raise RuntimeError("handshake timed out")
+    from seo_brain.brain.planner import PlannerService
+    svc = PlannerService(c.eng, category_fetch=boom)
+    with pytest.raises(RuntimeError):
+        svc.cats.sync_wordpress(SID, "https://demo.example")
+    r = svc.cats.sync_from_local(SID)
+    assert r["via"] == "local_snapshot" and r["terms"] == 2
+    tree = svc.repo.category_tree(SID, "wordpress")
+    assert tree[0]["name"] == "امداد خودرو مدیران" and tree[0]["children"][0]["name"] == "امداد MVM"

@@ -78,7 +78,7 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
       <SheetContent side='left' className='w-full overflow-y-auto p-4 sm:max-w-xl' dir='rtl'>
         <SheetHeader className='p-0'>
           <SheetTitle className='flex items-center gap-2'>{cid === 'new' ? 'محتوای جدید' : d?.title ?? '…'}{d && <Badge style={{ background: STATUS_COLOR[d.status] }}>{d.status_fa}</Badge>}</SheetTitle>
-          <SheetDescription>{d?.target_keyword ? `کلمه کلیدی هدف: ${d.target_keyword}` : 'محتوا را به یک کلمه کلیدی وصل کنید تا بریف از داده‌های واقعی ساخته شود'}</SheetDescription>
+          <SheetDescription>{d?.target_keyword ? `کلمه کلیدی هدف: ${d.target_keyword}` : 'محتوا را به یک کلمه کلیدی وصل کنید تا بریف از داده‌های واقعی ساخته شود'}{d?.metadata?.plan_id ? <> · <a className='underline' href={`/dashboard/content-planner?site=${siteId}&plan=${String(d.metadata.plan_id)}`}>برنامه محتوایی #{String(d.metadata.plan_id)}</a></> : null}</SheetDescription>
         </SheetHeader>
         {d && (
           <div className='mt-2 flex flex-wrap items-center gap-1'>

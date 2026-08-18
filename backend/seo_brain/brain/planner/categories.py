@@ -75,6 +75,23 @@ class CategoryIntelligence:
                 self.repo.update_category(site_id, c["id"], metadata={**c["metadata"], "missing_in_wordpress": True, "missing_since": now}); removed += 1
         return {"source": "wordpress", "terms": len(terms), "created": created, "updated": updated, "missing": removed, "synced_at": now, "note": "فقط‌خواندنی — هیچ تغییری در وردپرس اعمال نمی‌شود"}
 
+    def sync_from_local(self, site_id: str) -> dict[str, Any]:
+        """Fallback when WordPress REST is unreachable: seed content_categories from the local `categories` snapshot (v0.1 sync-wordpress)."""
+        with self.engine.connect() as cx:
+            rows = cx.execute(text("SELECT wp_id, name, slug, url, description, parent_wp_id, count FROM categories WHERE site_id=:s AND taxonomy='category' ORDER BY wp_id"), {"s": site_id}).all()
+        if not rows:
+            raise ValueError("no_local_snapshot")
+        now = utcnow()
+        ids: dict[int, int] = {}
+        for wp, name, slug, url, desc, parent, count in rows:
+            row = self.repo.upsert_category(site_id, "wordpress", name or f"category-{wp}", wordpress_category_id=int(wp), slug=unquote(slug or "") or None, url=url, description=desc or None, post_count=int(count or 0), synced_at=now,
+                                            metadata={"source_detail": "local_snapshot"})
+            ids[int(wp)] = row["id"]
+        for r in rows:
+            parent = int(r[5] or 0)
+            self.repo.update_category(site_id, ids[int(r[0])], parent_id=ids.get(parent) if parent else None)
+        return {"source": "wordpress", "via": "local_snapshot", "terms": len(rows), "synced_at": now, "note": "REST وردپرس در دسترس نبود — از آخرین همگام‌سازی محلی استفاده شد"}
+
     # ------------------------------------------------------------------ Brain topic categories from keyword clusters
     def sync_brain(self, site_id: str, min_keywords: int = 3) -> dict[str, Any]:
         ctx = build_planner_context(self.engine, site_id)

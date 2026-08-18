@@ -95,7 +95,7 @@ def main() -> int:
     check("graph on unknown site → 404", "GET", api + "/sites/nope-nope/graph/summary", 404, headers=H)
 
     # ---- phase 4: graph modes / view / node details (real site, read-only)
-    check("graph modes", "GET", api + f"/sites/{sid}/graph/modes", 200, lambda r: [m["key"] for m in r.json()] == ["seo", "content", "links"], headers=H)
+    check("graph modes", "GET", api + f"/sites/{sid}/graph/modes", 200, lambda r: [m["key"] for m in r.json()] == ["seo", "content", "links", "planner"], headers=H)
     check("graph view seo", "GET", api + f"/sites/{sid}/graph/view?mode=seo", 200, lambda r: len(r.json()["nodes"]) > 0 and len(r.json()["edges"]) > 0 and r.json()["mode"]["key"] == "seo", headers=H)
     check("graph view links (no isolated)", "GET", api + f"/sites/{sid}/graph/view?mode=links&include_isolated=false", 200, lambda r: all(e["relation_type"] in ("LINKS_TO", "SUGGESTED_LINK", "LINK_OPPORTUNITY", "SUPPORTS") for e in r.json()["edges"]), headers=H)
     check("graph view content types filter", "GET", api + f"/sites/{sid}/graph/view?mode=content&types=SCHEMA,PAGE", 200, lambda r: set(n["type"] for n in r.json()["nodes"]) <= {"SCHEMA", "PAGE"}, headers=H)
@@ -270,6 +270,45 @@ def main() -> int:
     check("ai insights list", "GET", api + f"/ai/insights?site_id={tmp}", 200, lambda r: isinstance(r.json(), list), headers=H)
     check("ai insights learn (min_n=5 → advisory)", "POST", api + f"/ai/insights/learn?site_id={tmp}", 200, lambda r: "insights" in r.json(), headers=H)
 
+    # ---- phase 8.5: content strategy planner (tmp site: categories via local snapshot/brain, plans CRUD, mirroring, import/export, mapping, suggestions, graph)
+    check("planner meta (7 statuses, 3 views, publishing disabled)", "GET", api + f"/sites/{tmp}/content-plans/meta", 200, lambda r: len(r.json()["statuses"]) == 7 and r.json()["views"] == ["table", "kanban", "graph"] and r.json()["publishing"]["enabled"] is False and r.json()["ai_generation"]["enabled"] is False, headers=H)
+    check("planner categories sync (brain; WP not configured on tmp)", "POST", api + f"/sites/{tmp}/content-plans/categories/sync?min_keywords=1", 200, lambda r: "brain" in r.json() and r.json()["wordpress_error"] == "wordpress_not_configured", headers=H)
+    check("planner category create (manual)", "POST", api + f"/sites/{tmp}/content-plans/categories", 201, lambda r: r.json()["source"] == "manual" and r.json()["name"] == "راهنماها", headers=H, json={"name": "راهنماها"})
+    check("planner categories tree", "GET", api + f"/sites/{tmp}/content-plans/categories?tree=true", 200, lambda r: any(c["name"] == "راهنماها" for c in r.json()), headers=H)
+    pl = check("planner plan create (+analyze, recommendation, advanced fields)", "POST", api + f"/sites/{tmp}/content-plans", 201, lambda r: r.json()["recommendation"]["action"] and r.json()["priority_score"] is not None and r.json()["content_gap"] in ("none", "partial", "full") and r.json()["funnel_stage"] and r.json()["ai_priority"] is not None, headers=H, json={"title": "امداد خودرو تست تهران", "primary_keyword": "امداد خودرو تست", "category": "راهنماها"})
+    plid = pl.json()["id"] if pl is not None and pl.status_code == 201 else 0
+    if plid:
+        check("planner plan PATCH (inline edit)", "PATCH", api + f"/sites/{tmp}/content-plans/{plid}", 200, lambda r: r.json()["seo_title"] == "عنوان سئو تست" and r.json()["business_value"] == 70, headers=H, json={"seo_title": "عنوان سئو تست", "business_value": 70})
+        check("planner transition researching (planner-only)", "POST", api + f"/sites/{tmp}/content-plans/{plid}/transition", 200, lambda r: r.json()["status"] == "researching" and r.json()["content_item"] is None, headers=H, json={"status": "researching"})
+        check("planner transition writing without item → 409", "POST", api + f"/sites/{tmp}/content-plans/{plid}/transition", 409, headers=H, json={"status": "writing"})
+        check("planner brief → content item + brief_ready", "POST", api + f"/sites/{tmp}/content-plans/{plid}/brief", 200, lambda r: bool(r.json()["h1"]) and "plan_hints" in r.json(), headers=H, json={})
+        check("planner plan detail (mirrored)", "GET", api + f"/sites/{tmp}/content-plans/{plid}", 200, lambda r: r.json()["status"] == "brief_ready" and r.json()["content_item"]["has_brief"] is True and len(r.json()["events"]) >= 1, headers=H)
+        check("planner generation job prepared (no run)", "POST", api + f"/sites/{tmp}/content-plans/{plid}/generation-jobs", 201, lambda r: r.json()["status"] == "prepared" and r.json()["generation_run_id"] is None, headers=H, json={"kind": "article"})
+        check("planner publishing metadata only", "PUT", api + f"/sites/{tmp}/content-plans/{plid}/publishing-metadata", 200, lambda r: r.json()["publishing"]["publishing_enabled"] is False, headers=H, json={"target": "wordpress", "wp_status": "draft"})
+        check("planner link prep", "POST", api + f"/sites/{tmp}/content-plans/{plid}/link-prep", 200, lambda r: "inbound" in r.json() and "outbound" in r.json(), headers=H)
+        check("planner recommendations stored", "GET", api + f"/sites/{tmp}/content-plans/{plid}/recommendations", 200, lambda r: len(r.json()) >= 1 and all(x["status"] in ("new", "superseded", "accepted", "dismissed", "applied") for x in r.json()), headers=H)
+    check("planner list + counts", "GET", api + f"/sites/{tmp}/content-plans?limit=50", 200, lambda r: r.json()["total"] >= 1 and "by_status" in r.json()["counts"], headers=H)
+    check("planner board (7 columns)", "GET", api + f"/sites/{tmp}/content-plans/board", 200, lambda r: len(r.json()["columns"]) == 7, headers=H)
+    check("planner calendar", "GET", api + f"/sites/{tmp}/content-plans/calendar?from=2026-01-01&to=2026-12-31", 200, lambda r: "days" in r.json() and "unscheduled" in r.json(), headers=H)
+    csv85 = "عنوان,کلمه کلیدی اصلی,دسته,اینتنت,نوع صفحه,تاریخ انتشار,اولویت\nبرنامه واردشده,امداد خودرو تست دو,راهنماها,اطلاعاتی,راهنما,2026-09-03,متوسط\n"
+    check("planner import dry-run (Persian headers)", "POST", api + f"/sites/{tmp}/content-plans/import", 200, lambda r: r.json()["dry_run"] and r.json()["created"] == 1 and r.json()["mapping"].get("کلمه کلیدی اصلی") == "primary_keyword", headers=H, files={"file": ("plans.csv", csv85.encode("utf-8"), "text/csv")}, data={"dry_run": "true"})
+    check("planner import apply", "POST", api + f"/sites/{tmp}/content-plans/import", 200, lambda r: r.json()["created"] == 1, headers=H, files={"file": ("plans.csv", csv85.encode("utf-8"), "text/csv")}, data={"dry_run": "false"})
+    check("planner import upsert", "POST", api + f"/sites/{tmp}/content-plans/import", 200, lambda r: r.json()["created"] == 0 and r.json()["updated"] == 1, headers=H, files={"file": ("plans.csv", csv85.encode("utf-8"), "text/csv")}, data={"dry_run": "false"})
+    check("planner export csv", "GET", api + f"/sites/{tmp}/content-plans/export.csv", 200, lambda r: "text/csv" in r.headers["content-type"] and "عنوان" in r.text, headers=H)
+    check("planner export xlsx", "GET", api + f"/sites/{tmp}/content-plans/export.xlsx", 200, lambda r: r.content[:2] == b"PK", headers=H)
+    check("planner import template", "GET", api + f"/sites/{tmp}/content-plans/import/template.csv", 200, lambda r: "عنوان" in r.text, headers=H)
+    src85 = check("planner google-sheet source create", "POST", api + f"/sites/{tmp}/content-plans/sources", 201, lambda r: r.json()["kind"] == "google_sheet" and r.json()["auto_sync"] is False, headers=H, json={"name": "شیت تست", "kind": "google_sheet", "url": "https://docs.google.com/spreadsheets/d/ABC/edit#gid=0"})
+    check("planner keyword mapping overview", "GET", api + f"/sites/{tmp}/content-plans/keyword-mapping", 200, lambda r: "counts" in r.json(), headers=H)
+    check("planner keyword mapping suggest (persisted)", "POST", api + f"/sites/{tmp}/content-plans/keyword-mapping/suggest", 200, lambda r: "items" in r.json() and all(i["recommendation"]["reasons_fa"] for i in r.json()["items"]), headers=H, json={"limit": 20})
+    check("planner suggestions inbox", "GET", api + f"/sites/{tmp}/content-plans/suggestions", 200, lambda r: isinstance(r.json(), list), headers=H)
+    check("planner analyze all (sync)", "POST", api + f"/sites/{tmp}/content-plans/analyze", 200, lambda r: r.json()["mode"] == "sync" and r.json()["analyzed"] >= 1, headers=H, json={})
+    check("planner graph mode", "GET", api + f"/sites/{tmp}/graph/view?mode=planner", 200, lambda r: "CONTENT_PLAN" in r.json()["mode"]["node_types"] and any(n["type"] == "CONTENT_PLAN" for n in r.json()["nodes"]), headers=H)
+    check("planner graph focus", "GET", api + f"/sites/{tmp}/content-plans/graph?plan_id={plid}", 200, lambda r: r.json().get("focus") == f"plan:{plid}", headers=H)
+    check("planner node details", "GET", api + f"/sites/{tmp}/graph/node-details/plan:{plid}", 200, lambda r: r.json()["type"] == "CONTENT_PLAN" and "plan" in r.json(), headers=H)
+    check("planner insights (advisory)", "POST", api + f"/sites/{tmp}/content-plans/insights/learn", 200, lambda r: "insights" in r.json(), headers=H)
+    check("planner backfill", "POST", api + f"/sites/{tmp}/content-plans/backfill", 200, lambda r: "created" in r.json(), headers=H)
+    check("planner plan 404", "GET", api + f"/sites/{tmp}/content-plans/999999", 404, headers=H)
+
     # ---- legacy + cleanup
     check("legacy dashboard", "GET", BASE + "/legacy/", 200)
     check("legacy api", "GET", BASE + "/legacy/api/sites", 200)
@@ -298,6 +337,7 @@ def main() -> int:
               "  phase 8: links meta/analyze/summary/suggestions/pages/patterns/settings/export ·",
               "  phase 9: ai task-kinds/models/health/budget(get/put/422)/usage/routing preview/route policy+fallbacks/prompts (seeded, get, preview, version 422/create/approve)/feedback tags ·",
               "  phase 9: generation meta/memory-preview/estimate/start (202, autopilot 422)/run detail+provenance/SSE/list/accept (+idempotent)/404/feedback (+422)/single agent/insights ·",
+              "  phase 8.5: planner meta/categories (sync brain, manual, tree)/plan create+PATCH+transitions (researching, 409 gate)/brief→item/generation job prepared/publishing metadata/link prep/recommendations/list/board/calendar/import (dry-run, apply, upsert)/export csv+xlsx/template/sheet source/keyword mapping+suggest/suggestions/analyze/graph mode+focus+details/insights/backfill/404 ·",
               "  graph (summary, nodes, node, 404, neighbors, filtered neighbors, subgraph, 422, search, path, orphans, unknown site) ·",
               "  memory (get, put, context, learned pattern) · AI orchestrator (routes, providers, text run, JSON run + learn, 422) · jobs (enqueue, poll, list, 422, 404) · legacy mount.",
               "* All checks ran over real HTTP against uvicorn (not TestClient). Read-only on the real site; writes only on the temporary site."]

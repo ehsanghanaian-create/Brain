@@ -72,6 +72,8 @@ function Body({ d, onFocus }: { d: NodeDetails; onFocus: (id: string) => void })
   if (t === 'BRAND' || t === 'MODEL' || t === 'SERVICE' || t === 'LOCATION') return <EntityBody d={d} onFocus={onFocus} />;
   if (t === 'SCHEMA') return <SchemaBody d={d} onFocus={onFocus} />;
   if (t === 'SITE') return <SiteBody d={d} />;
+  if (t === 'CONTENT_PLAN') return <PlanBody d={d} onFocus={onFocus} />;
+  if (t === 'CONTENT_CLUSTER' || t === 'SEARCH_INTENT' || t === 'FUNNEL_STAGE') return <PlanGroupBody d={d} onFocus={onFocus} />;
   return <Generic d={d} onFocus={onFocus} />;
 }
 
@@ -314,4 +316,33 @@ function SiteBody({ d }: { d: NodeDetails }) {
 
 function Generic({ d, onFocus }: { d: NodeDetails; onFocus: (id: string) => void }) {
   return <Section title='همسایه‌ها'><NeighborList items={((d.neighbors ?? (d.content as any)?.neighbors ?? []) as Neighbor[])} onFocus={onFocus} /></Section>;
+}
+
+// ---- phase 8.5: content plan nodes
+function PlanBody({ d, onFocus }: { d: NodeDetails; onFocus: (id: string) => void }) {
+  const p = (d as any).plan as Record<string, any> | undefined;
+  const rel = ((d as any).related ?? {}) as Record<string, Neighbor[]>;
+  return (
+    <>
+      {p && (
+        <Section title='برنامه محتوایی'>
+          <KV k='وضعیت' v={p.status} /><KV k='نوع صفحه' v={p.page_type ?? '—'} /><KV k='اینتنت' v={`${p.intent ?? '—'}${p.serp_intent && p.serp_intent !== p.intent ? ` (SERP: ${p.serp_intent})` : ''}`} />
+          <KV k='مرحله قیف' v={p.funnel_stage ?? '—'} /><KV k='کلمه کلیدی اصلی' v={p.primary_keyword ?? '—'} /><KV k='دسته' v={p.category?.name ?? '—'} />
+          <KV k='اولویت' v={`${p.priority ?? '—'} · ${p.priority_score ?? '—'}${p.ai_priority != null ? ` · AI ${p.ai_priority}` : ''}`} /><KV k='شکاف محتوایی' v={p.content_gap ?? '—'} />
+          <KV k='ریسک هم‌نوع‌خواری' v={p.cannibalization_risk ?? '—'} /><KV k='URL رتبه‌دار' v={p.ranking_url ?? '—'} ltr /><KV k='فرصت ترافیک' v={p.traffic_opportunity ?? '—'} />
+          <KV k='ارزش کسب‌وکار' v={p.business_value ?? '—'} /><KV k='تاریخ انتشار' v={p.publish_date ?? '—'} ltr /><KV k='امتیاز محتوا' v={p.content_score ?? '—'} />
+          {p.recommendation?.action_fa && <div className='mt-1 rounded border p-2 text-xs'><div className='font-medium'>پیشنهاد مغز: {p.recommendation.action_fa}</div><ul className='mt-1 list-disc ps-4'>{(p.recommendation.reasons_fa ?? []).slice(0, 5).map((r: string, i: number) => <li key={i}>{r}</li>)}</ul></div>}
+          <a href={`/dashboard/content-planner?plan=${p.id}`} className='mt-2 inline-block text-xs underline'>باز کردن در برنامه‌ریز محتوا</a>
+        </Section>
+      )}
+      <Section title='کلمات کلیدی هدف'><NeighborList items={rel.keywords ?? []} onFocus={onFocus} /></Section>
+      <Section title='دسته / محتوا / اینتنت / مرحله'><NeighborList items={[...(rel.category ?? []), ...(rel.content ?? []), ...(rel.intent ?? []), ...(rel.stage ?? [])]} onFocus={onFocus} /></Section>
+      <Section title='صفحات مرتبط و لینک‌ها'><NeighborList items={[...(rel.supports ?? []), ...(rel.links ?? [])]} onFocus={onFocus} /></Section>
+    </>
+  );
+}
+
+function PlanGroupBody({ d, onFocus }: { d: NodeDetails; onFocus: (id: string) => void }) {
+  const items = ((d as any).plans ?? (d as any).cluster?.plans ?? []) as Neighbor[];
+  return <Section title='برنامه‌های محتوایی'><NeighborList items={items} onFocus={onFocus} /></Section>;
 }

@@ -15,7 +15,11 @@ export const NODE_STYLE: Record<string, { fa: string; color: string; short: stri
   SEO_PROBLEM: { fa: 'مشکل', color: '#dc2626', short: '!' },
   SEO_OPPORTUNITY: { fa: 'فرصت', color: '#16a34a', short: '↑' },
   CONTENT: { fa: 'محتوا', color: '#0ea5e9', short: 'D' },
-  TOPIC: { fa: 'موضوع', color: '#f97316', short: 'O' }
+  TOPIC: { fa: 'موضوع', color: '#f97316', short: 'O' },
+  CONTENT_PLAN: { fa: 'برنامه محتوا', color: '#0891b2', short: 'PL' },
+  CONTENT_CLUSTER: { fa: 'خوشه محتوایی', color: '#0d9488', short: 'CC' },
+  SEARCH_INTENT: { fa: 'اینتنت جستجو', color: '#db2777', short: 'I' },
+  FUNNEL_STAGE: { fa: 'مرحله قیف', color: '#9333ea', short: 'F' }
 };
 
 /** UI grouping of node types (the "node types" requirement: Keyword · Page · Entity · Schema · Content · Brand · Location · Problem). */
@@ -27,6 +31,7 @@ export const TYPE_FAMILIES: { key: string; fa: string; types: string[] }[] = [
   { key: 'location', fa: 'مکان', types: ['LOCATION'] },
   { key: 'schema', fa: 'اسکیما', types: ['SCHEMA'] },
   { key: 'content', fa: 'محتوا', types: ['CONTENT', 'TOPIC'] },
+  { key: 'planner', fa: 'برنامه محتوا', types: ['CONTENT_PLAN', 'CONTENT_CLUSTER', 'SEARCH_INTENT', 'FUNNEL_STAGE'] },
   { key: 'problem', fa: 'مشکل / فرصت', types: ['SEO_PROBLEM', 'SEO_OPPORTUNITY'] }
 ];
 
@@ -50,7 +55,12 @@ export const RELATION_FA: Record<string, string> = {
   SUGGESTED_LINK: 'لینک پیشنهادی',
   PUBLISHED_AS: 'منتشر شده به‌عنوان',
   LINK_OPPORTUNITY: 'فرصت لینک',
-  SUPPORTS: 'پشتیبانی می‌کند'
+  SUPPORTS: 'پشتیبانی می‌کند',
+  CONNECTED_TO: 'مرتبط با',
+  CONTAINS: 'شامل',
+  PLANNED_AS: 'برنامه‌ریزی‌شده به‌عنوان',
+  HAS_INTENT: 'اینتنت',
+  IN_STAGE: 'مرحله قیف'
 };
 
 export const RELATION_STYLE: Record<string, { color: string; dashed?: boolean }> = {
@@ -66,7 +76,12 @@ export const RELATION_STYLE: Record<string, { color: string; dashed?: boolean }>
   SUGGESTED_LINK: { color: '#fbbf24', dashed: true },
   LINK_OPPORTUNITY: { color: '#f97316', dashed: true },
   SUPPORTS: { color: '#22c55e', dashed: true },
-  BELONGS_TO: { color: '#fbbf24' }
+  BELONGS_TO: { color: '#fbbf24' },
+  CONNECTED_TO: { color: '#f97316', dashed: true },
+  CONTAINS: { color: '#0891b2' },
+  PLANNED_AS: { color: '#0ea5e9' },
+  HAS_INTENT: { color: '#db2777', dashed: true },
+  IN_STAGE: { color: '#9333ea', dashed: true }
 };
 
 export const CONTENT_STATUS_FA: Record<string, string> = {

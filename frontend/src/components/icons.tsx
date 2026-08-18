@@ -136,6 +136,7 @@ export const Icons = {
   graph: IconTopologyStar3,
   keywords: IconKey,
   content: IconBrain,
+  planner: IconClipboardText,
   ai: IconSparkles,
   linking: IconLink,
   opportunities: IconTargetArrow,

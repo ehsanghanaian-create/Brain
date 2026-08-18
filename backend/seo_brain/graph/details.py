@@ -112,8 +112,19 @@ def node_details(repo: GraphRepository, conn, site_id: str, node_id: str) -> dic
         base["schema"] = {"type": n.label, "pages": _neighbors(repo, site_id, node_id, "HAS_SCHEMA", "in", limit=100)}
     elif t == "SITE":
         base["site"] = Q.get_site_summary(conn, site_id)
-    elif t in ("CONTENT", "TOPIC"):
-        base["content"] = {"status": n.metadata.get("props", {}).get("stage"), "neighbors": _neighbors(repo, site_id, node_id)}
+    elif t == "CONTENT":
+        cid = n.id.split(":", 1)[1] if ":" in n.id else None
+        try:
+            row = conn.execute("SELECT id, title, status, priority, publish_date, target_keyword, topic, url, brief_id FROM content_items WHERE site_id=? AND id=?", (site_id, cid)).fetchone()
+        except Exception:  # noqa: BLE001
+            row = None
+        base["content"] = {"status": (row["status"] if row else n.metadata.get("props", {}).get("stage")), "priority": row["priority"] if row else None,
+                           "publish_date": row["publish_date"] if row else None, "target_keyword": row["target_keyword"] if row else None, "topic": row["topic"] if row else None,
+                           "url": row["url"] if row else None, "has_brief": bool(row["brief_id"]) if row else False, "content_id": row["id"] if row else None,
+                           "neighbors": _neighbors(repo, site_id, node_id)}
+    elif t == "TOPIC":
+        base["topic"] = {"cluster_id": n.metadata.get("props", {}).get("cluster_id"), "keywords_count": n.metadata.get("props", {}).get("keywords_count"),
+                         "keywords": _neighbors(repo, site_id, node_id, "CLUSTERED_IN", "in", limit=100)}
     else:
         base["neighbors"] = _neighbors(repo, site_id, node_id)
     base["degree"] = len(repo.edges_of(site_id, [node_id]))

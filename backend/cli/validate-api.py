@@ -167,6 +167,29 @@ def main() -> int:
     check("keyword delete", "DELETE", api + f"/sites/{tmp}/keywords/{kid}", 200, lambda r: r.json()["deleted"] == kid, headers=H)
     check("keywords meta", "GET", api + f"/sites/{tmp}/keywords/meta", 200, lambda r: len(r.json()["opportunity_kinds"]) == 4, headers=H)
 
+
+    # ---- phase 6: content brain + ai providers (temporary site)
+    r = check("content create", "POST", api + f"/sites/{tmp}/content", 201, lambda r: r.json()["status"] == "planned" and r.json()["allowed_transitions"] == ["brief_ready"], headers=H,
+              json={"title": "محتوای آزمایشی", "target_keyword": "تست کلمه یک", "priority": "high", "publish_date": "2026-09-05"})
+    cid = r.json()["id"] if r is not None and r.status_code == 201 else 0
+    check("content transition skip → 409", "POST", api + f"/sites/{tmp}/content/{cid}/transition", 409, lambda r: r.json()["error"]["code"] == "invalid_transition", headers=H, json={"status": "writing"})
+    check("content brief", "POST", api + f"/sites/{tmp}/content/{cid}/brief", 200, lambda r: r.json()["version"] == 1 and bool(r.json()["h1"]) and bool(r.json()["markdown"]), headers=H, json={"use_ai": True})
+    check("content status brief_ready", "GET", api + f"/sites/{tmp}/content/{cid}", 200, lambda r: r.json()["status"] == "brief_ready" and r.json()["brief"]["version"] == 1, headers=H)
+    check("content transition writing", "POST", api + f"/sites/{tmp}/content/{cid}/transition", 200, lambda r: r.json()["status"] == "writing", headers=H, json={"status": "writing"})
+    check("content board", "GET", api + f"/sites/{tmp}/content/board", 200, lambda r: [c["status"] for c in r.json()["columns"]] == ["planned", "brief_ready", "writing", "review", "approved", "published"], headers=H)
+    check("content calendar", "GET", api + f"/sites/{tmp}/content/calendar?from=2026-09-01&to=2026-09-30", 200, lambda r: len(r.json()["days"].get("2026-09-05", [])) == 1, headers=H)
+    check("content sync graph", "POST", api + f"/sites/{tmp}/content/sync-graph", 200, lambda r: r.json()["nodes"] == 1, headers=H)
+    check("content meta", "GET", api + f"/sites/{tmp}/content/meta", 200, lambda r: len(r.json()["statuses"]) == 6, headers=H)
+    check("content delete", "DELETE", api + f"/sites/{tmp}/content/{cid}", 200, lambda r: r.json()["deleted"] == cid, headers=H)
+    check("ai provider kinds", "GET", api + "/ai/provider-kinds", 200, lambda r: {k["kind"] for k in r.json()} >= {"anthropic", "openai", "google", "ollama"}, headers=H)
+    r = check("ai provider create", "POST", api + "/ai/provider-configs", 201, lambda r: r.json()["has_key"] and r.json()["key_hint"] == "9999" and "api_key" not in r.json(), headers=H,
+              json={"name": "zz-validation-provider", "kind": "ollama", "api_key": "test-key-9999"})
+    pid = r.json()["id"] if r is not None and r.status_code == 201 else 0
+    check("ai task routes", "GET", api + "/ai/task-routes", 200, lambda r: len(r.json()["routes"]) == 8, headers=H)
+    check("ai route set", "PUT", api + "/ai/task-routes/brief", 200, lambda r: r.json()["provider_name"] == "zz-validation-provider", headers=H, json={"provider_id": pid, "model": "llama3"})
+    check("ai route reset", "PUT", api + "/ai/task-routes/brief", 200, lambda r: r.json()["provider_id"] is None, headers=H, json={})
+    check("ai provider delete", "DELETE", api + f"/ai/provider-configs/{pid}", 200, lambda r: r.json()["deleted"] == pid, headers=H)
+
     # ---- legacy + cleanup
     check("legacy dashboard", "GET", BASE + "/legacy/", 200)
     check("legacy api", "GET", BASE + "/legacy/api/sites", 200)
@@ -190,6 +213,7 @@ def main() -> int:
     lines += ["", "## Coverage", "",
               "* health / openapi / docs / request-id · error envelope (404, 409, 422) · sites CRUD (create, get, list, patch, delete-refuse, delete-force, 404 after) ·",
               "  phase 3: connections status/tests (gsc/ga4/wordpress + 404 kind), gsc properties listing, initialize (idempotent), site brain fields + AI context ·",
+              "  phase 6: content create/transition guard/brief/board/calendar/graph sync/delete · ai provider config (masked key)/task routes ·",
               "  graph (summary, nodes, node, 404, neighbors, filtered neighbors, subgraph, 422, search, path, orphans, unknown site) ·",
               "  memory (get, put, context, learned pattern) · AI orchestrator (routes, providers, text run, JSON run + learn, 422) · jobs (enqueue, poll, list, 422, 404) · legacy mount.",
               "* All checks ran over real HTTP against uvicorn (not TestClient). Read-only on the real site; writes only on the temporary site."]

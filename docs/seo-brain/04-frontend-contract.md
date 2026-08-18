@@ -124,3 +124,17 @@ Client rule: node ids go into the path as **one `encodeURIComponent` segment** (
 | `POST /keywords/sync-graph` | KEYWORD/TOPIC nodes + CLUSTERED_IN/KEYWORD_TARGETS edges |
 
 Frontend: file uploads go through the proxy as `FormData` (the proxy forwards the raw body); never set `Content-Type` manually for multipart.
+
+## 11. Phase 6 additions (2026-08-17, additive) — `/sites/{id}/content/*`, `/ai/provider-configs`, `/ai/task-routes`
+
+| Endpoint | Notes |
+|---|---|
+| `GET /content?status&q&topic&cluster_id&priority&date_from&date_to&sort&order&limit&offset` | paginated envelope + `counts {total, by_status, scheduled}`; item adds `status_fa`, `allowed_transitions[]`, `has_brief` |
+| `POST /content` → 201 · `GET/PATCH/DELETE /content/{cid}` | PATCH cannot change `status` (use transition); `clear_date: true` unschedules; detail adds `brief`, `briefs[]`, `events[]`, `keyword` |
+| `POST /content/{cid}/transition {status, note?}` | 409 `invalid_transition` (+ `details.allowed`) when skipping stages, `brief_ready` without brief, `published` without url |
+| `POST /content/{cid}/brief {use_ai, mark_ready}` · `GET /content/{cid}/briefs` · `GET /content/{cid}/events` | **ContentBrief** `{id, version, h1, seo_title, meta_description, intent, outline[{h2,h3[],why}], entities[], questions[{question,source}], internal_links[{url,anchor,reason,node_id}], sources{}, markdown, provenance{}}` |
+| `GET /content/board` · `GET /content/calendar?from&to` · `POST /content/from-opportunity/{oid}` · `POST /content/sync-graph` · `GET /content/meta` | board = `{columns[{status,status_fa,items[]}], counts}`; calendar = `{from, to, days{YYYY-MM-DD: items[]}, unscheduled[], counts}` |
+| `GET /ai/provider-kinds` · `GET/POST /ai/provider-configs` · `PATCH/DELETE /ai/provider-configs/{pid}` · `POST /ai/provider-configs/{pid}/test` | **ProviderConfig** never contains the key: `{id, name, kind, kind_label, base_url, default_model, models[], enabled, has_key, key_hint, last_test}`; `api_key` is write-only (POST/PATCH), `clear_key: true` removes it |
+| `GET /ai/task-routes` · `PUT /ai/task-routes/{task_kind}` | 8 task kinds; route = `{task_kind, site_id, provider_id, model, fallback_provider_id, fallback_model, provider_name, fallback_provider_name}` |
+
+UI rules: never render/log an API key; show `••••{key_hint}`; workflow buttons come from `allowed_transitions`; publishing is manual (URL + transition), no auto-publish anywhere.

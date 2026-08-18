@@ -1,0 +1,174 @@
+"""Content Brain endpoints (phase 6): /sites/{site_id}/content/*  — human approval workflow, no auto-publishing."""
+from __future__ import annotations
+
+from datetime import date, timedelta
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import Engine
+
+from ...brain.content import ContentService, WorkflowError
+from ...brain.content.repository import PRIORITIES, STATUSES, STATUS_FA, TRANSITIONS
+from ..deps import engine, orchestrator, require_site
+from ..errors import ApiError
+
+router = APIRouter(prefix="/sites/{site_id}/content", tags=["content"], dependencies=[Depends(require_site)])
+Status = Literal["planned", "brief_ready", "writing", "review", "approved", "published"]
+Priority = Literal["high", "medium", "low"]
+
+
+class ContentCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=300)
+    target_keyword_id: int | None = None
+    target_keyword: str | None = None
+    topic: str | None = None
+    cluster_id: str | None = None
+    intent: str | None = None
+    priority: Priority | None = None
+    publish_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    publish_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    ai_provider: str | None = None
+    ai_model: str | None = None
+    url: str | None = None
+    metadata: dict[str, Any] | None = None
+    notes: str | None = None
+
+
+class ContentUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=2, max_length=300)
+    target_keyword_id: int | None = None
+    target_keyword: str | None = None
+    topic: str | None = None
+    cluster_id: str | None = None
+    intent: str | None = None
+    priority: Priority | None = None
+    publish_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    publish_time: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}$")
+    ai_provider: str | None = None
+    ai_model: str | None = None
+    url: str | None = None
+    wp_post_id: int | None = None
+    metadata: dict[str, Any] | None = None
+    notes: str | None = None
+    clear_date: bool = False
+
+
+class Transition(BaseModel):
+    status: Status
+    note: str | None = None
+
+
+class BriefRequest(BaseModel):
+    use_ai: bool = False
+    mark_ready: bool = True
+
+
+def svc(eng: Engine = Depends(engine), orch=Depends(orchestrator)) -> ContentService:
+    return ContentService(eng, orch)
+
+
+@router.get("/meta")
+def meta() -> dict:
+    return {"statuses": [{"key": s, "fa": STATUS_FA[s], "next": list(TRANSITIONS[s])} for s in STATUSES], "priorities": list(PRIORITIES)}
+
+
+@router.get("")
+def list_content(site_id: str, status: str | None = None, q: str | None = None, topic: str | None = None, cluster_id: str | None = None, priority: str | None = None,
+                 date_from: str | None = None, date_to: str | None = None, sort: str = "updated_at", order: Literal["asc", "desc"] = "desc",
+                 limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0), s: ContentService = Depends(svc)) -> dict:
+    rows, total = s.repo.list(site_id, status, q, topic, cluster_id, priority, date_from, date_to, sort, order, limit, offset)
+    return {"items": s.enrich(rows), "total": total, "limit": limit, "offset": offset, "counts": s.repo.counts(site_id)}
+
+
+@router.post("", status_code=201)
+def create_content(site_id: str, body: ContentCreate, s: ContentService = Depends(svc)) -> dict:
+    it = s.create(site_id, body.title, **body.model_dump(exclude_none=True, exclude={"title"}))
+    return s.enrich([it])[0]
+
+
+@router.post("/from-opportunity/{oid}", status_code=201)
+def from_opportunity(site_id: str, oid: int, s: ContentService = Depends(svc)) -> dict:
+    try:
+        return s.enrich([s.create_from_opportunity(site_id, oid)])[0]
+    except KeyError:
+        raise HTTPException(404, "opportunity not found")
+
+
+@router.get("/board")
+def board(site_id: str, s: ContentService = Depends(svc)) -> dict:
+    return s.board(site_id)
+
+
+@router.get("/calendar")
+def calendar(site_id: str, date_from: str | None = Query(None, alias="from"), date_to: str | None = Query(None, alias="to"), s: ContentService = Depends(svc)) -> dict:
+    today = date.today()
+    f = date_from or (today.replace(day=1) - timedelta(days=7)).isoformat()
+    t = date_to or (today + timedelta(days=45)).isoformat()
+    return s.calendar(site_id, f, t)
+
+
+@router.post("/sync-graph")
+def sync_graph(site_id: str, s: ContentService = Depends(svc)) -> dict:
+    return s.sync_graph(site_id)
+
+
+@router.get("/{cid}")
+def get_content(site_id: str, cid: int, s: ContentService = Depends(svc)) -> dict:
+    d = s.detail(site_id, cid)
+    if not d:
+        raise HTTPException(404, "content not found")
+    return d
+
+
+@router.patch("/{cid}")
+def update_content(site_id: str, cid: int, body: ContentUpdate, s: ContentService = Depends(svc)) -> dict:
+    if not s.repo.get(site_id, cid):
+        raise HTTPException(404, "content not found")
+    data = body.model_dump(exclude_none=True, exclude={"clear_date"})
+    if body.clear_date:
+        data["publish_date"] = None; data["publish_time"] = None
+    try:
+        it = s.repo.update(site_id, cid, **data)
+    except WorkflowError as e:
+        raise ApiError(409, str(e), code="invalid_transition")
+    return s.enrich([it])[0]  # type: ignore[list-item]
+
+
+@router.post("/{cid}/transition")
+def transition(site_id: str, cid: int, body: Transition, s: ContentService = Depends(svc)) -> dict:
+    """Human approval workflow. Forward one step or back; 'published' requires a URL. Never publishes anywhere."""
+    try:
+        it = s.repo.transition(site_id, cid, body.status, actor="user", note=body.note)
+    except KeyError:
+        raise HTTPException(404, "content not found")
+    except WorkflowError as e:
+        raise ApiError(409, str(e), code="invalid_transition", details={"allowed": list(TRANSITIONS.get((s.repo.get(site_id, cid) or {}).status if s.repo.get(site_id, cid) else "planned", ()))})
+    return s.enrich([it])[0]
+
+
+@router.delete("/{cid}")
+def delete_content(site_id: str, cid: int, s: ContentService = Depends(svc)) -> dict:
+    if not s.repo.delete(site_id, cid):
+        raise HTTPException(404, "content not found")
+    return {"deleted": cid}
+
+
+@router.post("/{cid}/brief")
+def generate_brief(site_id: str, cid: int, body: BriefRequest | None = None, s: ContentService = Depends(svc)) -> dict:
+    body = body or BriefRequest()
+    try:
+        b = s.generate_brief(site_id, cid, use_ai=body.use_ai, mark_ready=body.mark_ready)
+    except KeyError:
+        raise HTTPException(404, "content not found")
+    return b.to_dict()
+
+
+@router.get("/{cid}/briefs")
+def list_briefs(site_id: str, cid: int, s: ContentService = Depends(svc)) -> list[dict]:
+    return [b.to_dict() for b in s.repo.briefs(site_id, cid)]
+
+
+@router.get("/{cid}/events")
+def events(site_id: str, cid: int, s: ContentService = Depends(svc)) -> list[dict]:
+    return s.repo.events(site_id, cid)

@@ -156,3 +156,90 @@ keyword_opportunities = Table(
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
 )
+
+
+# ----------------------------------------------------------------------------- phase 6: content brain + ai providers
+content_items = Table(
+    "content_items", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("title", String, nullable=False),
+    Column("slug", String),
+    Column("target_keyword_id", Integer),
+    Column("target_keyword", String),
+    Column("topic", String),
+    Column("cluster_id", String),
+    Column("intent", String),
+    Column("status", String, nullable=False, server_default="planned"),
+    Column("priority", String),
+    Column("publish_date", String),
+    Column("publish_time", String),
+    Column("ai_provider", String),
+    Column("ai_model", String),
+    Column("url", String),
+    Column("wp_post_id", Integer),
+    Column("brief_id", Integer),
+    Column("metadata", Text, nullable=False, server_default="{}"),
+    Column("notes", Text),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+
+content_events = Table(
+    "content_events", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("content_id", Integer, nullable=False),
+    Column("from_status", String),
+    Column("to_status", String),
+    Column("actor", String, nullable=False, server_default="user"),
+    Column("note", Text),
+    Column("created_at", String, nullable=False),
+)
+
+content_briefs = Table(
+    "content_briefs", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("content_id", Integer, nullable=False),
+    Column("version", Integer, nullable=False, server_default="1"),
+    Column("h1", String),
+    Column("seo_title", String),
+    Column("meta_description", Text),
+    Column("intent", String),
+    Column("outline", Text, nullable=False, server_default="[]"),
+    Column("entities", Text, nullable=False, server_default="[]"),
+    Column("questions", Text, nullable=False, server_default="[]"),
+    Column("internal_links", Text, nullable=False, server_default="[]"),
+    Column("sources", Text, nullable=False, server_default="{}"),
+    Column("markdown", Text),
+    Column("provenance", Text, nullable=False, server_default="{}"),
+    Column("created_at", String, nullable=False),
+)
+
+ai_providers = Table(
+    "ai_providers", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("name", String, nullable=False),
+    Column("kind", String, nullable=False),
+    Column("base_url", String),
+    Column("default_model", String),
+    Column("models", Text, nullable=False, server_default="[]"),
+    Column("enabled", Integer, nullable=False, server_default="1"),
+    Column("secret_ref", String),
+    Column("key_hint", String),
+    Column("last_test", Text),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+
+ai_routes = Table(
+    "ai_routes", metadata,
+    Column("task_kind", String, primary_key=True),
+    Column("site_id", String, primary_key=True, server_default="*"),
+    Column("provider_id", Integer),
+    Column("model", String),
+    Column("fallback_provider_id", Integer),
+    Column("fallback_model", String),
+    Column("updated_at", String, nullable=False),
+)

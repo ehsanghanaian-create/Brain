@@ -123,5 +123,10 @@ def test_10_no_wordpress_write_paths():
     files = [p for p in (ROOT / "backend" / "seo_brain").rglob("*.py") if not (excluded & set(p.parts))]
     assert len(files) > 20
     src = "\n".join(p.read_text(encoding="utf-8") for p in files) + (ROOT / "backend" / "mcp_server" / "server.py").read_text(encoding="utf-8")
-    for verb in (".post(", ".put(", ".patch(", ".delete(", "requests.post", "httpx.post", "method=\"POST\""):
-        assert verb not in src, verb
+    # HTTP-client write calls only (repositories/SecretStore legitimately have local `.delete(`/`.update(` methods)
+    import re
+    patterns = [r"\bhttpx\.(post|put|patch|delete)\(", r"\brequests\.(post|put|patch|delete)\(", r"\b(client|session|http|cli|svc|self\.client|self\.session)\.(post|put|patch|delete)\(",
+                r"method\s*=\s*['\"](POST|PUT|PATCH|DELETE)['\"]", r"\.request\(\s*['\"](POST|PUT|PATCH|DELETE)['\"]"]
+    for pat in patterns:
+        m = re.search(pat, src)
+        assert m is None, f"outbound HTTP write found: {m.group(0)}"

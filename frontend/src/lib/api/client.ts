@@ -115,6 +115,27 @@ export type TopicMap = { clusters: (KeywordCluster & { members: KeywordRow[]; gs
 export type KeywordOpportunity = { id: number; site_id: string; keyword_id: number; kind: string; kind_fa?: string; keyword?: string | null; keyword_status?: string | null; target_url: string | null; score: number; reason: string; evidence: Record<string, unknown>; status: string; run_id: string | null; created_at: string; updated_at: string };
 export type ImportResult = { format: string; columns: string[]; mapping: Record<string, string>; unmapped_columns: string[]; rows_total: number; rows_valid: number; rows_imported: number; rows_updated: number; rows_skipped: number; errors: { row: number; error: string }[]; errors_count: number; preview: Record<string, unknown>[]; import_id: number | null; dry_run: boolean };
 export type KeywordsMeta = { intents: string[]; priorities: string[]; statuses: string[]; opportunity_kinds: { kind: string; fa: string }[]; opportunity_statuses: string[] };
+// phase 6 — content brain + ai providers
+export type ContentStatus = 'planned' | 'brief_ready' | 'writing' | 'review' | 'approved' | 'published';
+export type ContentItem = {
+  id: number; site_id: string; title: string; slug: string | null; target_keyword_id: number | null; target_keyword: string | null; topic: string | null;
+  cluster_id: string | null; intent: string | null; status: ContentStatus; status_fa: string; priority: string | null; publish_date: string | null; publish_time: string | null;
+  ai_provider: string | null; ai_model: string | null; url: string | null; wp_post_id: number | null; brief_id: number | null; metadata: Record<string, unknown>;
+  notes: string | null; created_at: string; updated_at: string; allowed_transitions: ContentStatus[]; has_brief: boolean;
+};
+export type ContentBrief = {
+  id: number; content_id: number; version: number; h1: string | null; seo_title: string | null; meta_description: string | null; intent: string | null;
+  outline: { h2: string; h3: string[]; why?: string }[]; entities: { type: string; label: string; node_id: string }[]; questions: { question: string; source: string }[];
+  internal_links: { url: string; anchor: string; reason: string; node_id: string | null }[]; sources: Record<string, unknown>; markdown: string | null; provenance: Record<string, unknown>; created_at: string;
+};
+export type ContentDetail = ContentItem & { brief: ContentBrief | null; briefs: { id: number; version: number; created_at: string; provenance: Record<string, unknown> }[]; events: { id: number; from_status: string | null; to_status: string | null; actor: string; note: string | null; created_at: string }[]; keyword?: KeywordRow & { gsc: KeywordGsc } };
+export type ContentCounts = { total: number; by_status: Record<ContentStatus, number>; scheduled: number };
+export type ContentBoard = { columns: { status: ContentStatus; status_fa: string; items: ContentItem[] }[]; counts: ContentCounts };
+export type ContentCalendar = { from: string; to: string; days: Record<string, ContentItem[]>; unscheduled: ContentItem[]; counts: ContentCounts };
+export type ContentMeta = { statuses: { key: ContentStatus; fa: string; next: ContentStatus[] }[]; priorities: string[] };
+export type ProviderKind = { kind: string; label: string; base_url: string; models: string[]; needs_key: boolean };
+export type ProviderConfig = { id: number; name: string; kind: string; kind_label: string; base_url: string | null; default_model: string | null; models: string[]; enabled: boolean; has_key: boolean; key_hint: string | null; last_test: { ok: boolean; status: string; message: string; tested_at: string; models_found?: string[] } | null; created_at: string; updated_at: string };
+export type TaskRoute = { task_kind: string; site_id: string; provider_id: number | null; model: string | null; fallback_provider_id: number | null; fallback_model: string | null; provider_name: string | null; fallback_provider_name: string | null; updated_at: string | null };
 export type SiteCreateBody = Schemas['SiteCreate'];
 export type SiteUpdateBody = Schemas['SiteUpdate'];
 export type MemoryUpdateBody = Schemas['MemoryUpdate'];
@@ -175,6 +196,32 @@ export const endpoints = {
   },
   setOpportunityStatus: (id: string, oid: number, status: string) => api<KeywordOpportunity>(`/sites/${encodeURIComponent(id)}/keywords/opportunities/${oid}`, { method: 'PATCH', json: { status } }),
   syncKeywordGraph: (id: string) => api<Record<string, unknown>>(`/sites/${encodeURIComponent(id)}/keywords/sync-graph`, { method: 'POST' }),
+  // phase 6 — content brain
+  contentMeta: (id: string) => api<ContentMeta>(`/sites/${encodeURIComponent(id)}/content/meta`),
+  contentList: (id: string, params: Record<string, string | number | undefined> = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => v !== undefined && v !== '' && q.set(k, String(v)));
+    return api<{ items: ContentItem[]; total: number; counts: ContentCounts }>(`/sites/${encodeURIComponent(id)}/content?${q.toString()}`);
+  },
+  contentBoard: (id: string) => api<ContentBoard>(`/sites/${encodeURIComponent(id)}/content/board`),
+  contentCalendar: (id: string, from: string, to: string) => api<ContentCalendar>(`/sites/${encodeURIComponent(id)}/content/calendar?from=${from}&to=${to}`),
+  content: (id: string, cid: number) => api<ContentDetail>(`/sites/${encodeURIComponent(id)}/content/${cid}`),
+  createContent: (id: string, body: Record<string, unknown>) => api<ContentItem>(`/sites/${encodeURIComponent(id)}/content`, { method: 'POST', json: body }),
+  contentFromOpportunity: (id: string, oid: number) => api<ContentItem>(`/sites/${encodeURIComponent(id)}/content/from-opportunity/${oid}`, { method: 'POST' }),
+  updateContent: (id: string, cid: number, body: Record<string, unknown>) => api<ContentItem>(`/sites/${encodeURIComponent(id)}/content/${cid}`, { method: 'PATCH', json: body }),
+  transitionContent: (id: string, cid: number, status: ContentStatus, note?: string) => api<ContentItem>(`/sites/${encodeURIComponent(id)}/content/${cid}/transition`, { method: 'POST', json: { status, note } }),
+  deleteContent: (id: string, cid: number) => api<{ deleted: number }>(`/sites/${encodeURIComponent(id)}/content/${cid}`, { method: 'DELETE' }),
+  generateBrief: (id: string, cid: number, opts: { use_ai?: boolean; mark_ready?: boolean } = {}) => api<ContentBrief>(`/sites/${encodeURIComponent(id)}/content/${cid}/brief`, { method: 'POST', json: { use_ai: !!opts.use_ai, mark_ready: opts.mark_ready ?? true } }),
+  syncContentGraph: (id: string) => api<Record<string, unknown>>(`/sites/${encodeURIComponent(id)}/content/sync-graph`, { method: 'POST' }),
+  // phase 6 — ai providers
+  providerKinds: () => api<ProviderKind[]>('/ai/provider-kinds'),
+  providerConfigs: () => api<ProviderConfig[]>('/ai/provider-configs'),
+  createProvider: (body: Record<string, unknown>) => api<ProviderConfig>('/ai/provider-configs', { method: 'POST', json: body }),
+  updateProvider: (pid: number, body: Record<string, unknown>) => api<ProviderConfig>(`/ai/provider-configs/${pid}`, { method: 'PATCH', json: body }),
+  deleteProvider: (pid: number) => api<{ deleted: number }>(`/ai/provider-configs/${pid}`, { method: 'DELETE' }),
+  testProvider: (pid: number) => api<{ ok: boolean; status: string; message: string; models_found?: string[] }>(`/ai/provider-configs/${pid}/test`, { method: 'POST' }),
+  taskRoutes: () => api<{ task_kinds: string[]; routes: TaskRoute[] }>('/ai/task-routes'),
+  setTaskRoute: (kind: string, body: Record<string, unknown>) => api<TaskRoute>(`/ai/task-routes/${kind}`, { method: 'PUT', json: body }),
   putMemory: (id: string, body: MemoryUpdateBody) => api<SiteMemory>(`/sites/${encodeURIComponent(id)}/memory`, { method: 'PUT', json: body })
 };
 

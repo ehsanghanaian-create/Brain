@@ -157,7 +157,7 @@ def test_delete_site_refuses_then_forces(client):
 def test_graph_modes_view_and_details(client):
     _seed(client)
     modes = client.get("/api/v1/sites/demo/graph/modes").json()
-    assert [m["key"] for m in modes] == ["seo", "content", "links"] and all(m["title_fa"] for m in modes)
+    assert [m["key"] for m in modes] == ["seo", "content", "links", "planner"] and all(m["title_fa"] for m in modes)
     v = client.get("/api/v1/sites/demo/graph/view", params={"mode": "seo"}).json()
     assert v["mode"]["key"] == "seo" and {n["id"] for n in v["nodes"]} == {"site:demo", "page:https://demo.example/a", "query:امداد"}
     assert {(e["source"], e["relation_type"], e["target"]) for e in v["edges"]} == {("site:demo", "HAS_PAGE", "page:https://demo.example/a"), ("page:https://demo.example/a", "RANKS_FOR", "query:امداد")}

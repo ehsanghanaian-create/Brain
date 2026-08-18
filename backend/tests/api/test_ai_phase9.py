@@ -289,7 +289,7 @@ def test_pipeline_echo_manual_and_real_assisted_with_sse_feedback_learning(c):
     # meta / no publishing endpoint
     meta = c.get(f"/api/v1/sites/{SID}/generation/meta").json()
     assert meta["modes"] == ["manual", "assisted"] and meta["reserved_modes"] == ["autopilot"] and "fact_check" in [a["agent"] for a in meta["agents"]]
-    assert not any("publish" in p_ for p_ in c.get("/api/openapi.json").json()["paths"])
+    assert not any("publish" in p_ and "metadata" not in p_ for p_ in c.get("/api/openapi.json").json()["paths"])   # phase 8.5 adds /publishing-metadata (metadata only, publishing disabled)
 
 
 def _debug(c, run):

@@ -241,6 +241,11 @@ def transition(site_id: str, cid: int, body: Transition, s: ContentService = Dep
     try:
         ContentIntelligenceService(s.engine, None).check_gate(site_id, cid, body.status)
         it = s.repo.transition(site_id, cid, body.status, actor="user", note=body.note)
+        try:   # phase 8.5: mirror to the linked content plan (additive, never blocks)
+            from ...brain.planner import PlannerService
+            PlannerService(s.engine, s).sync_from_item(site_id, cid)
+        except Exception:  # noqa: BLE001
+            pass
     except KeyError:
         raise HTTPException(404, "content not found")
     except WorkflowError as e:

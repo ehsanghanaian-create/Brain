@@ -114,7 +114,39 @@ def node_details(repo: GraphRepository, conn, site_id: str, node_id: str) -> dic
         base["opportunity"] = {"type": otype, "count": len(items), "action_fa": OPP_ACTIONS.get(otype, ""),
                                "items": [{"url": i["url"], "related_url": i.get("related_url"), "query": i.get("query"), "score": i.get("score"),
                                           "reason": i.get("reason"), "confidence": i.get("confidence")} for i in items[:30]]}
-    elif t in ("BRAND", "MODEL", "SERVICE", "LOCATION"):
+    elif t == "CONTENT_PLAN":
+        pid = int(n.id.split(":", 1)[1]) if n.id.split(":", 1)[1].isdigit() else None
+        row = conn.execute("SELECT * FROM content_plans WHERE site_id=? AND id=?", (site_id, pid)).fetchone() if pid else None
+        if row:
+            import json as _json
+            r = dict(row)
+            for f in ("secondary_keywords", "heading_structure", "existing_pages", "link_targets", "cannibalization", "recommendation", "publishing"):
+                r[f] = _json.loads(r.get(f) or ("{}" if f in ("recommendation", "publishing") else "[]"))
+            cat = conn.execute("SELECT id, name, source FROM content_categories WHERE id=?", (r.get("category_id"),)).fetchone() if r.get("category_id") else None
+            kws = conn.execute("SELECT k.id, k.keyword, pk.role, k.volume, k.intent FROM content_plan_keywords pk JOIN keywords k ON k.id=pk.keyword_id WHERE pk.content_plan_id=?", (pid,)).fetchall()
+            base["plan"] = {**{k: r.get(k) for k in ("id", "title", "url", "status", "intent", "serp_intent", "page_type", "funnel_stage", "priority", "priority_score", "ai_priority", "business_value", "publish_date", "primary_keyword",
+                                                     "content_gap", "cannibalization_risk", "ranking_url", "ranking_position", "traffic_opportunity", "content_item_id", "content_score", "graph_connections", "category_reason")},
+                            "category": dict(cat) if cat else None, "keywords": [dict(k) for k in kws], "secondary_keywords": r["secondary_keywords"], "heading_structure": r["heading_structure"],
+                            "existing_pages": r["existing_pages"], "link_targets": r["link_targets"], "cannibalization": r["cannibalization"], "recommendation": r["recommendation"]}
+        base["related"] = {"keywords": _neighbors(repo, site_id, node_id, "TARGETS"), "category": _neighbors(repo, site_id, node_id, "BELONGS_TO"), "content": _neighbors(repo, site_id, node_id, "PLANNED_AS"),
+                           "supports": _neighbors(repo, site_id, node_id, "SUPPORTS"), "links": _neighbors(repo, site_id, node_id, "LINK_OPPORTUNITY"), "intent": _neighbors(repo, site_id, node_id, "HAS_INTENT"), "stage": _neighbors(repo, site_id, node_id, "IN_STAGE")}
+    elif t == "CONTENT_CLUSTER":
+        base["cluster"] = {"plans": _neighbors(repo, site_id, node_id, "CONTAINS", "out"), "category": _neighbors(repo, site_id, node_id, "BELONGS_TO", "out")}
+    elif t in ("SEARCH_INTENT", "FUNNEL_STAGE"):
+        base["plans"] = _neighbors(repo, site_id, node_id, "HAS_INTENT" if t == "SEARCH_INTENT" else "IN_STAGE", "in")
+    if t == "CATEGORY":
+        try:
+            import json as _json
+            props = n.metadata.get("props", {})
+            crow = conn.execute("SELECT * FROM content_categories WHERE site_id=? AND (wordpress_category_id=? OR (intelligence LIKE ?))", (site_id, props.get("wp_id"), '%"graph_node_id": "' + node_id + '"%')).fetchone()
+            if crow:
+                cr = dict(crow); intel = _json.loads(cr.get("intelligence") or "{}")
+                base["planner_category"] = {"id": cr["id"], "source": cr["source"], "post_count": cr["post_count"], "page_count": cr["page_count"], "keyword_count": cr["keyword_count"], "plan_count": cr["plan_count"],
+                                            "coverage_score": cr["coverage_score"], "gaps": intel.get("gaps", [])[:10], "top_keywords": intel.get("top_keywords", [])[:10], "intents": intel.get("intents", {})}
+                base["plans"] = _neighbors(repo, site_id, node_id, "CONTAINS", "out")
+        except Exception:  # noqa: BLE001
+            pass
+    if t in ("BRAND", "MODEL", "SERVICE", "LOCATION"):
         base["entity"] = {"kind": t, "aliases": n.metadata.get("props", {}).get("aliases", []), "evidence": n.metadata.get("props", {}).get("evidence"),
                           "pages": _neighbors(repo, site_id, node_id, "ABOUT") + _neighbors(repo, site_id, node_id, "OFFERS"),
                           "children": _neighbors(repo, site_id, node_id, "BELONGS_TO", "in")}

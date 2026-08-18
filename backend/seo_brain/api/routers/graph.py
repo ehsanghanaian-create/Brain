@@ -104,7 +104,7 @@ def modes(site_id: str) -> list[dict]:
 
 
 @router.get("/view")
-def view(site_id: str, mode: str = Query("seo", pattern="^(seo|content|links)$"), types: str | None = None,
+def view(site_id: str, mode: str = Query("seo", pattern="^(seo|content|links|planner)$"), types: str | None = None,
          relation_types: str | None = None, limit: int = Query(400, ge=1, le=2000), include_isolated: bool = True,
          repo: GraphRepository = Depends(graph_repo)) -> dict:
     """Mode-filtered graph slice for React Flow (nodes ranked by PageRank, edges among them)."""

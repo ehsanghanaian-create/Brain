@@ -15,13 +15,17 @@ from typing import Any
 NODE_TYPES = ("SITE", "PAGE", "POST", "CATEGORY", "TAG", "BRAND", "MODEL", "SERVICE", "LOCATION", "QUERY",
               "SCHEMA", "SEO_PROBLEM", "SEO_OPPORTUNITY",
               # SEO Brain additions (phases 5-7)
-              "KEYWORD", "TOPIC", "CONTENT")
+              "KEYWORD", "TOPIC", "CONTENT",
+              # phase 8.5 content strategy planner
+              "CONTENT_PLAN", "CONTENT_CLUSTER", "SEARCH_INTENT", "FUNNEL_STAGE")
 RELATION_TYPES = ("HAS_PAGE", "HAS_POST", "HAS_CATEGORY", "HAS_TAG", "BELONGS_TO", "LINKS_TO", "ABOUT", "OFFERS",
                   "TARGETS", "RANKS_FOR", "HAS_SCHEMA", "HAS_PROBLEM", "HAS_OPPORTUNITY",
                   # SEO Brain additions
                   "KEYWORD_TARGETS", "CLUSTERED_IN", "CONTENT_FOR", "SUGGESTED_LINK", "PUBLISHED_AS",
                   # phase 8 internal linking
-                  "LINK_OPPORTUNITY", "SUPPORTS")
+                  "LINK_OPPORTUNITY", "SUPPORTS",
+                  # phase 8.5 planner
+                  "CONNECTED_TO", "CONTAINS", "PLANNED_AS", "HAS_INTENT", "IN_STAGE")
 
 
 @dataclass

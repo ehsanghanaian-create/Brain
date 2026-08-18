@@ -42,6 +42,12 @@ MODES: dict[str, GraphMode] = {
         node_types=("PAGE", "POST", "CATEGORY", "CONTENT"),
         relation_types=("LINKS_TO", "SUGGESTED_LINK", "LINK_OPPORTUNITY", "SUPPORTS"),
         layout="force", group_by="community"),
+    "planner": GraphMode(
+        key="planner", title_fa="نقشه برنامه محتوا",
+        description_fa="برنامه‌های محتوایی، دسته‌ها (وردپرس/مغز)، خوشه‌های محتوایی، کلمات کلیدی هدف، اینتنت و مرحله قیف، محتوای تولیدشده و صفحات مرتبط",
+        node_types=("CATEGORY", "CONTENT_CLUSTER", "CONTENT_PLAN", "KEYWORD", "TOPIC", "CONTENT", "PAGE", "POST", "SEARCH_INTENT", "FUNNEL_STAGE"),
+        relation_types=("CONTAINS", "BELONGS_TO", "TARGETS", "CONNECTED_TO", "SUPPORTS", "PLANNED_AS", "PUBLISHED_AS", "LINK_OPPORTUNITY", "HAS_INTENT", "IN_STAGE", "CONTENT_FOR"),
+        layout="layered", group_by="type"),
 }
 
 

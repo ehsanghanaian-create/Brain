@@ -30,6 +30,12 @@ def test_migrate_fresh_sqlite_is_idempotent(tmp_path):
 
 def test_migrate_via_engine_and_status(tmp_path):
     eng = make_engine("sqlite:///" + (tmp_path / "e.db").as_posix())
-    assert migrate(eng)[:8] == ["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008"]
+    assert migrate(eng)[:9] == ["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008", "0009"]
+    with eng.connect() as cx:
+        from sqlalchemy import text as _t
+        names = {r[0] for r in cx.execute(_t("select name from sqlite_master where type='table'"))}
+        assert {"content_plans", "content_categories", "content_plan_keywords", "content_plan_events", "content_plan_recommendations", "content_plan_generation_jobs", "content_plan_sources"} <= names
+        assert "plan_id" in {r[1] for r in cx.execute(_t("pragma table_info(link_suggestions)"))}
+        assert migrate(eng) == []   # idempotent
     st = status(eng)
     assert all(s["applied"] for s in st) and len(st) >= 2

@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { INTENT_FA, PRIORITY_FA, STATUS_COLOR, STATUS_FA, STATUS_ORDER } from '../constants';
+import { DraftPanel } from './draft-panel';
 
 export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: string; cid: number | 'new' | null; onClose: () => void; onChanged: () => void }) {
   const [d, setD] = useState<ContentDetail | null>(null);
@@ -20,7 +21,7 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
   const [busy, setBusy] = useState<string | null>(null);
   const [kwQuery, setKwQuery] = useState('');
   const [kwOptions, setKwOptions] = useState<KeywordRow[]>([]);
-  const [tab, setTab] = useState<'fields' | 'brief' | 'history'>('fields');
+  const [tab, setTab] = useState<'fields' | 'brief' | 'draft' | 'history'>('fields');
   const open = cid !== null;
 
   const load = () => {
@@ -92,11 +93,12 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
               </Button>
             ))}
             {d.status === 'approved' && !d.url && <span className='text-muted-foreground text-xs'>برای «منتشرشده» ابتدا URL نهایی را ثبت کنید (انتشار خودکار فعال نیست)</span>}
+            {d.status === 'review' && d.review_status !== 'ready' && <span className='text-muted-foreground text-xs'>دروازه بازبینی: برای تأیید، آخرین پیش‌نویس باید «آماده» باشد ({d.review_status === 'changes_requested' ? 'نیاز به اصلاح' : 'بازبینی نشده'})</span>}
           </div>
         )}
         {d && (
           <div className='mt-3 flex gap-1 border-b text-sm'>
-            {(['fields', 'brief', 'history'] as const).map((t) => <button key={t} className={`px-3 py-1 ${tab === t ? 'border-primary border-b-2 font-medium' : 'text-muted-foreground'}`} onClick={() => setTab(t)}>{t === 'fields' ? 'مشخصات' : t === 'brief' ? `بریف${d.brief ? ` (v${d.brief.version})` : ''}` : `تاریخچه (${d.events.length})`}</button>)}
+            {(['fields', 'brief', 'draft', 'history'] as const).map((t) => <button key={t} className={`px-3 py-1 ${tab === t ? 'border-primary border-b-2 font-medium' : 'text-muted-foreground'}`} onClick={() => setTab(t)}>{t === 'fields' ? 'مشخصات' : t === 'brief' ? `بریف${d.brief ? ` (v${d.brief.version})` : ''}` : t === 'draft' ? `پیش‌نویس و امتیاز${d.latest_score != null ? ` (${d.latest_score})` : ''}` : `تاریخچه (${d.events.length})`}</button>)}
           </div>
         )}
         {(tab === 'fields' || !d) && (
@@ -144,6 +146,7 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
             ) : <BriefView b={d.brief} onRegenerate={(ai) => brief(ai)} busy={!!busy} />}
           </div>
         )}
+        {tab === 'draft' && d && typeof cid === 'number' && <DraftPanel siteId={siteId} cid={cid} onChanged={() => { onChanged(); load(); }} />}
         {tab === 'history' && d && (
           <ul className='space-y-1 py-3 text-xs'>
             {d.events.map((e) => (

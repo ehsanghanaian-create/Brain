@@ -195,3 +195,54 @@ def test_insight_acceptance_writes_site_brain_memory(c):
     assert len(c.get(f"/api/v1/sites/{SID}/memory").json()["successful_patterns"]) == 1
     assert c.get(f"/api/v1/sites/{SID}/content/insights", params={"status": "accepted"}).json()[0]["id"] == ins[0]["id"]
     assert "NEVER" not in c.get(f"/api/v1/sites/{SID}/memory/context").json()["messages"][0]["content"] or True
+
+
+def test_analytics_snapshot_and_conservative_learning(c):
+    """Insights only from large, old-enough samples; accepted → Site Brain memory. Uses gsc_query_page fallback + backdated items."""
+    from datetime import date, timedelta
+    old = (date.today() - timedelta(days=60)).isoformat()
+    ids = []
+    with c.eng.begin() as cx:
+        # 12 published contents: 6 with FAQ (high CTR pages) and 6 without (low CTR), each with a URL and GSC rows
+        for i in range(12):
+            faq = i < 6
+            url = f"https://demo.example/p{i}/"
+            cx.execute(text("INSERT INTO content_items(site_id,title,status,url,publish_date,intent,metadata,created_at,updated_at) VALUES(:s,:t,'published',:u,:d,'transactional','{}',:c,:c)"),
+                       {"s": SID, "t": f"مقاله {i}", "u": url, "d": old, "c": old + "T00:00:00Z"})
+            cid = cx.execute(text("SELECT last_insert_rowid()")).scalar(); ids.append(cid)
+            body = "# عنوان\n\nمتن اول با تماس ۰۹۱۲.\n\n## بخش\nمتن.\n" + ("## سؤالات متداول\n### چرا؟\nچون.\n### چگونه؟\nاینطور.\n### کجا؟\nاینجا.\n" if faq else "")
+            from seo_brain.brain.content.drafts import parse_draft
+            st, txt = parse_draft(body)
+            cx.execute(text("INSERT INTO content_drafts(site_id,content_id,version,title,body,body_text,word_count,structure,source,created_at) VALUES(:s,:c,1,:t,:b,:x,:w,:st,'user',:d)"),
+                       {"s": SID, "c": cid, "t": f"مقاله {i}", "b": body, "x": txt, "w": st.word_count, "st": __import__('json').dumps(st.to_dict(), ensure_ascii=False), "d": old + "T00:00:00Z"})
+            imp = 900; clicks = 90 if faq else 20      # ctr 10% vs 2.2%
+            cx.execute(text("INSERT INTO gsc_query_page(site_id,page,query,clicks,impressions,ctr,position) VALUES(:s,:p,:q,:c,:i,0,:o)"), {"s": SID, "p": url, "q": f"کوئری {i}", "c": clicks, "i": imp, "o": 8.0 if faq else 14.0})
+    snap = c.post(f"/api/v1/sites/{SID}/content/analytics/snapshot").json()
+    assert snap["snapshots"] == 24 and snap["source"] == "gsc_query_page"
+    ov = c.get(f"/api/v1/sites/{SID}/content/analytics/overview").json()
+    assert ov["totals"]["contents"] == 12 and ov["totals"]["impressions"] == 12 * 900 and ov["rows"][0]["ctr"] == 0.1
+    m = c.get(f"/api/v1/sites/{SID}/content/{ids[0]}/metrics").json()
+    assert m[0]["window"] == "28d" and m[0]["impressions"] == 900 and m[0]["top_queries"][0]["query"] == "کوئری 0"
+    # gates: with default 1000 imp / 30 clicks per group and n>=5 → faq=yes group: n=6, imp=5400, clicks=540 ✓ ; faq=no: n=6, imp=5400, clicks=120 ✓
+    res = c.post(f"/api/v1/sites/{SID}/content/analytics/learn").json()
+    assert res["samples"] == 12 and res["skipped"]["young"] == 0
+    ins = c.get(f"/api/v1/sites/{SID}/content/insights").json()
+    faq_ctr = next(x for x in ins if x["feature"] == "faq" and x["value"] == "yes" and x["metric"] == "ctr")
+    assert faq_ctr["effect"] > 0 and faq_ctr["n"] == 6 and faq_ctr["impressions"] == 5400 and "FAQ" in faq_ctr["message_fa"] and faq_ctr["status"] == "new"
+    faq_pos = next(x for x in ins if x["feature"] == "faq" and x["value"] == "yes" and x["metric"] == "position")
+    assert faq_pos["effect"] > 0                                    # positive = better position
+    # raise gate: min_clicks 200 → 'no' group (120 clicks) disappears next learn; existing rows are not deleted but not refreshed
+    c.put(f"/api/v1/sites/{SID}/content/analytics/settings", json={"min_clicks": 200})
+    res2 = c.post(f"/api/v1/sites/{SID}/content/analytics/learn").json()
+    assert all(not (i["feature"] == "faq" and i["value"] == "no") for i in res2["insights"])
+    # too-young content is skipped entirely
+    c.put(f"/api/v1/sites/{SID}/content/analytics/settings", json={"min_age_days": 90})
+    res3 = c.post(f"/api/v1/sites/{SID}/content/analytics/learn").json()
+    assert res3["samples"] == 0 and res3["skipped"]["young"] == 12 and res3["insights"] == []
+    # human confirmation → Site Brain memory pattern (source content_analytics), never automatic
+    mem_before = len(c.get(f"/api/v1/sites/{SID}/memory").json()["successful_patterns"])
+    acc = c.patch(f"/api/v1/sites/{SID}/content/insights/{faq_ctr['id']}", json={"status": "accepted"}).json()
+    mem = c.get(f"/api/v1/sites/{SID}/memory").json()["successful_patterns"]
+    assert acc["status"] == "accepted" and len(mem) == mem_before + 1 and mem[-1]["source"] == "content_analytics" and "FAQ" in mem[-1]["pattern"]
+    # weights untouched by learning
+    assert c.get(f"/api/v1/sites/{SID}/content/settings/scoring").json()["weights"]["headings"] == 15

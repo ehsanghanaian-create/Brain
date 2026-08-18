@@ -180,6 +180,22 @@ def main() -> int:
     check("content calendar", "GET", api + f"/sites/{tmp}/content/calendar?from=2026-09-01&to=2026-09-30", 200, lambda r: len(r.json()["days"].get("2026-09-05", [])) == 1, headers=H)
     check("content sync graph", "POST", api + f"/sites/{tmp}/content/sync-graph", 200, lambda r: r.json()["nodes"] == 1, headers=H)
     check("content meta", "GET", api + f"/sites/{tmp}/content/meta", 200, lambda r: len(r.json()["statuses"]) == 6, headers=H)
+    # ---- phase 7: drafts / score / review / gate / analytics / insights (temporary site, content created above)
+    md7 = "# تست کلمه یک — راهنما\n\nپاراگراف اول درباره تست کلمه یک با شماره ۰۹۱۲۰۰۰۰۰۰۰.\n\n## بخش اول\nمتن بخش اول درباره تست کلمه یک.\n\n## سؤالات متداول\n### چرا؟\nچون.\n"
+    r = check("draft create v1", "POST", api + f"/sites/{tmp}/content/{cid}/drafts", 201, lambda r: r.json()["version"] == 1 and r.json()["word_count"] > 0 and r.json()["structure"]["faq"] is True, headers=H, json={"body": md7, "format": "markdown", "author": "validator"})
+    check("draft create v2 keeps v1", "POST", api + f"/sites/{tmp}/content/{cid}/drafts", 201, lambda r: r.json()["version"] == 2 and r.json()["revision_of"] is not None, headers=H, json={"body": md7 + "\n## بخش دوم\nمتن.\n", "source": "ai:test", "provenance": {"provider": "test"}})
+    check("drafts list", "GET", api + f"/sites/{tmp}/content/{cid}/drafts", 200, lambda r: [d["version"] for d in r.json()] == [2, 1] and "body" not in r.json()[0], headers=H)
+    check("score", "POST", api + f"/sites/{tmp}/content/{cid}/score", 200, lambda r: 0 <= r.json()["total"] <= 100 and set(r.json()["dims"]) == {"intent", "keywords", "entities", "headings", "links", "cta", "completeness"}, headers=H)
+    check("review (rules, advisory ai)", "POST", api + f"/sites/{tmp}/content/{cid}/review", 200, lambda r: r.json()["review_status"] in ("ready", "changes_requested") and "counts" in r.json() and r.json()["gate"] == "strict", headers=H, json={"use_ai": True})
+    check("intelligence history", "GET", api + f"/sites/{tmp}/content/{cid}/intelligence", 200, lambda r: len(r.json()["drafts"]) == 2 and len(r.json()["reviews"]) >= 1, headers=H)
+    check("scoring settings get", "GET", api + f"/sites/{tmp}/content/settings/scoring", 200, lambda r: r.json()["review_gate"] == "strict" and r.json()["weights"]["intent"] == 20, headers=H)
+    check("scoring settings put", "PUT", api + f"/sites/{tmp}/content/settings/scoring", 200, lambda r: r.json()["review_gate"] == "advisory", headers=H, json={"review_gate": "advisory"})
+    check("analytics settings", "GET", api + f"/sites/{tmp}/content/analytics/settings", 200, lambda r: r.json()["min_impressions"] == 1000 and r.json()["min_clicks"] == 30 and r.json()["min_age_days"] == 28, headers=H)
+    check("analytics snapshot (no urls)", "POST", api + f"/sites/{tmp}/content/analytics/snapshot", 200, lambda r: r.json()["snapshots"] == 0, headers=H)
+    check("analytics learn (no samples)", "POST", api + f"/sites/{tmp}/content/analytics/learn", 200, lambda r: r.json()["samples"] == 0 and r.json()["insights"] == [], headers=H)
+    check("analytics overview", "GET", api + f"/sites/{tmp}/content/analytics/overview", 200, lambda r: r.json()["totals"]["contents"] == 0, headers=H)
+    check("insights list", "GET", api + f"/sites/{tmp}/content/insights", 200, lambda r: r.json() == [], headers=H)
+
     check("content delete", "DELETE", api + f"/sites/{tmp}/content/{cid}", 200, lambda r: r.json()["deleted"] == cid, headers=H)
     check("ai provider kinds", "GET", api + "/ai/provider-kinds", 200, lambda r: {k["kind"] for k in r.json()} >= {"anthropic", "openai", "google", "ollama"}, headers=H)
     r = check("ai provider create", "POST", api + "/ai/provider-configs", 201, lambda r: r.json()["has_key"] and r.json()["key_hint"] == "9999" and "api_key" not in r.json(), headers=H,
@@ -214,6 +230,7 @@ def main() -> int:
               "* health / openapi / docs / request-id · error envelope (404, 409, 422) · sites CRUD (create, get, list, patch, delete-refuse, delete-force, 404 after) ·",
               "  phase 3: connections status/tests (gsc/ga4/wordpress + 404 kind), gsc properties listing, initialize (idempotent), site brain fields + AI context ·",
               "  phase 6: content create/transition guard/brief/board/calendar/graph sync/delete · ai provider config (masked key)/task routes ·",
+              "  phase 7: drafts v1/v2, score, review, intelligence history, scoring/analytics settings, snapshot/learn/overview/insights ·",
               "  graph (summary, nodes, node, 404, neighbors, filtered neighbors, subgraph, 422, search, path, orphans, unknown site) ·",
               "  memory (get, put, context, learned pattern) · AI orchestrator (routes, providers, text run, JSON run + learn, 422) · jobs (enqueue, poll, list, 422, 404) · legacy mount.",
               "* All checks ran over real HTTP against uvicorn (not TestClient). Read-only on the real site; writes only on the temporary site."]

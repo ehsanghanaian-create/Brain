@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { PRIORITY_FA, STATUS_COLOR, STATUS_FA, STATUS_ORDER, faNum } from '../constants';
 import { ContentEditor } from './content-editor';
+import { AnalyticsPanel } from './analytics-panel';
 
 export function ContentBrainPage({ sites, initialSiteId }: { sites: Site[]; initialSiteId: string }) {
   const [siteId, setSiteId] = useState(initialSiteId);
@@ -59,7 +60,7 @@ export function ContentBrainPage({ sites, initialSiteId }: { sites: Site[]; init
         <KpiCard label='منتشرشده' value={board?.counts.by_status.published ?? null} hint='انتشار خودکار غیرفعال است' />
       </div>
       <Tabs defaultValue='board'>
-        <TabsList><TabsTrigger value='board'>کانبان</TabsTrigger><TabsTrigger value='list'>فهرست</TabsTrigger></TabsList>
+        <TabsList><TabsTrigger value='board'>کانبان</TabsTrigger><TabsTrigger value='list'>فهرست</TabsTrigger><TabsTrigger value='analytics'>تحلیل و یادگیری</TabsTrigger></TabsList>
         <TabsContent value='board'>
           <p className='text-muted-foreground mb-2 text-xs'>کارت‌ها را بین ستون‌ها بکشید (فقط یک مرحله جلو یا عقب؛ «بریف آماده» بریف می‌خواهد و «منتشرشده» URL). تأیید همیشه با شماست.</p>
           <div className='grid gap-2 overflow-x-auto md:grid-cols-3 xl:grid-cols-6'>
@@ -79,6 +80,7 @@ export function ContentBrainPage({ sites, initialSiteId }: { sites: Site[]; init
                         {it.priority && <Badge variant={it.priority === 'high' ? 'default' : 'outline'} className='text-[10px]'>{PRIORITY_FA[it.priority]}</Badge>}
                         {it.publish_date && <span className='text-muted-foreground' dir='ltr'>{it.publish_date}</span>}
                         {it.has_brief && <span title='بریف دارد'>📄</span>}
+                        {it.latest_score != null && <span className='rounded px-1 text-[10px] text-white' style={{ background: it.latest_score >= 80 ? '#16a34a' : it.latest_score >= 60 ? '#f59e0b' : '#dc2626' }} title={`امتیاز کیفیت · ${it.review_status === 'ready' ? 'آماده' : it.review_status === 'changes_requested' ? 'نیاز به اصلاح' : 'بازبینی نشده'}`}>{Math.round(it.latest_score)}{it.review_status === 'ready' ? ' ✓' : ''}</span>}
                         {it.url && <span title={it.url}>🔗</span>}
                       </div>
                     </div>
@@ -112,6 +114,7 @@ export function ContentBrainPage({ sites, initialSiteId }: { sites: Site[]; init
             </Table>
           </div>
         </TabsContent>
+        <TabsContent value='analytics'><AnalyticsPanel siteId={siteId} onOpen={(cid) => setEditing(cid)} /></TabsContent>
       </Tabs>
       <ContentEditor siteId={siteId} cid={editing} onClose={() => setEditing(null)} onChanged={load} />
     </div>

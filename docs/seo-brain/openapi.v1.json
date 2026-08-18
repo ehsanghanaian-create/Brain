@@ -4642,6 +4642,699 @@
     }
    }
   },
+  "/api/v1/sites/{site_id}/content/settings/scoring": {
+   "get": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Get Scoring Settings",
+    "operationId": "get_scoring_settings_api_v1_sites__site_id__content_settings_scoring_get",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Get Scoring Settings Api V1 Sites  Site Id  Content Settings Scoring Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "put": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Put Scoring Settings",
+    "operationId": "put_scoring_settings_api_v1_sites__site_id__content_settings_scoring_put",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ScoringSettings"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Put Scoring Settings Api V1 Sites  Site Id  Content Settings Scoring Put"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sites/{site_id}/content/insights": {
+   "get": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Insights",
+    "description": "Learned content patterns (only from large samples). Accepting one writes it into Site Brain memory (human confirmation).",
+    "operationId": "insights_api_v1_sites__site_id__content_insights_get",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "status",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Status"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "additionalProperties": true
+         },
+         "title": "Response Insights Api V1 Sites  Site Id  Content Insights Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sites/{site_id}/content/insights/{iid}": {
+   "patch": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Set Insight",
+    "operationId": "set_insight_api_v1_sites__site_id__content_insights__iid__patch",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "iid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Iid"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/InsightStatus"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Set Insight Api V1 Sites  Site Id  Content Insights  Iid  Patch"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sites/{site_id}/content/analytics/overview": {
+   "get": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Analytics Overview",
+    "description": "Latest 28d GSC performance per published content (from content_metrics snapshots).",
+    "operationId": "analytics_overview_api_v1_sites__site_id__content_analytics_overview_get",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Analytics Overview Api V1 Sites  Site Id  Content Analytics Overview Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sites/{site_id}/content/analytics/snapshot": {
+   "post": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Analytics Snapshot",
+    "description": "Take today's 7d/28d snapshots for every content item with a URL (from gsc_daily, fallback gsc_query_page).",
+    "operationId": "analytics_snapshot_api_v1_sites__site_id__content_analytics_snapshot_post",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Analytics Snapshot Api V1 Sites  Site Id  Content Analytics Snapshot Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sites/{site_id}/content/analytics/learn": {
+   "post": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Analytics Learn",
+    "description": "Derive insights from snapshots â€” only when every gate passes (min impressions/clicks/age, n â‰¥ min_n). Nothing is applied automatically.",
+    "operationId": "analytics_learn_api_v1_sites__site_id__content_analytics_learn_post",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "min_n",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "integer",
+       "minimum": 2,
+       "default": 5,
+       "title": "Min N"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Analytics Learn Api V1 Sites  Site Id  Content Analytics Learn Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sites/{site_id}/content/analytics/settings": {
+   "get": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Analytics Settings",
+    "operationId": "analytics_settings_api_v1_sites__site_id__content_analytics_settings_get",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Analytics Settings Api V1 Sites  Site Id  Content Analytics Settings Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "put": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Put Analytics Settings",
+    "operationId": "put_analytics_settings_api_v1_sites__site_id__content_analytics_settings_put",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Put Analytics Settings Api V1 Sites  Site Id  Content Analytics Settings Put"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sites/{site_id}/content/{cid}/metrics": {
+   "get": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Content Metrics Ep",
+    "operationId": "content_metrics_ep_api_v1_sites__site_id__content__cid__metrics_get",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "cid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Cid"
+      }
+     },
+     {
+      "name": "window",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "default": "28d",
+       "title": "Window"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "additionalProperties": true
+         },
+         "title": "Response Content Metrics Ep Api V1 Sites  Site Id  Content  Cid  Metrics Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
   "/api/v1/sites/{site_id}/content/{cid}": {
    "get": {
     "tags": [
@@ -5148,6 +5841,475 @@
           "additionalProperties": true
          },
          "title": "Response Events Api V1 Sites  Site Id  Content  Cid  Events Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sites/{site_id}/content/{cid}/drafts": {
+   "get": {
+    "tags": [
+     "content"
+    ],
+    "summary": "List Drafts",
+    "operationId": "list_drafts_api_v1_sites__site_id__content__cid__drafts_get",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "cid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Cid"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "type": "object",
+          "additionalProperties": true
+         },
+         "title": "Response List Drafts Api V1 Sites  Site Id  Content  Cid  Drafts Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   },
+   "post": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Create Draft",
+    "description": "Every modification creates a new version (previous content, change summary, author/source, AI provenance kept).",
+    "operationId": "create_draft_api_v1_sites__site_id__content__cid__drafts_post",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "cid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Cid"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DraftCreate"
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Create Draft Api V1 Sites  Site Id  Content  Cid  Drafts Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sites/{site_id}/content/{cid}/drafts/{did}": {
+   "get": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Get Draft",
+    "operationId": "get_draft_api_v1_sites__site_id__content__cid__drafts__did__get",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "cid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Cid"
+      }
+     },
+     {
+      "name": "did",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Did"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Get Draft Api V1 Sites  Site Id  Content  Cid  Drafts  Did  Get"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sites/{site_id}/content/{cid}/score": {
+   "post": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Score Content",
+    "operationId": "score_content_api_v1_sites__site_id__content__cid__score_post",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "cid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Cid"
+      }
+     },
+     {
+      "name": "draft_id",
+      "in": "query",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Draft Id"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Score Content Api V1 Sites  Site Id  Content  Cid  Score Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sites/{site_id}/content/{cid}/review": {
+   "post": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Review Content",
+    "description": "Rules review (+ advisory AI when a real provider is routed). Sets draft.review_status ready|changes_requested.",
+    "operationId": "review_content_api_v1_sites__site_id__content__cid__review_post",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "cid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Cid"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "anyOf": [
+         {
+          "$ref": "#/components/schemas/ReviewRequest"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "title": "Body"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Review Content Api V1 Sites  Site Id  Content  Cid  Review Post"
+        }
+       }
+      }
+     },
+     "422": {
+      "description": "Validation Error",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/api/v1/sites/{site_id}/content/{cid}/intelligence": {
+   "get": {
+    "tags": [
+     "content"
+    ],
+    "summary": "Intelligence History",
+    "operationId": "intelligence_history_api_v1_sites__site_id__content__cid__intelligence_get",
+    "parameters": [
+     {
+      "name": "site_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "title": "Site Id"
+      }
+     },
+     {
+      "name": "cid",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "integer",
+       "title": "Cid"
+      }
+     },
+     {
+      "name": "x-api-token",
+      "in": "header",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Api-Token"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Successful Response",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": true,
+         "title": "Response Intelligence History Api V1 Sites  Site Id  Content  Cid  Intelligence Get"
         }
        }
       }
@@ -5677,6 +6839,91 @@
     "type": "object",
     "title": "ContentUpdate"
    },
+   "DraftCreate": {
+    "properties": {
+     "body": {
+      "type": "string",
+      "minLength": 1,
+      "title": "Body"
+     },
+     "format": {
+      "type": "string",
+      "enum": [
+       "markdown",
+       "html",
+       "text"
+      ],
+      "title": "Format",
+      "default": "markdown"
+     },
+     "title": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Title"
+     },
+     "meta_description": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Meta Description"
+     },
+     "source": {
+      "type": "string",
+      "title": "Source",
+      "default": "user"
+     },
+     "author": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Author"
+     },
+     "change_summary": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Change Summary"
+     },
+     "provenance": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Provenance"
+     }
+    },
+    "type": "object",
+    "required": [
+     "body"
+    ],
+    "title": "DraftCreate"
+   },
    "HTTPValidationError": {
     "properties": {
      "detail": {
@@ -5689,6 +6936,24 @@
     },
     "type": "object",
     "title": "HTTPValidationError"
+   },
+   "InsightStatus": {
+    "properties": {
+     "status": {
+      "type": "string",
+      "enum": [
+       "new",
+       "accepted",
+       "dismissed"
+      ],
+      "title": "Status"
+     }
+    },
+    "type": "object",
+    "required": [
+     "status"
+    ],
+    "title": "InsightStatus"
    },
    "JobEnqueue": {
     "properties": {
@@ -6253,6 +7518,28 @@
     "type": "object",
     "title": "ProviderUpdate"
    },
+   "ReviewRequest": {
+    "properties": {
+     "draft_id": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Draft Id"
+     },
+     "use_ai": {
+      "type": "boolean",
+      "title": "Use Ai",
+      "default": false
+     }
+    },
+    "type": "object",
+    "title": "ReviewRequest"
+   },
    "RouteSet": {
     "properties": {
      "provider_id": {
@@ -6307,6 +7594,80 @@
     },
     "type": "object",
     "title": "RouteSet"
+   },
+   "ScoringSettings": {
+    "properties": {
+     "weights": {
+      "anyOf": [
+       {
+        "additionalProperties": {
+         "type": "number"
+        },
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Weights"
+     },
+     "thresholds": {
+      "anyOf": [
+       {
+        "additionalProperties": {
+         "type": "number"
+        },
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Thresholds"
+     },
+     "min_words": {
+      "anyOf": [
+       {
+        "additionalProperties": {
+         "type": "integer"
+        },
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Min Words"
+     },
+     "min_internal_links": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Min Internal Links"
+     },
+     "review_gate": {
+      "anyOf": [
+       {
+        "type": "string",
+        "enum": [
+         "strict",
+         "advisory"
+        ]
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Review Gate"
+     }
+    },
+    "type": "object",
+    "title": "ScoringSettings"
    },
    "SiteCreate": {
     "properties": {

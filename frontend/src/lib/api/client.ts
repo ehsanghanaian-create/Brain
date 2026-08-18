@@ -122,6 +122,7 @@ export type ContentItem = {
   cluster_id: string | null; intent: string | null; status: ContentStatus; status_fa: string; priority: string | null; publish_date: string | null; publish_time: string | null;
   ai_provider: string | null; ai_model: string | null; url: string | null; wp_post_id: number | null; brief_id: number | null; metadata: Record<string, unknown>;
   notes: string | null; created_at: string; updated_at: string; allowed_transitions: ContentStatus[]; has_brief: boolean;
+  current_draft_id?: number | null; latest_score?: number | null; review_status?: string;
 };
 export type ContentBrief = {
   id: number; content_id: number; version: number; h1: string | null; seo_title: string | null; meta_description: string | null; intent: string | null;
@@ -136,6 +137,16 @@ export type ContentMeta = { statuses: { key: ContentStatus; fa: string; next: Co
 export type ProviderKind = { kind: string; label: string; base_url: string; models: string[]; needs_key: boolean };
 export type ProviderConfig = { id: number; name: string; kind: string; kind_label: string; base_url: string | null; default_model: string | null; models: string[]; enabled: boolean; has_key: boolean; key_hint: string | null; last_test: { ok: boolean; status: string; message: string; tested_at: string; models_found?: string[] } | null; created_at: string; updated_at: string };
 export type TaskRoute = { task_kind: string; site_id: string; provider_id: number | null; model: string | null; fallback_provider_id: number | null; fallback_model: string | null; provider_name: string | null; fallback_provider_name: string | null; updated_at: string | null };
+// phase 7 — content intelligence
+export type ContentDraft = { id: number; content_id: number; version: number; title: string | null; meta_description: string | null; format: string; body?: string; body_text?: string; word_count: number; structure: { h1: string[]; h2: string[]; h3: string[]; paragraphs: string[]; links: { href: string; anchor: string }[]; images: { src: string; alt: string }[]; questions: string[]; faq: boolean; word_count: number }; source: string; author: string | null; revision_of: number | null; change_summary: string | null; provenance: Record<string, unknown>; review_status: string; created_at: string };
+export type ScoreFinding = { rule: string; dim: string; passed: boolean; weight: number; evidence: string; fix_fa: string };
+export type ContentScore = { id?: number; draft_id?: number; version?: number; total: number; dims: Record<string, number>; dims_fa: Record<string, string>; findings: ScoreFinding[]; failed: ScoreFinding[]; weights: Record<string, number>; engine_version: string; label: string; thresholds?: { ready: number; needs_work: number } };
+export type ReviewFinding = { code: string; severity: 'high' | 'medium' | 'low'; area: string; message_fa: string; evidence: string; suggestion_fa: string; auto_fixable: boolean; paragraph_index: number | null };
+export type ContentReview = { id: number; draft_id: number; version: number; review_status: string; score: ContentScore; findings: ReviewFinding[]; counts: { high: number; medium: number; low: number }; summary_fa: string; provenance: Record<string, unknown>; gate: string };
+export type ScoringSettings = { weights: Record<string, number>; thresholds: { ready: number; needs_work: number }; min_words: Record<string, number>; min_internal_links: number; review_gate: 'strict' | 'advisory' };
+export type AnalyticsSettings = { min_impressions: number; min_clicks: number; min_age_days: number; windows: string[] };
+export type ContentInsight = { id: number; category: string; feature: string; value: string; metric: string; effect: number; baseline: number | null; n: number; impressions: number; clicks: number; confidence: number | null; message_fa: string; evidence: Record<string, unknown>; status: string; memory_pattern_ref: string | null; created_at: string };
+export type AnalyticsOverview = { window: string; rows: { content_id: number; title: string; status: string; publish_date: string | null; url: string; date: string; clicks: number; impressions: number; ctr: number; position: number | null; delta: Record<string, number | null>; top_queries: { query: string; impressions: number }[] }[]; totals: { contents: number; clicks: number; impressions: number; ctr: number }; gates: AnalyticsSettings };
 export type SiteCreateBody = Schemas['SiteCreate'];
 export type SiteUpdateBody = Schemas['SiteUpdate'];
 export type MemoryUpdateBody = Schemas['MemoryUpdate'];
@@ -213,6 +224,23 @@ export const endpoints = {
   deleteContent: (id: string, cid: number) => api<{ deleted: number }>(`/sites/${encodeURIComponent(id)}/content/${cid}`, { method: 'DELETE' }),
   generateBrief: (id: string, cid: number, opts: { use_ai?: boolean; mark_ready?: boolean } = {}) => api<ContentBrief>(`/sites/${encodeURIComponent(id)}/content/${cid}/brief`, { method: 'POST', json: { use_ai: !!opts.use_ai, mark_ready: opts.mark_ready ?? true } }),
   syncContentGraph: (id: string) => api<Record<string, unknown>>(`/sites/${encodeURIComponent(id)}/content/sync-graph`, { method: 'POST' }),
+  // phase 7 — content intelligence
+  contentDrafts: (id: string, cid: number) => api<ContentDraft[]>(`/sites/${encodeURIComponent(id)}/content/${cid}/drafts`),
+  contentDraft: (id: string, cid: number, did: number) => api<ContentDraft>(`/sites/${encodeURIComponent(id)}/content/${cid}/drafts/${did}`),
+  createDraft: (id: string, cid: number, body: Record<string, unknown>) => api<ContentDraft>(`/sites/${encodeURIComponent(id)}/content/${cid}/drafts`, { method: 'POST', json: body }),
+  scoreContent: (id: string, cid: number, draftId?: number) => api<ContentScore>(`/sites/${encodeURIComponent(id)}/content/${cid}/score${draftId ? `?draft_id=${draftId}` : ''}`, { method: 'POST' }),
+  reviewContent: (id: string, cid: number, opts: { draft_id?: number; use_ai?: boolean } = {}) => api<ContentReview>(`/sites/${encodeURIComponent(id)}/content/${cid}/review`, { method: 'POST', json: opts }),
+  contentIntelligence: (id: string, cid: number) => api<{ drafts: ContentDraft[]; scores: Record<string, unknown>[]; reviews: (Record<string, unknown> & { findings: ReviewFinding[]; counts: Record<string, number> })[] }>(`/sites/${encodeURIComponent(id)}/content/${cid}/intelligence`),
+  scoringSettings: (id: string) => api<ScoringSettings>(`/sites/${encodeURIComponent(id)}/content/settings/scoring`),
+  putScoringSettings: (id: string, body: Partial<ScoringSettings>) => api<ScoringSettings>(`/sites/${encodeURIComponent(id)}/content/settings/scoring`, { method: 'PUT', json: body }),
+  contentInsights: (id: string, status?: string) => api<ContentInsight[]>(`/sites/${encodeURIComponent(id)}/content/insights${status ? `?status=${status}` : ''}`),
+  setInsightStatus: (id: string, iid: number, status: string) => api<ContentInsight>(`/sites/${encodeURIComponent(id)}/content/insights/${iid}`, { method: 'PATCH', json: { status } }),
+  analyticsOverview: (id: string) => api<AnalyticsOverview>(`/sites/${encodeURIComponent(id)}/content/analytics/overview`),
+  analyticsSnapshot: (id: string) => api<Record<string, unknown>>(`/sites/${encodeURIComponent(id)}/content/analytics/snapshot`, { method: 'POST' }),
+  analyticsLearn: (id: string) => api<{ samples: number; skipped: Record<string, number>; insights: ContentInsight[]; gates: Record<string, number> }>(`/sites/${encodeURIComponent(id)}/content/analytics/learn`, { method: 'POST' }),
+  analyticsSettings: (id: string) => api<AnalyticsSettings>(`/sites/${encodeURIComponent(id)}/content/analytics/settings`),
+  putAnalyticsSettings: (id: string, body: Partial<AnalyticsSettings>) => api<AnalyticsSettings>(`/sites/${encodeURIComponent(id)}/content/analytics/settings`, { method: 'PUT', json: body }),
+  contentMetrics: (id: string, cid: number, window = '28d') => api<Record<string, unknown>[]>(`/sites/${encodeURIComponent(id)}/content/${cid}/metrics?window=${window}`),
   // phase 6 — ai providers
   providerKinds: () => api<ProviderKind[]>('/ai/provider-kinds'),
   providerConfigs: () => api<ProviderConfig[]>('/ai/provider-configs'),

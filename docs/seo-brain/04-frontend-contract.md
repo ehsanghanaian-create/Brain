@@ -138,3 +138,18 @@ Frontend: file uploads go through the proxy as `FormData` (the proxy forwards th
 | `GET /ai/task-routes` · `PUT /ai/task-routes/{task_kind}` | 8 task kinds; route = `{task_kind, site_id, provider_id, model, fallback_provider_id, fallback_model, provider_name, fallback_provider_name}` |
 
 UI rules: never render/log an API key; show `••••{key_hint}`; workflow buttons come from `allowed_transitions`; publishing is manual (URL + transition), no auto-publish anywhere.
+
+## 12. Phase 7 additions (2026-08-18, additive) — content intelligence
+
+| Endpoint | Notes |
+|---|---|
+| `GET/POST /content/{cid}/drafts` · `GET /content/{cid}/drafts/{did}` | POST always creates version N+1 (`revision_of` = previous, `change_summary` auto if omitted). List omits `body`; get includes it. Draft = `{id, content_id, version, title, meta_description, format, body, body_text, word_count, structure{h1[],h2[],h3[],headings[],paragraphs[],links[],images[],questions[],faq}, source, author, revision_of, change_summary, provenance{}, review_status, created_at}` |
+| `POST /content/{cid}/score?draft_id` | **ContentScore** `{id, draft_id, version, total, dims{7}, dims_fa, findings[{rule,dim,passed,weight,evidence,fix_fa}], failed[], weights, engine_version, label ready|needs_work|weak, thresholds}`; 404 without a draft |
+| `POST /content/{cid}/review {draft_id?, use_ai}` | **ContentReview** `{id, draft_id, version, review_status ready|changes_requested, score, findings[{code,severity,area,message_fa,evidence,suggestion_fa,auto_fixable,paragraph_index}], counts{high,medium,low}, summary_fa, provenance{engine, ai_used, note?, provider?, model?}, gate}` |
+| `GET /content/{cid}/intelligence` | `{drafts[] (no body), scores[], reviews[]}` newest first |
+| `POST /content/{cid}/transition` | additionally 409 `invalid_transition` when gate is `strict` and the latest draft is not `ready` (message says why) |
+| `GET/PUT /content/settings/scoring` | `{weights{intent,keywords,entities,headings,links,cta,completeness}, thresholds{ready,needs_work}, min_words{}, min_internal_links, review_gate strict|advisory}` (PUT = partial merge) |
+| `GET/PUT /content/analytics/settings` · `POST /content/analytics/snapshot` · `POST /content/analytics/learn?min_n` · `GET /content/analytics/overview` · `GET /content/{cid}/metrics?window` | overview = `{window, rows[{content_id,title,status,url,date,clicks,impressions,ctr,position,delta,top_queries}], totals, gates}` |
+| `GET /content/insights?status` · `PATCH /content/insights/{iid} {status}` | insight = `{id, category, feature, value, metric ctr|position, effect, baseline, n, impressions, clicks, confidence, message_fa, evidence, status, memory_pattern_ref}`; `accepted` writes a Site Brain pattern (idempotent) |
+
+UI rules: AI findings/suggestions are advisory — never auto-apply; show the gate reason on approval; scores/insights never change weights automatically.

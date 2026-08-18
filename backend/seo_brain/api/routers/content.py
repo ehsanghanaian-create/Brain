@@ -10,6 +10,7 @@ from sqlalchemy import Engine
 
 from ...brain.content import ContentService, WorkflowError
 from ...brain.content.intelligence import ContentIntelligenceService
+from ...brain.content.analytics import ContentAnalytics
 from ...brain.content.repository import PRIORITIES, STATUSES, STATUS_FA, TRANSITIONS
 from ..deps import engine, orchestrator, require_site
 from ..errors import ApiError
@@ -175,6 +176,41 @@ def set_insight(site_id: str, iid: int, body: InsightStatus, i: ContentIntellige
         raise HTTPException(404, "insight not found")
     return r
 
+
+
+@router.get("/analytics/overview")
+def analytics_overview(site_id: str, eng: Engine = Depends(engine)) -> dict:
+    """Latest 28d GSC performance per published content (from content_metrics snapshots)."""
+    return ContentAnalytics(eng).overview(site_id)
+
+
+@router.post("/analytics/snapshot")
+def analytics_snapshot(site_id: str, eng: Engine = Depends(engine)) -> dict:
+    """Take today's 7d/28d snapshots for every content item with a URL (from gsc_daily, fallback gsc_query_page)."""
+    return ContentAnalytics(eng).snapshot(site_id)
+
+
+@router.post("/analytics/learn")
+def analytics_learn(site_id: str, min_n: int = Query(5, ge=2), eng: Engine = Depends(engine)) -> dict:
+    """Derive insights from snapshots — only when every gate passes (min impressions/clicks/age, n ≥ min_n). Nothing is applied automatically."""
+    return ContentAnalytics(eng).learn(site_id, min_n=min_n)
+
+
+@router.get("/analytics/settings")
+def analytics_settings(site_id: str, i: ContentIntelligenceService = Depends(intel)) -> dict:
+    return i.drafts.settings(site_id, "analytics")
+
+
+@router.put("/analytics/settings")
+def put_analytics_settings(site_id: str, body: dict, i: ContentIntelligenceService = Depends(intel)) -> dict:
+    cur = i.drafts.settings(site_id, "analytics")
+    allowed = {k: v for k, v in body.items() if k in ("min_impressions", "min_clicks", "min_age_days", "windows")}
+    return i.drafts.put_settings(site_id, "analytics", {**cur, **allowed})
+
+
+@router.get("/{cid}/metrics")
+def content_metrics_ep(site_id: str, cid: int, window: str = "28d", eng: Engine = Depends(engine)) -> list[dict]:
+    return ContentAnalytics(eng).metrics(site_id, cid, window)
 
 
 @router.get("/{cid}")

@@ -59,6 +59,8 @@ def _seed(c):
 
 def test_workflow_transitions_enforced(c):
     _seed(c)
+    # phase 7 strict review gate would block review→approved without a reviewed draft; this test covers the workflow mechanics only
+    assert c.put(f"/api/v1/sites/{SID}/content/settings/scoring", json={"review_gate": "advisory"}).json()["review_gate"] == "advisory"
     r = c.post(f"/api/v1/sites/{SID}/content", json={"title": "امداد خودرو MVM در تهران", "target_keyword": "امداد خودرو mvm تهران", "priority": "high", "publish_date": "2026-09-01"})
     assert r.status_code == 201, r.text
     d = r.json(); cid = d["id"]

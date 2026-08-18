@@ -183,6 +183,10 @@ content_items = Table(
     Column("notes", Text),
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
+    # phase 7 (migration 0006)
+    Column("current_draft_id", Integer),
+    Column("latest_score", Float),
+    Column("review_status", String, nullable=False, server_default="none"),
 )
 
 content_events = Table(
@@ -241,5 +245,104 @@ ai_routes = Table(
     Column("model", String),
     Column("fallback_provider_id", Integer),
     Column("fallback_model", String),
+    Column("updated_at", String, nullable=False),
+)
+
+
+# ----------------------------------------------------------------------------- phase 7: content intelligence
+content_drafts = Table(
+    "content_drafts", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("content_id", Integer, nullable=False),
+    Column("version", Integer, nullable=False, server_default="1"),
+    Column("title", String),
+    Column("meta_description", Text),
+    Column("format", String, nullable=False, server_default="markdown"),
+    Column("body", Text, nullable=False),
+    Column("body_text", Text),
+    Column("word_count", Integer, nullable=False, server_default="0"),
+    Column("structure", Text, nullable=False, server_default="{}"),
+    Column("source", String, nullable=False, server_default="user"),
+    Column("author", String),
+    Column("revision_of", Integer),
+    Column("change_summary", Text),
+    Column("provenance", Text, nullable=False, server_default="{}"),
+    Column("review_status", String, nullable=False, server_default="none"),
+    Column("created_at", String, nullable=False),
+)
+
+content_scores = Table(
+    "content_scores", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("content_id", Integer, nullable=False),
+    Column("draft_id", Integer, nullable=False),
+    Column("total", Float, nullable=False),
+    Column("dims", Text, nullable=False, server_default="{}"),
+    Column("findings", Text, nullable=False, server_default="[]"),
+    Column("weights", Text, nullable=False, server_default="{}"),
+    Column("engine_version", String, nullable=False, server_default="score-v1"),
+    Column("created_at", String, nullable=False),
+)
+
+content_reviews = Table(
+    "content_reviews", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("content_id", Integer, nullable=False),
+    Column("draft_id", Integer, nullable=False),
+    Column("kind", String, nullable=False),
+    Column("findings", Text, nullable=False, server_default="[]"),
+    Column("summary_fa", Text),
+    Column("counts", Text, nullable=False, server_default="{}"),
+    Column("provenance", Text, nullable=False, server_default="{}"),
+    Column("created_at", String, nullable=False),
+)
+
+content_metrics = Table(
+    "content_metrics", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("content_id", Integer, nullable=False),
+    Column("url", String, nullable=False),
+    Column("window", String, nullable=False),
+    Column("date", String, nullable=False),
+    Column("clicks", Integer, nullable=False, server_default="0"),
+    Column("impressions", Integer, nullable=False, server_default="0"),
+    Column("ctr", Float, nullable=False, server_default="0"),
+    Column("position", Float),
+    Column("top_queries", Text, nullable=False, server_default="[]"),
+    Column("delta", Text, nullable=False, server_default="{}"),
+    Column("created_at", String, nullable=False),
+)
+
+content_insights = Table(
+    "content_insights", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("category", String, nullable=False),
+    Column("feature", String, nullable=False),
+    Column("value", String, nullable=False),
+    Column("metric", String, nullable=False),
+    Column("effect", Float, nullable=False),
+    Column("baseline", Float),
+    Column("n", Integer, nullable=False),
+    Column("impressions", Integer, nullable=False, server_default="0"),
+    Column("clicks", Integer, nullable=False, server_default="0"),
+    Column("confidence", Float),
+    Column("message_fa", Text, nullable=False),
+    Column("evidence", Text, nullable=False, server_default="{}"),
+    Column("status", String, nullable=False, server_default="new"),
+    Column("memory_pattern_ref", String),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+
+site_settings = Table(
+    "site_settings", metadata,
+    Column("site_id", String, primary_key=True),
+    Column("key", String, primary_key=True),
+    Column("value", Text, nullable=False, server_default="{}"),
     Column("updated_at", String, nullable=False),
 )

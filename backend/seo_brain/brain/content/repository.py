@@ -57,6 +57,9 @@ class ContentItem:
     notes: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    current_draft_id: int | None = None
+    latest_score: float | None = None
+    review_status: str = "none"
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self); d["status_fa"] = STATUS_FA.get(self.status, self.status); return d
@@ -178,7 +181,10 @@ class ContentRepository(Repository):
             return [dict(r._mapping) for r in cx.execute(select(content_events).where(and_(content_events.c.site_id == site_id, content_events.c.content_id == cid)).order_by(content_events.c.id.desc()))]
 
     def delete(self, site_id: str, cid: int) -> bool:
+        from ...db.tables import content_drafts, content_reviews, content_scores  # phase 7 tables
         with self.engine.begin() as cx:
+            for t in (content_scores, content_reviews, content_drafts):
+                cx.execute(delete(t).where(and_(t.c.site_id == site_id, t.c.content_id == cid)))
             cx.execute(delete(content_briefs).where(and_(content_briefs.c.site_id == site_id, content_briefs.c.content_id == cid)))
             cx.execute(delete(content_events).where(and_(content_events.c.site_id == site_id, content_events.c.content_id == cid)))
             n = cx.execute(delete(content_items).where(and_(content_items.c.site_id == site_id, content_items.c.id == cid))).rowcount

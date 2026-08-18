@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Engine
 
 from ...brain.content import ContentService, WorkflowError
+from ...brain.content.intelligence import ContentIntelligenceService
 from ...brain.content.repository import PRIORITIES, STATUSES, STATUS_FA, TRANSITIONS
 from ..deps import engine, orchestrator, require_site
 from ..errors import ApiError
@@ -68,6 +69,38 @@ def svc(eng: Engine = Depends(engine), orch=Depends(orchestrator)) -> ContentSer
     return ContentService(eng, orch)
 
 
+def intel(eng: Engine = Depends(engine), orch=Depends(orchestrator)) -> ContentIntelligenceService:
+    return ContentIntelligenceService(eng, orch)
+
+
+class DraftCreate(BaseModel):
+    body: str = Field(min_length=1)
+    format: Literal["markdown", "html", "text"] = "markdown"
+    title: str | None = None
+    meta_description: str | None = None
+    source: str = "user"
+    author: str | None = None
+    change_summary: str | None = None
+    provenance: dict[str, Any] | None = None
+
+
+class ReviewRequest(BaseModel):
+    draft_id: int | None = None
+    use_ai: bool = False
+
+
+class InsightStatus(BaseModel):
+    status: Literal["new", "accepted", "dismissed"]
+
+
+class ScoringSettings(BaseModel):
+    weights: dict[str, float] | None = None
+    thresholds: dict[str, float] | None = None
+    min_words: dict[str, int] | None = None
+    min_internal_links: int | None = None
+    review_gate: Literal["strict", "advisory"] | None = None
+
+
 @router.get("/meta")
 def meta() -> dict:
     return {"statuses": [{"key": s, "fa": STATUS_FA[s], "next": list(TRANSITIONS[s])} for s in STATUSES], "priorities": list(PRIORITIES)}
@@ -113,6 +146,37 @@ def sync_graph(site_id: str, s: ContentService = Depends(svc)) -> dict:
     return s.sync_graph(site_id)
 
 
+# ----------------------------------------------------------------------------- phase 7: drafts / score / review / settings / insights
+@router.get("/settings/scoring")
+def get_scoring_settings(site_id: str, i: ContentIntelligenceService = Depends(intel)) -> dict:
+    return i.drafts.settings(site_id, "scoring")
+
+
+@router.put("/settings/scoring")
+def put_scoring_settings(site_id: str, body: ScoringSettings, i: ContentIntelligenceService = Depends(intel)) -> dict:
+    cur = i.drafts.settings(site_id, "scoring")
+    patch = body.model_dump(exclude_none=True)
+    for k in ("weights", "thresholds", "min_words"):
+        if k in patch:
+            patch[k] = {**cur.get(k, {}), **patch[k]}
+    return i.drafts.put_settings(site_id, "scoring", {**cur, **patch})
+
+
+@router.get("/insights")
+def insights(site_id: str, status: str | None = None, i: ContentIntelligenceService = Depends(intel)) -> list[dict]:
+    """Learned content patterns (only from large samples). Accepting one writes it into Site Brain memory (human confirmation)."""
+    return i.list_insights(site_id, status)
+
+
+@router.patch("/insights/{iid}")
+def set_insight(site_id: str, iid: int, body: InsightStatus, i: ContentIntelligenceService = Depends(intel)) -> dict:
+    r = i.set_insight_status(site_id, iid, body.status)
+    if not r:
+        raise HTTPException(404, "insight not found")
+    return r
+
+
+
 @router.get("/{cid}")
 def get_content(site_id: str, cid: int, s: ContentService = Depends(svc)) -> dict:
     d = s.detail(site_id, cid)
@@ -139,6 +203,7 @@ def update_content(site_id: str, cid: int, body: ContentUpdate, s: ContentServic
 def transition(site_id: str, cid: int, body: Transition, s: ContentService = Depends(svc)) -> dict:
     """Human approval workflow. Forward one step or back; 'published' requires a URL. Never publishes anywhere."""
     try:
+        ContentIntelligenceService(s.engine, None).check_gate(site_id, cid, body.status)
         it = s.repo.transition(site_id, cid, body.status, actor="user", note=body.note)
     except KeyError:
         raise HTTPException(404, "content not found")
@@ -172,3 +237,49 @@ def list_briefs(site_id: str, cid: int, s: ContentService = Depends(svc)) -> lis
 @router.get("/{cid}/events")
 def events(site_id: str, cid: int, s: ContentService = Depends(svc)) -> list[dict]:
     return s.repo.events(site_id, cid)
+
+
+@router.get("/{cid}/drafts")
+def list_drafts(site_id: str, cid: int, i: ContentIntelligenceService = Depends(intel)) -> list[dict]:
+    return [d.to_dict(with_body=False) for d in i.drafts.list(site_id, cid)]
+
+
+@router.post("/{cid}/drafts", status_code=201)
+def create_draft(site_id: str, cid: int, body: DraftCreate, i: ContentIntelligenceService = Depends(intel)) -> dict:
+    """Every modification creates a new version (previous content, change summary, author/source, AI provenance kept)."""
+    try:
+        d = i.create_draft(site_id, cid, body.body, body.format, body.title, body.meta_description, body.source, body.author, body.change_summary, body.provenance)
+    except KeyError:
+        raise HTTPException(404, "content not found")
+    return d.to_dict()
+
+
+@router.get("/{cid}/drafts/{did}")
+def get_draft(site_id: str, cid: int, did: int, i: ContentIntelligenceService = Depends(intel)) -> dict:
+    d = i.drafts.get(site_id, did)
+    if not d or d.content_id != cid:
+        raise HTTPException(404, "draft not found")
+    return d.to_dict()
+
+
+@router.post("/{cid}/score")
+def score_content(site_id: str, cid: int, draft_id: int | None = None, i: ContentIntelligenceService = Depends(intel)) -> dict:
+    try:
+        return i.score(site_id, cid, draft_id)
+    except KeyError:
+        raise ApiError(404, "no draft to score — create a draft first", code="not_found")
+
+
+@router.post("/{cid}/review")
+def review_content(site_id: str, cid: int, body: ReviewRequest | None = None, i: ContentIntelligenceService = Depends(intel)) -> dict:
+    """Rules review (+ advisory AI when a real provider is routed). Sets draft.review_status ready|changes_requested."""
+    body = body or ReviewRequest()
+    try:
+        return i.review(site_id, cid, body.draft_id, body.use_ai)
+    except KeyError:
+        raise ApiError(404, "no draft to review — create a draft first", code="not_found")
+
+
+@router.get("/{cid}/intelligence")
+def intelligence_history(site_id: str, cid: int, i: ContentIntelligenceService = Depends(intel)) -> dict:
+    return i.history(site_id, cid)

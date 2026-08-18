@@ -27,7 +27,16 @@ export const TASK_FA: Record<string, string> = {
   keyword_analysis: 'تحلیل کلمات کلیدی',
   internal_linking: 'لینک‌سازی داخلی',
   schema: 'اسکیما',
-  generic: 'عمومی'
+  generic: 'عمومی',
+  outline: 'ساختار مقاله',
+  article_section: 'نگارش بخش مقاله',
+  article_long: 'مقاله بلند',
+  rewrite: 'بازنویسی',
+  seo_review: 'بازبینی سئو',
+  fact_check: 'راستی‌آزمایی',
+  title_meta: 'عنوان و متا',
+  faq: 'پرسش‌های متداول',
+  translation: 'ترجمه'
 };
 
 /** Jalali helpers via ICU (no library): parts for a Gregorian date. */

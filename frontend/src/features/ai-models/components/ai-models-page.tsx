@@ -8,12 +8,14 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ApiError, endpoints, type ProviderConfig, type ProviderKind, type TaskRoute } from '@/lib/api/client';
+import { ApiError, endpoints, type ProviderConfig, type ProviderKind, type Site, type TaskRoute } from '@/lib/api/client';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { InsightsPanel, ModelCatalog, POLICY_FA, PromptLibrary, UsagePanel } from './ai-ops-panels';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { TASK_FA } from '@/features/content/constants';
 
-export function AiModelsPage() {
+export function AiModelsPage({ sites = [] }: { sites?: Site[] }) {
   const [kinds, setKinds] = useState<ProviderKind[]>([]);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [routes, setRoutes] = useState<TaskRoute[]>([]);
@@ -52,13 +54,16 @@ export function AiModelsPage() {
   }
   async function setRoute(kindKey: string, patch: Partial<TaskRoute>) {
     const cur = routes.find((r) => r.task_kind === kindKey)!;
-    const body = { provider_id: cur.provider_id, model: cur.model, fallback_provider_id: cur.fallback_provider_id, fallback_model: cur.fallback_model, ...patch };
+    const body = { provider_id: cur.provider_id, model: cur.model, fallback_provider_id: cur.fallback_provider_id, fallback_model: cur.fallback_model, policy: cur.policy, fallbacks: cur.fallbacks?.map((f) => ({ provider_id: f.provider_id, model: f.model })), ...patch };
     try { await endpoints.setTaskRoute(kindKey, body); load(); } catch (e) { toast.error(String(e)); }
   }
   const modelsOf = (pid: number | null) => providers.find((p) => p.id === pid)?.models ?? [];
 
   return (
     <div className='flex flex-col gap-4'>
+     <Tabs defaultValue='providers'>
+      <TabsList className='flex-wrap'><TabsTrigger value='providers'>ارائه‌دهنده‌ها و مسیردهی</TabsTrigger><TabsTrigger value='catalog'>کاتالوگ مدل‌ها</TabsTrigger><TabsTrigger value='usage'>مصرف و بودجه</TabsTrigger><TabsTrigger value='prompts'>پرامپت‌ها</TabsTrigger><TabsTrigger value='insights'>یادگیری AI</TabsTrigger></TabsList>
+      <TabsContent value='providers' className='flex flex-col gap-4'>
       <Card>
         <CardHeader>
           <CardTitle className='flex items-center justify-between'>ارائه‌دهنده‌ها <Button size='sm' onClick={openNew}>افزودن ارائه‌دهنده</Button></CardTitle>
@@ -90,19 +95,26 @@ export function AiModelsPage() {
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>مسیردهی وظایف</CardTitle><CardDescription>برای هر نوع وظیفه، مدل اصلی و مدل جایگزین را انتخاب کنید (مثلاً نگارش محتوا → Claude، تحلیل سئو → GPT، تحقیق → Gemini). اجرای واقعی مدل‌ها در فاز ۹ متصل می‌شود.</CardDescription></CardHeader>
+        <CardHeader><CardTitle>مسیردهی وظایف</CardTitle><CardDescription>برای هر نوع وظیفه، مدل اصلی و مدل جایگزین را انتخاب کنید (مثلاً نگارش محتوا → Claude، تحلیل سئو → GPT، تحقیق → Gemini). سیاست «خودکار» یعنی مسیریاب بر اساس سطح/برچسب مدل انتخاب می‌کند؛ «صریح» مدل شما را اجباری می‌کند؛ زنجیره جایگزین‌ها به ترتیب امتحان می‌شود. پیشنهادهای AI برای مسیر فقط پیشنهادند و اینجا با دست اعمال می‌شوند.</CardDescription></CardHeader>
         <CardContent>
           <div className='overflow-x-auto rounded-md border'>
             <Table>
-              <TableHeader><TableRow><TableHead>وظیفه</TableHead><TableHead>ارائه‌دهنده</TableHead><TableHead>مدل</TableHead><TableHead>جایگزین</TableHead><TableHead>مدل جایگزین</TableHead></TableRow></TableHeader>
+              <TableHeader><TableRow><TableHead>وظیفه</TableHead><TableHead>سیاست</TableHead><TableHead>ارائه‌دهنده</TableHead><TableHead>مدل</TableHead><TableHead>جایگزین</TableHead><TableHead>مدل جایگزین</TableHead><TableHead>زنجیره جایگزین‌ها</TableHead></TableRow></TableHeader>
               <TableBody>
                 {routes.map((r) => (
                   <TableRow key={r.task_kind}>
                     <TableCell className='font-medium'>{TASK_FA[r.task_kind] ?? r.task_kind}</TableCell>
+                    <TableCell><NativeSelect value={r.policy ?? 'auto'} onChange={(e) => setRoute(r.task_kind, { policy: e.target.value as TaskRoute['policy'] })} className='h-8 w-36 text-xs'>{Object.entries(POLICY_FA).map(([k, v]) => <NativeSelectOption key={k} value={k}>{v}</NativeSelectOption>)}</NativeSelect></TableCell>
                     <TableCell><NativeSelect value={r.provider_id ?? ''} onChange={(e) => setRoute(r.task_kind, { provider_id: e.target.value ? Number(e.target.value) : null, model: null })} className='h-8 w-40 text-xs'><NativeSelectOption value=''>—</NativeSelectOption>{providers.map((p) => <NativeSelectOption key={p.id} value={p.id}>{p.name}</NativeSelectOption>)}</NativeSelect></TableCell>
                     <TableCell><Input value={r.model ?? ''} onChange={(e) => setRoute(r.task_kind, { model: e.target.value || null })} list={`m-${r.task_kind}`} placeholder={providers.find((p) => p.id === r.provider_id)?.default_model ?? ''} dir='ltr' className='h-8 w-44 text-xs' /><datalist id={`m-${r.task_kind}`}>{modelsOf(r.provider_id).map((m) => <option key={m} value={m} />)}</datalist></TableCell>
                     <TableCell><NativeSelect value={r.fallback_provider_id ?? ''} onChange={(e) => setRoute(r.task_kind, { fallback_provider_id: e.target.value ? Number(e.target.value) : null, fallback_model: null })} className='h-8 w-40 text-xs'><NativeSelectOption value=''>—</NativeSelectOption>{providers.map((p) => <NativeSelectOption key={p.id} value={p.id}>{p.name}</NativeSelectOption>)}</NativeSelect></TableCell>
                     <TableCell><Input value={r.fallback_model ?? ''} onChange={(e) => setRoute(r.task_kind, { fallback_model: e.target.value || null })} dir='ltr' className='h-8 w-44 text-xs' /></TableCell>
+                    <TableCell className='text-xs'>
+                      <div className='flex flex-wrap items-center gap-1'>
+                        {(r.fallbacks ?? []).map((f, i) => <Badge key={i} variant='outline' dir='ltr'>{f.provider_name ?? f.provider_id}/{f.model} <button className='ms-1' onClick={() => setRoute(r.task_kind, { fallbacks: (r.fallbacks ?? []).filter((_, j) => j !== i) })}>×</button></Badge>)}
+                        <NativeSelect value='' onChange={(e) => { const [pid, model] = e.target.value.split('|'); if (pid) setRoute(r.task_kind, { fallbacks: [...(r.fallbacks ?? []), { provider_id: Number(pid), model }] }); }} className='h-7 w-32 text-xs'><NativeSelectOption value=''>+ افزودن</NativeSelectOption>{providers.flatMap((p) => (p.models.length ? p.models : [p.default_model ?? '']).filter(Boolean).map((m) => <NativeSelectOption key={`${p.id}|${m}`} value={`${p.id}|${m}`}>{p.name}/{m}</NativeSelectOption>))}</NativeSelect>
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -110,6 +122,12 @@ export function AiModelsPage() {
           </div>
         </CardContent>
       </Card>
+      </TabsContent>
+      <TabsContent value='catalog'><ModelCatalog /></TabsContent>
+      <TabsContent value='usage'><UsagePanel sites={sites} /></TabsContent>
+      <TabsContent value='prompts'><PromptLibrary sites={sites} /></TabsContent>
+      <TabsContent value='insights'><InsightsPanel sites={sites} /></TabsContent>
+     </Tabs>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>

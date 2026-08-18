@@ -43,6 +43,39 @@ def job_queue() -> JobQueue:
     return get_job_queue()
 
 
+_gateway = None
+
+
+def gateway():
+    """Phase 9 gateway (real providers from ai_providers + SecretStore; Echo when nothing is configured). One per process."""
+    global _gateway
+    from ..ai.gateway import Gateway
+    if _gateway is None or _gateway.engine is not engine():
+        _gateway = Gateway(engine())
+    return _gateway
+
+
+class GatewayOrchestrator:
+    """Drop-in for AIOrchestrator.run(task): routes through TaskRouter + Gateway, prepends site memory context."""
+
+    def __init__(self, gw, memory):
+        self.gw, self.memory = gw, memory
+        from ..ai.gateway import TaskRouter
+        self.router = TaskRouter(gw.engine, gw)
+
+    def run(self, task, learn=None):
+        from ..ai.gateway import CallMeta
+        from ..ai.types import AITask
+        msgs = list(self.memory.context_messages(task.site_id)) if self.memory else []
+        t = AITask(**{**task.__dict__, "messages": msgs + list(task.messages)})
+        d = self.router.resolve(task.kind.value if hasattr(task.kind, "value") else str(task.kind), task.site_id)
+        res = self.gw.run(t, d.chain, CallMeta(site_id=task.site_id, run_id=task.run_id, route_reason=d.reason, prompt_refs={"agent": task.prompt_id or ""}))
+        res.memory_used = bool(msgs)
+        if res.ok and learn and self.memory is not None:
+            self.memory.record_success(task.site_id, learn.get("pattern", ""), learn.get("evidence", ""), source=f"{task.kind.value}:{res.response.provider}/{res.response.model}", run_id=task.run_id)
+        return res
+
+
 @lru_cache(maxsize=1)
 def _router() -> AIRouter:
     # Phase 1: only the offline EchoProvider is registered. Phase 9/10 load providers + routes from the DB.
@@ -54,8 +87,9 @@ def _router() -> AIRouter:
     return r
 
 
-def orchestrator(mem: SiteMemoryRepository = Depends(memory_repo)) -> AIOrchestrator:
-    return AIOrchestrator(_router(), MemoryService(mem))
+def orchestrator(mem: SiteMemoryRepository = Depends(memory_repo)):
+    """Phase 9: gateway-backed orchestrator (same .run(task) contract as AIOrchestrator)."""
+    return GatewayOrchestrator(gateway(), MemoryService(mem))
 
 
 def require_site(site_id: str = Path(...), repo: SitesRepository = Depends(sites_repo)):

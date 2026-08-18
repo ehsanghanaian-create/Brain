@@ -39,6 +39,8 @@ class RouteSet(BaseModel):
     fallback_provider_id: int | None = None
     fallback_model: str | None = None
     site_id: str = "*"
+    policy: str | None = None                      # phase 9: explicit | auto | echo (None keeps current)
+    fallbacks: list[dict] | None = None            # phase 9: [{provider_id, model}, ...] ordered fallback chain
 
 
 def cfg_repo(eng: Engine = Depends(engine)) -> ProviderConfigRepository:
@@ -60,6 +62,11 @@ def list_provider_configs(repo: ProviderConfigRepository = Depends(cfg_repo)) ->
 def create_provider_config(body: ProviderCreate, repo: ProviderConfigRepository = Depends(cfg_repo)) -> dict:
     try:
         p = repo.create(body.name, body.kind, body.api_key, body.base_url, body.default_model, body.models, body.enabled)
+        try:
+            from ..deps import gateway as _gw
+            _gw().seed_catalog(p.id, p.kind); _gw().invalidate()
+        except Exception:  # noqa: BLE001
+            pass
     except ValueError as e:
         exists = "exists" in str(e)
         raise ApiError(409 if exists else 422, str(e), code="conflict" if exists else "validation_error")
@@ -73,6 +80,11 @@ def update_provider_config(pid: int, body: ProviderUpdate, repo: ProviderConfigR
     if body.clear_key:
         repo.clear_key(pid)
     p = repo.update(pid, **body.model_dump(exclude_none=True, exclude={"clear_key"}))
+    try:
+        from ..deps import gateway as _gw
+        _gw().invalidate()
+    except Exception:  # noqa: BLE001
+        pass
     return p.to_dict()  # type: ignore[union-attr]
 
 
@@ -101,6 +113,6 @@ def task_routes(site_id: str | None = None, repo: ProviderConfigRepository = Dep
 @router.put("/task-routes/{task_kind}")
 def set_task_route(task_kind: str, body: RouteSet, repo: ProviderConfigRepository = Depends(cfg_repo)) -> dict:
     try:
-        return repo.set_route(task_kind, body.provider_id, body.model, body.fallback_provider_id, body.fallback_model, body.site_id)
+        return repo.set_route(task_kind, body.provider_id, body.model, body.fallback_provider_id, body.fallback_model, body.site_id, policy=body.policy, fallbacks=body.fallbacks)
     except ValueError as e:
         raise ApiError(422, str(e), code="validation_error")

@@ -170,3 +170,29 @@ UI rules: AI findings/suggestions are advisory — never auto-apply; show the ga
 
 Graph: relation types `LINK_OPPORTUNITY`, `SUPPORTS` added; links map returns them; page node details include `link_health` and `link_suggestions`.
 UI rules: always show the confidence label + score; suggestions are advisory (accept/dismiss/done are bookkeeping, nothing is written to WordPress); "Create Content Task" only on user click.
+
+## 14. Phase 9 additions (2026-08-18, additive) — `/ai/*` gateway, `/sites/{id}/generation/*`
+
+| Endpoint | Notes |
+|---|---|
+| `GET /ai/task-kinds` | `[{kind, fa, policy{tiers[], tags[]}}]` — 17 kinds |
+| `GET /ai/models?provider_id` · `POST /ai/models/sync?provider_id&discover` · `PATCH /ai/models/{mid}` | **AiModel** `{id, provider_id, provider, kind, model_id, display, tier, tags[], context_tokens, price_in_per_m, price_out_per_m, enabled, source}`; PATCH fields tier/tags/prices/context/enabled/display |
+| `GET /ai/health` | `{providers:[{provider, calls, failures, consecutive_failures, p50_ms, breaker_open_until, last_error, updated_at}], now}` |
+| `GET /ai/usage?site_id&from&to&group_by=model|provider|task_kind|agent` | `{group_by, rows[{key, calls, ok, input_tokens, output_tokens, cost_usd, avg_latency_ms}], by_day[], budget}` |
+| `GET /ai/budget?site_id` · `PUT /ai/budget?site_id {budget_usd_month>0}` | **Budget** `{month, limit_usd (default 20), spent_usd, ratio, state: ok|warning|soft_limit|hard_stop, thresholds{0.8,1.0,1.2}}` — human-set only |
+| `GET /ai/routing/preview?task_kind&site_id&priority&provider&model` | **RoutingDecision** `{chain[{provider, model, reason}], reason, policy: explicit|auto|echo, candidates[]}`; 422 unknown kind |
+| `PUT /ai/task-routes/{kind}` (extended) | body may add `policy` and `fallbacks:[{provider_id, model}]`; omitted → unchanged; response adds `policy`, `fallbacks[{…, provider_name}]` |
+| `GET/POST /ai/prompts` · `GET /ai/prompts/{pid}` · `POST /ai/prompts/{pid}/versions {template, changelog?, activate?}` · `PATCH /ai/prompts/versions/{vid} {activate?, approval?, approved_by?}` · `POST …/versions/{vid}/preview {site_id, variables?}` · `POST …/versions/{vid}/test {site_id, provider?, model?}` · `PATCH /ai/prompts/tests/{tid} {human_rating, notes?}` | **Prompt** `{id, key, scope, site_id, title, description, tags[], active_version, versions[PromptVersion], performance[]?}`; **PromptVersion** `{id, version, template, variables[], model_hints, is_active, approval: draft|approved|rejected, approved_by, changelog}`; agent/task templates must contain `{{memory_pack}}` (422 otherwise); new versions are inactive until a human activates |
+| `GET /ai/insights?site_id&status` · `POST /ai/insights/learn?site_id&min_n` · `PATCH /ai/insights/{iid} {status}` | **AiInsight** `{id, site_id, category, feature, value, metric, effect, baseline, n, confidence, message_fa, evidence, recommendation{action,…}, status: new|accepted|dismissed, memory_pattern_ref}` — recommendation only; `accepted` writes a Site Brain pattern, never routing/prompt changes |
+| `GET /ai/feedback-tags` | the 6 tags with Persian labels |
+| `GET /sites/{id}/generation/meta` | `{agents[{agent,fa}] (7), steps[], modes:[manual,assisted], reserved_modes:[autopilot], feedback_tags[]}` |
+| `GET /sites/{id}/generation/memory-preview` | `{id, hash, pack, rendered}` (Memory Snapshot) |
+| `POST /sites/{id}/content/{cid}/generate/estimate {models?, prompt_versions?}` | **GenEstimate** `{per_agent{agent:{provider, model, input_tokens, output_tokens, cost_usd, route[], reason, prompt, sections?}}, total{}, sections, budget, memory_snapshot_id}` |
+| `POST /sites/{id}/content/{cid}/generate {mode?, models?, prompt_versions?}` → **202** | **GenerationRun** + `job_run_id`, `budget`; 409 `budget_exceeded` at hard stop; 422 for `autopilot`; 404 no content |
+| `GET /sites/{id}/generation/runs?content_id` · `GET …/runs/{run_id}` | **GenerationRun** `{run_id, mode, status: queued|running|succeeded|failed|cancelled, step, step_fa, steps[{key, agent, status, artifact_id, provenance{provider,model,placeholder…}, words?, validation_ok?, fact_check?, error?}], models{agent→{provider,model}}, prompt_versions{agent→id}, memory_snapshot_id, estimate, actual{input_tokens,output_tokens,cost_usd}, draft_id, score, review_status, error, artifacts[{id, step, agent, version, payload, provenance}] (detail only)}` |
+| `GET …/runs/{run_id}/stream` | `text/event-stream`; events `start, plan, step_start, step_done, done, failed, cancelled, keepalive` with JSON data `{type, run_id, step?, agent?, cost_usd?, …}` (backlog replayed on connect) |
+| `POST …/runs/{run_id}/accept` · `POST …/runs/{run_id}/cancel` | accept (manual mode, human) → `{draft_id, version, score, review_status}` (idempotent `{already:true}`); the draft then follows the Phase-7 gate |
+| `POST /sites/{id}/content/{cid}/agents/{agent}/run` | single-agent proposal (research/outline/seo/linking/reviewer) `{agent, ok, payload, provenance, placeholder, memory_snapshot_id}`; 404 otherwise |
+| `POST /sites/{id}/content/{cid}/feedback {rating 1–5, tags?, draft_id?, run_id?, notes?}` → 201 · `GET …/feedback` | unknown tags dropped; `tags_fa` echoed |
+
+UI rules: autopilot is shown greyed/reserved; Studio always shows the routing reason and budget state; generation output is only ever a draft version; publishing stays a human action outside this system.

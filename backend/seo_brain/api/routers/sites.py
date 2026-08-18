@@ -50,7 +50,7 @@ def update_site(body: SiteUpdate, site: Site = Depends(require_site), repo: Site
 
 # tables that reference sites(site_id); a site with data is only deleted with ?force=true
 # dependency order: dependents first (entity_mentions→entities, post_terms→posts, gsc_query_page→queries, graph_edges→graph_nodes)
-_CHILD_TABLES = ("link_suggestions", "link_page_stats", "link_patterns", "content_scores", "content_reviews", "content_drafts", "content_metrics", "content_insights", "site_settings", "content_briefs", "content_events", "content_items", "keyword_opportunities", "keywords", "keyword_clusters", "keyword_imports",
+_CHILD_TABLES = ("generation_runs", "draft_feedback", "memory_snapshots", "link_suggestions", "link_page_stats", "link_patterns", "content_scores", "content_reviews", "content_drafts", "content_metrics", "content_insights", "site_settings", "content_briefs", "content_events", "content_items", "keyword_opportunities", "keywords", "keyword_clusters", "keyword_imports",
                  "entity_mentions", "post_terms", "links", "gsc_query_page", "gsc_daily", "graph_edges", "seo_problems",
                  "seo_opportunities", "media", "schemas", "entities", "queries", "pages", "posts", "categories", "tags",
                  "taxonomies", "graph_nodes", "site_memory", "site_connections", "crawl_runs", "sync_runs")
@@ -80,6 +80,8 @@ def delete_site(site_id: str, force: bool = Query(False, description="also delet
                        code="site_has_data", details=related)
     existing = set(inspect(eng).get_table_names())
     with eng.begin() as cx:
+        if "generation_artifacts" in existing:   # keyed by run_id, not site_id
+            cx.execute(text("DELETE FROM generation_artifacts WHERE run_id IN (SELECT run_id FROM generation_runs WHERE site_id = :s)"), {"s": site_id})
         for t in _CHILD_TABLES:
             if t in existing:
                 cx.execute(text(f"DELETE FROM {t} WHERE site_id = :s"), {"s": site_id})

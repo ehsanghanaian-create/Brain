@@ -25,7 +25,9 @@ PROVIDER_KINDS: dict[str, dict[str, Any]] = {
     "ollama": {"label": "مدل محلی (Ollama)", "base_url": "http://127.0.0.1:11434", "models": [], "needs_key": False},
     "custom": {"label": "API سفارشی (سازگار با OpenAI)", "base_url": "", "models": [], "needs_key": False},
 }
-TASK_KINDS = ("content_writing", "seo_analysis", "research", "brief", "keyword_analysis", "internal_linking", "schema", "generic")
+TASK_KINDS = ("content_writing", "seo_analysis", "research", "brief", "keyword_analysis", "internal_linking", "schema", "generic",
+              # phase 9 task kinds
+              "outline", "article_section", "article_long", "rewrite", "seo_review", "fact_check", "title_meta", "faq", "translation")
 
 
 @dataclass
@@ -152,18 +154,27 @@ class ProviderConfigRepository(Repository):
         names = {p.id: p for p in self.list()}
         out = []
         for k in TASK_KINDS:
-            m = by_kind.get(k, {"task_kind": k, "site_id": "*", "provider_id": None, "model": None, "fallback_provider_id": None, "fallback_model": None, "updated_at": None})
+            m = by_kind.get(k, {"task_kind": k, "site_id": "*", "provider_id": None, "model": None, "fallback_provider_id": None, "fallback_model": None, "updated_at": None, "fallbacks": "[]", "policy": "auto"})
             p = names.get(m["provider_id"]); f = names.get(m["fallback_provider_id"])
-            out.append({**m, "provider_name": p.name if p else None, "fallback_provider_name": f.name if f else None})
+            fbs = loads(m.get("fallbacks"), []) or []
+            out.append({**m, "fallbacks": [{**fb, "provider_name": (names.get(fb.get("provider_id")).name if names.get(fb.get("provider_id")) else None)} for fb in fbs],
+                        "policy": m.get("policy") or "auto", "provider_name": p.name if p else None, "fallback_provider_name": f.name if f else None})
         return out
 
     def set_route(self, task_kind: str, provider_id: int | None, model: str | None, fallback_provider_id: int | None = None, fallback_model: str | None = None,
-                  site_id: str = "*") -> dict[str, Any]:
+                  site_id: str = "*", policy: str | None = None, fallbacks: list[dict] | None = None) -> dict[str, Any]:
         if task_kind not in TASK_KINDS:
             raise ValueError(f"unknown task kind '{task_kind}'")
+        if policy is not None and policy not in ("explicit", "auto", "echo"):
+            raise ValueError("policy must be explicit|auto|echo")
+        vals: dict[str, Any] = {"task_kind": task_kind, "site_id": site_id, "provider_id": provider_id, "model": model, "fallback_provider_id": fallback_provider_id,
+                                "fallback_model": fallback_model, "updated_at": utcnow()}
+        if policy is not None:
+            vals["policy"] = policy
+        if fallbacks is not None:
+            vals["fallbacks"] = dumps([{"provider_id": int(f["provider_id"]), "model": str(f.get("model") or "")} for f in fallbacks if f.get("provider_id")])
         with self.engine.begin() as cx:
-            self.upsert(cx, ai_routes, {"task_kind": task_kind, "site_id": site_id, "provider_id": provider_id, "model": model, "fallback_provider_id": fallback_provider_id,
-                                        "fallback_model": fallback_model, "updated_at": utcnow()}, conflict=["task_kind", "site_id"])
+            self.upsert(cx, ai_routes, vals, conflict=["task_kind", "site_id"])
         return next(r for r in self.routes(site_id if site_id != "*" else None) if r["task_kind"] == task_kind)
 
 

@@ -201,7 +201,7 @@ def main() -> int:
     r = check("ai provider create", "POST", api + "/ai/provider-configs", 201, lambda r: r.json()["has_key"] and r.json()["key_hint"] == "9999" and "api_key" not in r.json(), headers=H,
               json={"name": "zz-validation-provider", "kind": "ollama", "api_key": "test-key-9999"})
     pid = r.json()["id"] if r is not None and r.status_code == 201 else 0
-    check("ai task routes", "GET", api + "/ai/task-routes", 200, lambda r: len(r.json()["routes"]) == 8, headers=H)
+    check("ai task routes", "GET", api + "/ai/task-routes", 200, lambda r: len(r.json()["routes"]) == 17, headers=H)
     check("ai route set", "PUT", api + "/ai/task-routes/brief", 200, lambda r: r.json()["provider_name"] == "zz-validation-provider", headers=H, json={"provider_id": pid, "model": "llama3"})
     check("ai route reset", "PUT", api + "/ai/task-routes/brief", 200, lambda r: r.json()["provider_id"] is None, headers=H, json={})
     check("ai provider delete", "DELETE", api + f"/ai/provider-configs/{pid}", 200, lambda r: r.json()["deleted"] == pid, headers=H)
@@ -215,6 +215,60 @@ def main() -> int:
     check("links patterns", "GET", api + f"/sites/{tmp}/links/patterns", 200, lambda r: isinstance(r.json(), list), headers=H)
     check("links settings", "GET", api + f"/sites/{tmp}/links/settings", 200, lambda r: r.json()["min_score"] == 0.45 and r.json()["max_per_target"] == 5 and r.json()["max_per_source"] == 3, headers=H)
     check("links export csv", "GET", api + f"/sites/{tmp}/links/export.csv", 200, lambda r: "text/csv" in r.headers["content-type"], headers=H)
+
+    # ---- phase 9: AI gateway / prompts / generation (echo — no external calls; writes only on the tmp site)
+    check("ai task kinds (17)", "GET", api + "/ai/task-kinds", 200, lambda r: len(r.json()) == 17 and all(k["fa"] and "policy" in k for k in r.json()), headers=H)
+    check("ai models catalog", "GET", api + "/ai/models", 200, lambda r: isinstance(r.json(), list), headers=H)
+    check("ai health", "GET", api + "/ai/health", 200, lambda r: "providers" in r.json(), headers=H)
+    check("ai budget default 20 + thresholds", "GET", api + f"/ai/budget?site_id={tmp}", 200, lambda r: r.json()["limit_usd"] == 20.0 and r.json()["thresholds"] == {"warning": 0.8, "soft_limit": 1.0, "hard_stop": 1.2} and r.json()["state"] == "ok", headers=H)
+    check("ai budget set (human)", "PUT", api + f"/ai/budget?site_id={tmp}", 200, lambda r: r.json()["limit_usd"] == 7.5, headers=H, json={"budget_usd_month": 7.5})
+    check("ai budget set invalid → 422", "PUT", api + f"/ai/budget?site_id={tmp}", 422, headers=H, json={"budget_usd_month": 0})
+    check("ai usage", "GET", api + f"/ai/usage?site_id={tmp}&group_by=model", 200, lambda r: "rows" in r.json() and "budget" in r.json(), headers=H)
+    check("ai routing preview (echo w/o provider)", "GET", api + f"/ai/routing/preview?task_kind=article_section&site_id={tmp}", 200, lambda r: r.json()["policy"] in ("echo", "auto", "explicit") and bool(r.json()["reason"]) and len(r.json()["chain"]) >= 1, headers=H)
+    check("ai routing preview unknown kind → 422", "GET", api + "/ai/routing/preview?task_kind=nope", 422, headers=H)
+    check("ai route policy+fallbacks (additive)", "PUT", api + "/ai/task-routes/outline", 200, lambda r: r.json()["policy"] == "auto" and r.json()["fallbacks"] == [], headers=H, json={"policy": "auto", "fallbacks": []})
+    pr = check("ai prompts seeded (11, all with memory_pack)", "GET", api + "/ai/prompts", 200, lambda r: len(r.json()) >= 11 and all(any(v["is_active"] for v in p["versions"]) for p in r.json()), headers=H)
+    wid = next((p for p in (pr.json() if pr is not None else []) if p["key"] == "agent.writer_section"), None)
+    if wid:
+        vid = next(v["id"] for v in wid["versions"] if v["is_active"])
+        check("ai prompt get + performance", "GET", api + f"/ai/prompts/{wid['id']}", 200, lambda r: "performance" in r.json() and r.json()["key"] == "agent.writer_section", headers=H)
+        check("ai prompt preview (memory injected)", "POST", api + f"/ai/prompts/versions/{vid}/preview", 200, lambda r: "حافظه سایت" in r.json()["rendered"] and r.json()["memory_snapshot_id"] > 0, headers=H, json={"site_id": tmp})
+        check("ai prompt new version w/o memory_pack → 422", "POST", api + f"/ai/prompts/{wid['id']}/versions", 422, headers=H, json={"template": "بدون حافظه"})
+        nv = check("ai prompt new version (inactive)", "POST", api + f"/ai/prompts/{wid['id']}/versions", 201, lambda r: not r.json()["is_active"] and r.json()["approval"] == "draft", headers=H, json={"template": "{{memory_pack}}\nنسخه تست {{h2}}", "changelog": "validation"})
+        if nv is not None:
+            check("ai prompt version approve (human)", "PATCH", api + f"/ai/prompts/versions/{nv.json()['id']}", 200, lambda r: r.json()["approval"] == "approved", headers=H, json={"approval": "approved", "approved_by": "validation"})
+    check("ai feedback tags (6)", "GET", api + "/ai/feedback-tags", 200, lambda r: [t["tag"] for t in r.json()] == ["good_structure", "weak_intro", "wrong_intent", "too_generic", "excellent_entities", "good_links"], headers=H)
+    check("gen meta (7 agents, autopilot reserved)", "GET", api + f"/sites/{tmp}/generation/meta", 200, lambda r: len(r.json()["agents"]) == 7 and "autopilot" in r.json()["reserved_modes"] and "autopilot" not in r.json()["modes"], headers=H)
+    check("gen memory preview", "GET", api + f"/sites/{tmp}/generation/memory-preview", 200, lambda r: r.json()["id"] > 0 and "حافظه سایت" in r.json()["rendered"], headers=H)
+    r9 = check("content create for generation", "POST", api + f"/sites/{tmp}/content", 201, lambda r: r.json()["status"] == "planned", headers=H, json={"title": "امداد خودرو تست تولید"})
+    cid = r9.json()["id"] if r9 is not None and r9.status_code == 201 else 0
+    if cid:
+        check("content brief for generation", "POST", api + f"/sites/{tmp}/content/{cid}/brief", 200, lambda r: bool(r.json()["h1"]), headers=H, json={"use_ai": True, "mark_ready": True})
+        check("gen estimate", "POST", api + f"/sites/{tmp}/content/{cid}/generate/estimate", 200, lambda r: r.json()["total"]["input_tokens"] > 0 and r.json()["sections"] >= 1 and r.json()["memory_snapshot_id"] > 0, headers=H, json={})
+        check("gen start invalid mode (autopilot) → 422", "POST", api + f"/sites/{tmp}/content/{cid}/generate", 422, headers=H, json={"mode": "autopilot"})
+        gr = check("gen start (manual, 202)", "POST", api + f"/sites/{tmp}/content/{cid}/generate", 202, lambda r: r.json()["run_id"].startswith("gen-") and r.json()["mode"] == "manual", headers=H, json={"mode": "manual"})
+        if gr is not None and gr.status_code == 202:
+            rid = gr.json()["run_id"]
+            for _ in range(40):
+                st = httpx.get(api + f"/sites/{tmp}/generation/runs/{rid}", headers=H, timeout=30).json()
+                if st["status"] in ("succeeded", "failed", "cancelled"):
+                    break
+                time.sleep(0.5)
+            check("gen run detail (provenance)", "GET", api + f"/sites/{tmp}/generation/runs/{rid}", 200, lambda r: r.json()["status"] == "succeeded" and r.json()["memory_snapshot_id"] and r.json()["prompt_versions"] and r.json()["models"]["writer"]["model"] and len(r.json()["artifacts"]) >= 5, headers=H)
+            check("gen run stream (SSE)", "GET", api + f"/sites/{tmp}/generation/runs/{rid}/stream", 200, lambda r: "text/event-stream" in r.headers["content-type"], headers=H)
+            check("gen runs list", "GET", api + f"/sites/{tmp}/generation/runs", 200, lambda r: any(x["run_id"] == rid for x in r.json()), headers=H)
+            acc = check("gen accept (human) → draft", "POST", api + f"/sites/{tmp}/generation/runs/{rid}/accept", 200, lambda r: r.json()["draft_id"] > 0 and 0 <= r.json()["score"] <= 100, headers=H)
+            check("gen accept idempotent", "POST", api + f"/sites/{tmp}/generation/runs/{rid}/accept", 200, lambda r: r.json().get("already") is True, headers=H)
+            check("gen run 404", "GET", api + f"/sites/{tmp}/generation/runs/gen-nope", 404, headers=H)
+            if acc is not None:
+                check("draft feedback (rating+tags)", "POST", api + f"/sites/{tmp}/content/{cid}/feedback", 201, lambda r: r.json()["rating"] == 5, headers=H, json={"rating": 5, "tags": ["good_structure"], "draft_id": acc.json()["draft_id"], "run_id": rid})
+                check("draft feedback unknown tag filtered", "POST", api + f"/sites/{tmp}/content/{cid}/feedback", 201, lambda r: r.json()["tags"] == [], headers=H, json={"rating": 3, "tags": ["nope"]})
+                check("draft feedback rating out of range → 422", "POST", api + f"/sites/{tmp}/content/{cid}/feedback", 422, headers=H, json={"rating": 9})
+                check("draft feedback list", "GET", api + f"/sites/{tmp}/content/{cid}/feedback", 200, lambda r: len(r.json()) >= 1, headers=H)
+        check("agent single run (research, echo proposal)", "POST", api + f"/sites/{tmp}/content/{cid}/agents/research/run", 200, lambda r: r.json()["agent"] == "research" and "payload" in r.json() and r.json()["memory_snapshot_id"] > 0, headers=H, json={})
+        check("agent single run (fact_check needs section) → 404", "POST", api + f"/sites/{tmp}/content/{cid}/agents/fact_check/run", 404, headers=H, json={})
+    check("ai insights list", "GET", api + f"/ai/insights?site_id={tmp}", 200, lambda r: isinstance(r.json(), list), headers=H)
+    check("ai insights learn (min_n=5 → advisory)", "POST", api + f"/ai/insights/learn?site_id={tmp}", 200, lambda r: "insights" in r.json(), headers=H)
 
     # ---- legacy + cleanup
     check("legacy dashboard", "GET", BASE + "/legacy/", 200)
@@ -242,6 +296,8 @@ def main() -> int:
               "  phase 6: content create/transition guard/brief/board/calendar/graph sync/delete · ai provider config (masked key)/task routes ·",
               "  phase 7: drafts v1/v2, score, review, intelligence history, scoring/analytics settings, snapshot/learn/overview/insights ·",
               "  phase 8: links meta/analyze/summary/suggestions/pages/patterns/settings/export ·",
+              "  phase 9: ai task-kinds/models/health/budget(get/put/422)/usage/routing preview/route policy+fallbacks/prompts (seeded, get, preview, version 422/create/approve)/feedback tags ·",
+              "  phase 9: generation meta/memory-preview/estimate/start (202, autopilot 422)/run detail+provenance/SSE/list/accept (+idempotent)/404/feedback (+422)/single agent/insights ·",
               "  graph (summary, nodes, node, 404, neighbors, filtered neighbors, subgraph, 422, search, path, orphans, unknown site) ·",
               "  memory (get, put, context, learned pattern) · AI orchestrator (routes, providers, text run, JSON run + learn, 422) · jobs (enqueue, poll, list, 422, 404) · legacy mount.",
               "* All checks ran over real HTTP against uvicorn (not TestClient). Read-only on the real site; writes only on the temporary site."]

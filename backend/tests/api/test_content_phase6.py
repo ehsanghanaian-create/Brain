@@ -159,7 +159,7 @@ def test_provider_config_secret_store_and_routes(c):
     assert c.patch(f"/api/v1/ai/provider-configs/{p['id']}", json={"clear_key": True}).json()["has_key"] is False and not list((c.tmp / "secrets").glob("*.bin"))
     # routes
     rt = c.get("/api/v1/ai/task-routes").json()
-    assert len(rt["routes"]) == 8 and all(r["provider_id"] is None for r in rt["routes"])
+    assert len(rt["routes"]) == 17 and all(r["provider_id"] is None for r in rt["routes"])
     rr = c.put("/api/v1/ai/task-routes/content_writing", json={"provider_id": p["id"], "model": "claude-sonnet-5", "fallback_provider_id": o["id"], "fallback_model": "llama3"}).json()
     assert rr["provider_name"] == "Claude" and rr["fallback_provider_name"] == "Local"
     assert c.put("/api/v1/ai/task-routes/nope", json={}).status_code == 422

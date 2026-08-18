@@ -9,6 +9,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { ApiError, endpoints, type ContentDraft, type ContentReview, type ContentScore } from '@/lib/api/client';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import Link from 'next/link';
+import { DraftFeedback } from './draft-feedback';
 
 const SEV_FA = { high: 'مهم', medium: 'متوسط', low: 'جزئی' } as const;
 const SEV_COLOR = { high: '#dc2626', medium: '#f59e0b', low: '#64748b' } as const;
@@ -79,6 +81,7 @@ export function DraftPanel({ siteId, cid, onChanged }: { siteId: string; cid: nu
         )}
         {selected && !editing && <Button size='sm' variant='secondary' onClick={() => startEdit(selected)}>ویرایش → نسخه جدید</Button>}
         {!editing && drafts.length === 0 && <Button size='sm' onClick={() => startEdit(null)}>ثبت پیش‌نویس</Button>}
+        {!editing && <Button size='sm' variant='outline' render={<Link href={`/dashboard/ai-studio?site=${encodeURIComponent(siteId)}&content=${cid}`} />} title='تولید چندعاملی با تزریق حافظه سایت؛ خروجی فقط پیش‌نویس است'>تولید با AI</Button>}
         {selected && !editing && (
           <>
             <Button size='sm' disabled={!!busy} onClick={() => runReview(false)}>{busy === 'review' ? '…' : 'بازبینی و امتیاز'}</Button>
@@ -100,6 +103,8 @@ export function DraftPanel({ siteId, cid, onChanged }: { siteId: string; cid: nu
           <div className='flex justify-end gap-2'><Button variant='ghost' size='sm' onClick={() => setEditing(false)}>انصراف</Button><Button size='sm' onClick={saveVersion} disabled={!!busy || !f.body.trim()}>{busy === 'save' ? '…' : `ثبت به‌عنوان نسخه ${drafts.length + 1}`}</Button></div>
         </div>
       )}
+
+      {selected && !editing && <DraftFeedback siteId={siteId} cid={cid} draftId={selected.id} runId={selected.provenance?.run_id ? String(selected.provenance.run_id) : null} />}
 
       {selected && !editing && (
         <details className='rounded-md border p-2'>

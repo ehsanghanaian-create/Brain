@@ -36,8 +36,10 @@ export const navGroups: NavGroup[] = [
   {
     label: 'هوش مصنوعی و لینک‌سازی',
     items: [
+      { title: 'استودیوی AI', url: '/dashboard/ai-studio', icon: 'sparkles', items: [],
+        description: 'تولید چندعاملی محتوا با تأیید انسانی (فاز ۹)' },
       { title: 'مدل‌های AI', url: '/dashboard/ai-models', icon: 'ai', items: [],
-        description: 'ارائه‌دهنده‌ها، مسیردهی وظایف و کتابخانه پرامپت (فاز ۹–۱۱)' },
+        description: 'ارائه‌دهنده‌ها، مدل‌ها، مسیردهی، پرامپت‌ها، بودجه (فاز ۹)' },
       { title: 'لینک‌سازی داخلی', url: '/dashboard/internal-linking', icon: 'linking', items: [],
         description: 'پیشنهاد لینک داخلی و الگوهای یادگرفته‌شده (فاز ۱۳–۱۴)' },
       { title: 'فرصت‌های سئو', url: '/dashboard/opportunities', icon: 'opportunities', items: [],

@@ -246,6 +246,9 @@ ai_routes = Table(
     Column("fallback_provider_id", Integer),
     Column("fallback_model", String),
     Column("updated_at", String, nullable=False),
+    # phase 9
+    Column("fallbacks", Text, nullable=False, server_default="[]"),
+    Column("policy", String, nullable=False, server_default="auto"),
 )
 
 
@@ -413,6 +416,190 @@ link_patterns = Table(
     Column("acceptance_rate", Float, nullable=False, server_default="0"),
     Column("message_fa", Text, nullable=False),
     Column("status", String, nullable=False, server_default="new"),
+    Column("memory_pattern_ref", String),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+
+
+# ----------------------------------------------------------------------------- phase 9: ai orchestration
+ai_models = Table(
+    "ai_models", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("provider_id", Integer, nullable=False),
+    Column("model_id", String, nullable=False),
+    Column("display", String),
+    Column("tier", String, nullable=False, server_default='balanced'),
+    Column("tags", Text, nullable=False, server_default='[]'),
+    Column("context_tokens", Integer),
+    Column("price_in_per_m", Float, nullable=False, server_default='0'),
+    Column("price_out_per_m", Float, nullable=False, server_default='0'),
+    Column("enabled", Integer, nullable=False, server_default='1'),
+    Column("source", String, nullable=False, server_default='catalog'),
+    Column("updated_at", String, nullable=False),
+)
+
+ai_calls = Table(
+    "ai_calls", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String),
+    Column("run_id", String),
+    Column("content_id", Integer),
+    Column("agent", String),
+    Column("task_kind", String, nullable=False),
+    Column("provider", String, nullable=False),
+    Column("model", String, nullable=False),
+    Column("prompt_refs", Text, nullable=False, server_default='{}'),
+    Column("memory_snapshot_id", Integer),
+    Column("input_tokens", Integer, nullable=False, server_default='0'),
+    Column("output_tokens", Integer, nullable=False, server_default='0'),
+    Column("cost_usd", Float, nullable=False, server_default='0'),
+    Column("latency_ms", Integer, nullable=False, server_default='0'),
+    Column("ok", Integer, nullable=False, server_default='1'),
+    Column("error", Text),
+    Column("attempts", Text, nullable=False, server_default='[]'),
+    Column("route_reason", String),
+    Column("created_at", String, nullable=False),
+)
+
+ai_provider_health = Table(
+    "ai_provider_health", metadata,
+    Column("provider", String, primary_key=True),
+    Column("calls", Integer, nullable=False, server_default='0'),
+    Column("failures", Integer, nullable=False, server_default='0'),
+    Column("consecutive_failures", Integer, nullable=False, server_default='0'),
+    Column("p50_ms", Integer),
+    Column("breaker_open_until", String),
+    Column("last_error", Text),
+    Column("updated_at", String, nullable=False),
+)
+
+memory_snapshots = Table(
+    "memory_snapshots", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("hash", String, nullable=False),
+    Column("pack", Text, nullable=False),
+    Column("rendered", Text, nullable=False),
+    Column("created_at", String, nullable=False),
+)
+
+prompts = Table(
+    "prompts", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("key", String, nullable=False),
+    Column("scope", String, nullable=False),
+    Column("site_id", String),
+    Column("title", String, nullable=False),
+    Column("description", Text),
+    Column("tags", Text, nullable=False, server_default='[]'),
+    Column("created_at", String, nullable=False),
+)
+
+prompt_versions = Table(
+    "prompt_versions", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("prompt_id", Integer, nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("template", Text, nullable=False),
+    Column("variables", Text, nullable=False, server_default='[]'),
+    Column("model_hints", Text, nullable=False, server_default='{}'),
+    Column("is_active", Integer, nullable=False, server_default='0'),
+    Column("approval", String, nullable=False, server_default='draft'),
+    Column("approved_by", String),
+    Column("approved_at", String),
+    Column("changelog", Text),
+    Column("created_by", String),
+    Column("created_at", String, nullable=False),
+)
+
+prompt_tests = Table(
+    "prompt_tests", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("prompt_version_id", Integer, nullable=False),
+    Column("site_id", String),
+    Column("content_id", Integer),
+    Column("model", String),
+    Column("provider", String),
+    Column("input_ref", String),
+    Column("output", Text),
+    Column("score", Float),
+    Column("input_tokens", Integer),
+    Column("output_tokens", Integer),
+    Column("cost_usd", Float),
+    Column("latency_ms", Integer),
+    Column("human_rating", Integer),
+    Column("notes", Text),
+    Column("created_at", String, nullable=False),
+)
+
+generation_runs = Table(
+    "generation_runs", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", String, nullable=False),
+    Column("site_id", String, nullable=False),
+    Column("content_id", Integer, nullable=False),
+    Column("mode", String, nullable=False),
+    Column("status", String, nullable=False, server_default='queued'),
+    Column("step", String),
+    Column("steps", Text, nullable=False, server_default='[]'),
+    Column("models", Text, nullable=False, server_default='{}'),
+    Column("prompt_versions", Text, nullable=False, server_default='{}'),
+    Column("memory_snapshot_id", Integer),
+    Column("estimate", Text, nullable=False, server_default='{}'),
+    Column("actual", Text, nullable=False, server_default='{}'),
+    Column("draft_id", Integer),
+    Column("score", Float),
+    Column("review_status", String),
+    Column("error", Text),
+    Column("created_by", String),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+
+generation_artifacts = Table(
+    "generation_artifacts", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("run_id", String, nullable=False),
+    Column("step", String, nullable=False),
+    Column("agent", String, nullable=False),
+    Column("version", Integer, nullable=False, server_default='1'),
+    Column("schema_key", String),
+    Column("payload", Text, nullable=False),
+    Column("provenance", Text, nullable=False, server_default='{}'),
+    Column("created_at", String, nullable=False),
+)
+
+draft_feedback = Table(
+    "draft_feedback", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("content_id", Integer),
+    Column("draft_id", Integer),
+    Column("run_id", String),
+    Column("rating", Integer, nullable=False),
+    Column("tags", Text, nullable=False, server_default='[]'),
+    Column("notes", Text),
+    Column("created_by", String),
+    Column("created_at", String, nullable=False),
+)
+
+ai_insights = Table(
+    "ai_insights", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String),
+    Column("category", String, nullable=False),
+    Column("feature", String, nullable=False),
+    Column("value", String, nullable=False),
+    Column("metric", String, nullable=False),
+    Column("effect", Float, nullable=False),
+    Column("baseline", Float),
+    Column("n", Integer, nullable=False),
+    Column("confidence", Float),
+    Column("message_fa", Text, nullable=False),
+    Column("evidence", Text, nullable=False, server_default='{}'),
+    Column("recommendation", Text, nullable=False, server_default='{}'),
+    Column("status", String, nullable=False, server_default='new'),
     Column("memory_pattern_ref", String),
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),

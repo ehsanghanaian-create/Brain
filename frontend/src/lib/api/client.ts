@@ -136,7 +136,7 @@ export type ContentCalendar = { from: string; to: string; days: Record<string, C
 export type ContentMeta = { statuses: { key: ContentStatus; fa: string; next: ContentStatus[] }[]; priorities: string[] };
 export type ProviderKind = { kind: string; label: string; base_url: string; models: string[]; needs_key: boolean };
 export type ProviderConfig = { id: number; name: string; kind: string; kind_label: string; base_url: string | null; default_model: string | null; models: string[]; enabled: boolean; has_key: boolean; key_hint: string | null; last_test: { ok: boolean; status: string; message: string; tested_at: string; models_found?: string[] } | null; created_at: string; updated_at: string };
-export type TaskRoute = { task_kind: string; site_id: string; provider_id: number | null; model: string | null; fallback_provider_id: number | null; fallback_model: string | null; provider_name: string | null; fallback_provider_name: string | null; updated_at: string | null };
+export type TaskRoute = { task_kind: string; site_id: string; provider_id: number | null; model: string | null; fallback_provider_id: number | null; fallback_model: string | null; provider_name: string | null; fallback_provider_name: string | null; updated_at: string | null; policy?: 'explicit' | 'auto' | 'echo'; fallbacks?: { provider_id: number; model: string; provider_name?: string | null }[] };
 // phase 7 — content intelligence
 export type ContentDraft = { id: number; content_id: number; version: number; title: string | null; meta_description: string | null; format: string; body?: string; body_text?: string; word_count: number; structure: { h1: string[]; h2: string[]; h3: string[]; paragraphs: string[]; links: { href: string; anchor: string }[]; images: { src: string; alt: string }[]; questions: string[]; faq: boolean; word_count: number }; source: string; author: string | null; revision_of: number | null; change_summary: string | null; provenance: Record<string, unknown>; review_status: string; created_at: string };
 export type ScoreFinding = { rule: string; dim: string; passed: boolean; weight: number; evidence: string; fix_fa: string };
@@ -153,6 +153,16 @@ export type LinkPageStat = { node_id: string; url: string | null; title: string 
 export type LinkPattern = { id: number; pattern_key: string; feature: Record<string, string>; accepted: number; dismissed: number; done: number; acceptance_rate: number; message_fa: string; status: string; memory_pattern_ref: string | null };
 export type LinkSummary = { by_status: Record<string, number>; by_kind: Record<string, number>; by_confidence: Record<string, number>; pages: number; flags: Record<string, number>; avg_health: number | null; settings: Record<string, any> };
 export type LinkAnalyzeResult = { mode: 'sync' | 'job'; run_id: string; pages?: number; targets?: number; suggestions?: number; by_confidence?: Record<string, number>; supports_edges?: number; created?: number; graph?: Record<string, number>; stats?: Record<string, number | null>; status?: string };
+// phase 9 — ai orchestration
+export type AiModel = { id: number; provider_id: number; provider: string | null; kind: string | null; model_id: string; display: string | null; tier: string; tags: string[]; context_tokens: number | null; price_in_per_m: number; price_out_per_m: number; enabled: boolean; source: string };
+export type RoutingDecision = { chain: { provider: string; model: string; reason: string }[]; reason: string; policy: string; candidates: any[] };
+export type Budget = { month: string; limit_usd: number; spent_usd: number; ratio: number; state: 'ok' | 'warning' | 'soft_limit' | 'hard_stop'; thresholds: Record<string, number> };
+export type Usage = { group_by: string; rows: { key: string; calls: number; input_tokens: number; output_tokens: number; cost_usd: number; avg_latency_ms: number; ok: number }[]; by_day: { date: string; cost_usd: number; calls: number }[]; budget: Budget };
+export type PromptVersion = { id: number; prompt_id: number; version: number; template: string; variables: string[]; model_hints: Record<string, any>; is_active: number; approval: string; approved_by: string | null; changelog: string | null; created_at: string; key?: string; ref?: string };
+export type Prompt = { id: number; key: string; scope: string; site_id: string | null; title: string; description: string | null; tags: string[]; versions: PromptVersion[]; active_version: number | null; performance?: { version_id: number; version: number; tests: number; avg_score: number | null; avg_rating: number | null; avg_cost_usd: number | null; avg_latency_ms: number | null }[]; tests?: any[] };
+export type GenerationRun = { id: number; run_id: string; site_id: string; content_id: number; mode: string; status: string; step: string | null; step_fa?: string; steps: { key: string; agent: string; status: string; artifact_id?: number | null; provenance?: Record<string, any>; error?: string | null; words?: number; validation_ok?: boolean; fact_check?: string; sections?: number; draft_id?: number; score?: number; review_status?: string }[]; models: Record<string, { provider: string; model: string }>; prompt_versions: Record<string, number>; memory_snapshot_id: number | null; estimate: Record<string, any>; actual: Record<string, any>; draft_id: number | null; score: number | null; review_status: string | null; error: string | null; created_at: string; artifacts?: { id: number; step: string; agent: string; version: number; payload: Record<string, any>; provenance: Record<string, any> }[] };
+export type GenEstimate = { per_agent: Record<string, { input_tokens: number; output_tokens: number; cost_usd: number; provider?: string; model?: string; route?: any[]; reason?: string; prompt?: string; sections?: number }>; total: { input_tokens: number; output_tokens: number; cost_usd: number }; sections: number; budget: Budget; memory_snapshot_id: number };
+export type AiInsight = { id: number; site_id: string | null; category: string; feature: string; value: string; metric: string; effect: number; baseline: number | null; n: number; confidence: number | null; message_fa: string; evidence: Record<string, any>; recommendation: Record<string, any>; status: string; memory_pattern_ref: string | null };
 export type SiteCreateBody = Schemas['SiteCreate'];
 export type SiteUpdateBody = Schemas['SiteUpdate'];
 export type MemoryUpdateBody = Schemas['MemoryUpdate'];
@@ -267,6 +277,38 @@ export const endpoints = {
   setLinkPattern: (id: string, pid: number, status: string) => api<LinkPattern>(`/sites/${encodeURIComponent(id)}/links/patterns/${pid}`, { method: 'PATCH', json: { status } }),
   linkSettings: (id: string) => api<Record<string, any>>(`/sites/${encodeURIComponent(id)}/links/settings`),
   putLinkSettings: (id: string, body: Record<string, unknown>) => api<Record<string, any>>(`/sites/${encodeURIComponent(id)}/links/settings`, { method: 'PUT', json: body }),
+  // phase 9 — ai orchestration
+  aiTaskKinds: () => api<{ kind: string; fa: string; policy: any }[]>('/ai/task-kinds'),
+  aiModels: (providerId?: number) => api<AiModel[]>(`/ai/models${providerId ? `?provider_id=${providerId}` : ''}`),
+  aiModelsSync: (providerId?: number) => api<Record<string, any>>(`/ai/models/sync${providerId ? `?provider_id=${providerId}` : ''}`, { method: 'POST' }),
+  aiModelUpdate: (mid: number, body: Record<string, unknown>) => api<AiModel>(`/ai/models/${mid}`, { method: 'PATCH', json: body }),
+  aiHealth: () => api<{ providers: any[]; now: string }>('/ai/health'),
+  aiUsage: (params: Record<string, string | undefined> = {}) => { const q = new URLSearchParams(); Object.entries(params).forEach(([k, v]) => v && q.set(k, v)); return api<Usage>(`/ai/usage?${q.toString()}`); },
+  aiBudget: (siteId: string) => api<Budget>(`/ai/budget?site_id=${encodeURIComponent(siteId)}`),
+  aiBudgetSet: (siteId: string, budget_usd_month: number) => api<Budget>(`/ai/budget?site_id=${encodeURIComponent(siteId)}`, { method: 'PUT', json: { budget_usd_month } }),
+  aiRoutingPreview: (params: Record<string, string | undefined>) => { const q = new URLSearchParams(); Object.entries(params).forEach(([k, v]) => v && q.set(k, v)); return api<RoutingDecision>(`/ai/routing/preview?${q.toString()}`); },
+  aiPrompts: (siteId?: string, scope?: string) => { const q = new URLSearchParams(); if (siteId) q.set('site_id', siteId); if (scope) q.set('scope', scope); return api<Prompt[]>(`/ai/prompts?${q.toString()}`); },
+  aiPrompt: (pid: number) => api<Prompt>(`/ai/prompts/${pid}`),
+  aiPromptAddVersion: (pid: number, body: { template: string; changelog?: string; activate?: boolean }) => api<PromptVersion>(`/ai/prompts/${pid}/versions`, { method: 'POST', json: body }),
+  aiPromptPatchVersion: (vid: number, body: Record<string, unknown>) => api<PromptVersion>(`/ai/prompts/versions/${vid}`, { method: 'PATCH', json: body }),
+  aiPromptPreview: (vid: number, body: { site_id: string; variables?: Record<string, unknown> }) => api<{ rendered: string; memory_snapshot_id: number; variables: string[]; missing: string[] }>(`/ai/prompts/versions/${vid}/preview`, { method: 'POST', json: body }),
+  aiPromptTest: (vid: number, body: { site_id: string; variables?: Record<string, unknown>; provider?: string; model?: string; task_kind?: string }) => api<Record<string, any>>(`/ai/prompts/versions/${vid}/test`, { method: 'POST', json: body }),
+  aiPromptRateTest: (tid: number, body: { human_rating: number; notes?: string }) => api<Record<string, any>>(`/ai/prompts/tests/${tid}`, { method: 'PATCH', json: body }),
+  aiInsights: (siteId?: string, status?: string) => { const q = new URLSearchParams(); if (siteId) q.set('site_id', siteId); if (status) q.set('status', status); return api<AiInsight[]>(`/ai/insights?${q.toString()}`); },
+  aiInsightsLearn: (siteId?: string) => api<Record<string, any>>(`/ai/insights/learn${siteId ? `?site_id=${siteId}` : ''}`, { method: 'POST' }),
+  aiInsightStatus: (iid: number, status: string) => api<AiInsight>(`/ai/insights/${iid}`, { method: 'PATCH', json: { status } }),
+  aiFeedbackTags: () => api<{ tag: string; fa: string }[]>('/ai/feedback-tags'),
+  genMeta: (id: string) => api<{ agents: { agent: string; fa: string }[]; steps: { step: string; fa: string }[]; modes: string[]; reserved_modes: string[]; feedback_tags: string[] }>(`/sites/${encodeURIComponent(id)}/generation/meta`),
+  genMemoryPreview: (id: string) => api<{ id: number; hash: string; pack: Record<string, any>; rendered: string }>(`/sites/${encodeURIComponent(id)}/generation/memory-preview`),
+  genEstimate: (id: string, cid: number, body: Record<string, unknown> = {}) => api<GenEstimate>(`/sites/${encodeURIComponent(id)}/content/${cid}/generate/estimate`, { method: 'POST', json: body }),
+  genStart: (id: string, cid: number, body: Record<string, unknown> = {}) => api<GenerationRun & { job_run_id: string; budget: Budget }>(`/sites/${encodeURIComponent(id)}/content/${cid}/generate`, { method: 'POST', json: body }),
+  genRuns: (id: string, cid?: number) => api<GenerationRun[]>(`/sites/${encodeURIComponent(id)}/generation/runs${cid ? `?content_id=${cid}` : ''}`),
+  genRun: (id: string, runId: string) => api<GenerationRun>(`/sites/${encodeURIComponent(id)}/generation/runs/${runId}`),
+  genAccept: (id: string, runId: string) => api<Record<string, any>>(`/sites/${encodeURIComponent(id)}/generation/runs/${runId}/accept`, { method: 'POST' }),
+  genCancel: (id: string, runId: string) => api<GenerationRun>(`/sites/${encodeURIComponent(id)}/generation/runs/${runId}/cancel`, { method: 'POST' }),
+  genAgent: (id: string, cid: number, agent: string, body: Record<string, unknown> = {}) => api<Record<string, any>>(`/sites/${encodeURIComponent(id)}/content/${cid}/agents/${agent}/run`, { method: 'POST', json: body }),
+  genFeedback: (id: string, cid: number, body: { rating: number; tags?: string[]; draft_id?: number; run_id?: string; notes?: string }) => api<Record<string, any>>(`/sites/${encodeURIComponent(id)}/content/${cid}/feedback`, { method: 'POST', json: body }),
+  genFeedbackList: (id: string, cid: number) => api<any[]>(`/sites/${encodeURIComponent(id)}/content/${cid}/feedback`),
   // phase 6 — ai providers
   providerKinds: () => api<ProviderKind[]>('/ai/provider-kinds'),
   providerConfigs: () => api<ProviderConfig[]>('/ai/provider-configs'),

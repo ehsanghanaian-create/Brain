@@ -80,6 +80,7 @@ export function ContentBrainPage({ sites, initialSiteId }: { sites: Site[]; init
                         {it.priority && <Badge variant={it.priority === 'high' ? 'default' : 'outline'} className='text-[10px]'>{PRIORITY_FA[it.priority]}</Badge>}
                         {it.publish_date && <span className='text-muted-foreground' dir='ltr'>{it.publish_date}</span>}
                         {it.has_brief && <span title='بریف دارد'>📄</span>}
+                        {it.ai_provider && <Badge variant='secondary' className='text-[10px]' title={`پیش‌نویس تولیدشده با AI: ${it.ai_provider}/${it.ai_model ?? ''}`} dir='ltr'>✨ {it.ai_provider}</Badge>}
                         {it.latest_score != null && <span className='rounded px-1 text-[10px] text-white' style={{ background: it.latest_score >= 80 ? '#16a34a' : it.latest_score >= 60 ? '#f59e0b' : '#dc2626' }} title={`امتیاز کیفیت · ${it.review_status === 'ready' ? 'آماده' : it.review_status === 'changes_requested' ? 'نیاز به اصلاح' : 'بازبینی نشده'}`}>{Math.round(it.latest_score)}{it.review_status === 'ready' ? ' ✓' : ''}</span>}
                         {it.url && <span title={it.url}>🔗</span>}
                       </div>

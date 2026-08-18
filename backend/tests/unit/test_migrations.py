@@ -30,6 +30,6 @@ def test_migrate_fresh_sqlite_is_idempotent(tmp_path):
 
 def test_migrate_via_engine_and_status(tmp_path):
     eng = make_engine("sqlite:///" + (tmp_path / "e.db").as_posix())
-    assert migrate(eng)[:7] == ["0001", "0002", "0003", "0004", "0005", "0006", "0007"]
+    assert migrate(eng)[:8] == ["0001", "0002", "0003", "0004", "0005", "0006", "0007", "0008"]
     st = status(eng)
     assert all(s["applied"] for s in st) and len(st) >= 2

@@ -122,66 +122,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/sites/{site_id}/wordpress/sync": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Wordpress Sync Start
-         * @description Queue the full pipeline: categories → pages → posts → taxonomies → category intelligence → crawl (enrichment) → build graph. Never inline.
-         */
-        post: operations["wordpress_sync_start_api_v1_sites__site_id__wordpress_sync_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sites/{site_id}/wordpress/sync/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Wordpress Sync Status
-         * @description Latest pipeline run (persisted in sync_runs): status · step · progress · started/finished · items · errors + current table/graph counts.
-         */
-        get: operations["wordpress_sync_status_api_v1_sites__site_id__wordpress_sync_status_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/sites/{site_id}/graph/rebuild": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Graph Rebuild
-         * @description Manual graph rebuild from the data already synced (WordPress pages/posts = source of truth; crawl/keywords/content/planner layers re-applied).
-         */
-        post: operations["graph_rebuild_api_v1_sites__site_id__graph_rebuild_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/connections/gsc/properties": {
         parameters: {
             query?: never;
@@ -3178,26 +3118,10 @@ export interface components {
         /**
          * ConnectionTestRequest
          * @description Optional override of the property to test; when omitted the site's stored property is used.
-         *     WordPress only (additive): `wp_username` + `wp_app_password` run the Application-Password identity check and, when it
-         *     succeeds, are stored encrypted in the SecretStore for this site (never returned); `clear_wp_credentials` removes them.
          */
         ConnectionTestRequest: {
             /** Property */
             property?: string | null;
-            /** Wp Username */
-            wp_username?: string | null;
-            /** Wp App Password */
-            wp_app_password?: string | null;
-            /**
-             * Clear Wp Credentials
-             * @default false
-             */
-            clear_wp_credentials: boolean;
-            /**
-             * Auto Sync
-             * @default true
-             */
-            auto_sync: boolean;
         };
         /** ContentCreate */
         ContentCreate: {
@@ -3988,16 +3912,6 @@ export interface components {
             /** Changelog */
             changelog?: string | null;
         };
-        /** WordPressSyncStart */
-        WordPressSyncStart: {
-            /**
-             * Crawl
-             * @default true
-             */
-            crawl: boolean;
-            /** Max Urls */
-            max_urls?: number | null;
-        };
     };
     responses: never;
     parameters: never;
@@ -4301,115 +4215,6 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    wordpress_sync_start_api_v1_sites__site_id__wordpress_sync_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "x-api-token"?: string | null;
-            };
-            path: {
-                site_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["WordPressSyncStart"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    wordpress_sync_status_api_v1_sites__site_id__wordpress_sync_status_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "x-api-token"?: string | null;
-            };
-            path: {
-                site_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    graph_rebuild_api_v1_sites__site_id__graph_rebuild_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "x-api-token"?: string | null;
-            };
-            path: {
-                site_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            202: {
                 headers: {
                     [name: string]: unknown;
                 };

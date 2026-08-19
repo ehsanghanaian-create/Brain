@@ -96,34 +96,3 @@ def wp_rest_root(base_url: str) -> str:
 def wp_rest_v2(base_url: str) -> str:
     """`https://example.com` -> `https://example.com/wp-json/wp/v2/`"""
     return base_url.rstrip("/") + "/wp-json/wp/v2/"
-
-
-# --------------------------------------------------------------------------- canonical WordPress base URL (one resolver for all)
-def resolve_wordpress_base(raw: str | None, probe=None) -> tuple[str, dict]:
-    """Single canonical resolver used by the connector, the sync orchestrator, the crawler config and the graph builder:
-    normalize (scheme, no trailing slash, no `/wp-json`) and — when a `probe(url) -> status_code|None` is given — detect the
-    working scheme: an `http://` base is upgraded to `https://` if `https://…/wp-json/` answers 2xx/3xx, and an `https://` base
-    falls back to `http://` only when https fails at transport level and http answers. Returns (base, info)."""
-    base = normalize_wordpress_url(raw)
-    info: dict = {"input": raw, "normalized": base, "scheme_checked": False, "scheme_switched": False}
-    if probe is None:
-        return base, info
-    info["scheme_checked"] = True
-    from urllib.parse import urlsplit, urlunsplit
-    parts = urlsplit(base)
-    other = urlunsplit(("http" if parts.scheme == "https" else "https", parts.netloc, parts.path, "", ""))
-    def ok(u: str) -> bool:
-        try:
-            code = probe(wp_rest_root(u))
-        except Exception:  # noqa: BLE001
-            return False
-        return bool(code) and int(code) < 400
-    if parts.scheme == "http":
-        if ok(other):                       # prefer https whenever it works
-            info["scheme_switched"] = True; return other, info
-        return base, info
-    if ok(base):
-        return base, info
-    if ok(other):                           # https broken (cert/transport) but http serves
-        info["scheme_switched"] = True; return other, info
-    return base, info

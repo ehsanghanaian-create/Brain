@@ -66,15 +66,7 @@ def _register_builtin_jobs() -> None:
         gw = _gateway()
         return GenerationPipeline(gw.engine, gw, get_event_bus()).execute(payload["run_id"])
 
-    def _run_wordpress_pipeline(payload: dict):
-        """WordPress → sync → (crawl) → graph, one job; progress persisted in sync_runs (see wordpress/orchestrator.py)."""
-        from .deps import engine as _engine
-        from ..wordpress.orchestrator import WordPressSyncOrchestrator
-        return WordPressSyncOrchestrator(_engine()).run(payload["site_id"], run_id=payload.get("run_id"), stage=payload.get("stage", "full"),
-                                                          crawl=payload.get("crawl", True), max_urls=payload.get("max_urls"), job_id=payload.get("job_id"))
-
-    for name, fn in (("sync_wordpress", _run_sync_wordpress), ("build_graph", _run_build_graph), ("noop", _noop), ("links_analyze", _run_links_analyze), ("generation_run", _run_generation), ("planner_analyze", _run_planner_analyze),
-                     ("wordpress_sync", _run_wordpress_pipeline)):
+    for name, fn in (("sync_wordpress", _run_sync_wordpress), ("build_graph", _run_build_graph), ("noop", _noop), ("links_analyze", _run_links_analyze), ("generation_run", _run_generation), ("planner_analyze", _run_planner_analyze)):
         try:
             q.register(name, fn)
         except Exception:  # noqa: BLE001

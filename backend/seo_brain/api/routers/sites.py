@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
 from sqlalchemy import Engine, inspect, text
-from ...automation.queue import Job, JobQueue
 
 from ...common.config import PROJECT_ROOT
 from ...db.repositories import SitesRepository
 from ...db.repositories.sites import Site
-from ..deps import engine, job_queue, require_site, sites_repo
+from ..deps import engine, require_site, sites_repo
 from ..errors import ApiError
 from ..schemas import SiteCreate, SiteUpdate
 
@@ -114,8 +112,7 @@ def get_connections(site_id: str, site: Site = Depends(require_site), svc: Conne
 
 @router.post("/{site_id}/connections/{kind}/test")
 def test_connection(site_id: str, kind: str, body: ConnectionTestRequest | None = None, site: Site = Depends(require_site),
-                    svc: ConnectionsService = Depends(connections_service), repo: SitesRepository = Depends(sites_repo),
-                    eng: Engine = Depends(engine), q: JobQueue = Depends(job_queue)) -> dict:
+                    svc: ConnectionsService = Depends(connections_service), repo: SitesRepository = Depends(sites_repo)) -> dict:
     """Run a read-only permission test. If `property` is given and the test passes, it is stored on the site."""
     body = body or ConnectionTestRequest()
     if kind == "gsc":
@@ -138,12 +135,6 @@ def test_connection(site_id: str, kind: str, body: ConnectionTestRequest | None 
         if body.wp_username and body.wp_app_password and (res.detail.get("auth") or {}).get("status") == "ok":
             save_site_auth(site_id, body.wp_username, body.wp_app_password)
             res.detail["auth"]["stored"] = True
-        # production workflow: a successful (public) connection queues the WordPress → sync → graph pipeline (never inline)
-        if res.ok and body.auto_sync:
-            try:
-                res.detail["sync_job"] = _queue_wordpress_sync(site_id, eng, q, stage="full", crawl=True, max_urls=None, reason="connection_test")
-            except Exception as e:  # noqa: BLE001 — the connection result itself must still be returned
-                res.detail["sync_job"] = {"status": "not_queued", "error": f"{e.__class__.__name__}: {str(e)[:120]}"}
     else:
         raise ApiError(404, f"unknown connection kind '{kind}'", code="not_found", details={"kinds": ["gsc", "ga4", "wordpress"]})
     return res.to_dict()
@@ -158,46 +149,6 @@ def initialize_site(site_id: str, site: Site = Depends(require_site), eng: Engin
     if site.workspace_path != out["workspace"]["path"]:
         repo.set_fields(site_id, workspace_path=out["workspace"]["path"])
     return out
-
-
-# --------------------------------------------------------------------------- WordPress → sync → graph pipeline (wiring of existing components)
-def _queue_wordpress_sync(site_id: str, eng: Engine, q: JobQueue, stage: str, crawl: bool, max_urls: int | None, reason: str) -> dict:
-    from ...wordpress.orchestrator import WordPressSyncOrchestrator
-    orch = WordPressSyncOrchestrator(eng)
-    if orch.is_running(site_id):
-        cur = orch.latest(site_id) or {}
-        return {"status": "already_running", "run_id": cur.get("run_id"), "job_id": cur.get("job_id"), "step": cur.get("step")}
-    st = orch.create(site_id, stage=stage)
-    run = q.enqueue(Job(type="wordpress_sync", payload={"site_id": site_id, "run_id": st.run_id, "stage": stage, "crawl": crawl, "max_urls": max_urls, "reason": reason}, site_id=site_id))
-    orch.attach_job(st.run_id, run.run_id)
-    return {"status": "queued", "job_id": run.run_id, "run_id": st.run_id, "stage": stage}
-
-
-class WordPressSyncStart(BaseModel):
-    crawl: bool = True
-    max_urls: int | None = Field(default=None, ge=1, le=5000)
-
-
-@router.post("/{site_id}/wordpress/sync", status_code=202)
-def wordpress_sync_start(site_id: str, body: WordPressSyncStart | None = None, site: Site = Depends(require_site), eng: Engine = Depends(engine), q: JobQueue = Depends(job_queue)) -> dict:
-    """Queue the full pipeline: categories → pages → posts → taxonomies → category intelligence → crawl (enrichment) → build graph. Never inline."""
-    body = body or WordPressSyncStart()
-    if not site.wp_url:
-        raise ApiError(409, "آدرس وردپرس برای این سایت تنظیم نشده است — ابتدا اتصال وردپرس را تست کنید", code="wordpress_not_configured")
-    return _queue_wordpress_sync(site_id, eng, q, stage="full", crawl=body.crawl, max_urls=body.max_urls, reason="manual")
-
-
-@router.get("/{site_id}/wordpress/sync/status")
-def wordpress_sync_status(site_id: str, site: Site = Depends(require_site), eng: Engine = Depends(engine), q: JobQueue = Depends(job_queue)) -> dict:
-    """Latest pipeline run (persisted in sync_runs): status · step · progress · started/finished · items · errors + current table/graph counts."""
-    from ...wordpress.orchestrator import WordPressSyncOrchestrator
-    return {"site_id": site_id, "wp_url": site.wp_url, **WordPressSyncOrchestrator(eng).status(site_id, q)}
-
-
-@router.post("/{site_id}/graph/rebuild", status_code=202)
-def graph_rebuild(site_id: str, site: Site = Depends(require_site), eng: Engine = Depends(engine), q: JobQueue = Depends(job_queue)) -> dict:
-    """Manual graph rebuild from the data already synced (WordPress pages/posts = source of truth; crawl/keywords/content/planner layers re-applied)."""
-    return _queue_wordpress_sync(site_id, eng, q, stage="graph_only", crawl=False, max_urls=None, reason="graph_rebuild")
 
 
 gsc_router = APIRouter(prefix="/connections", tags=["sites"])

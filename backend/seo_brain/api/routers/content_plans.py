@@ -312,19 +312,15 @@ def categories_sync(site_id: str, brain: bool = True, min_keywords: int = 3, s: 
     wp_error = None
     if site and site.wp_url:
         try:
-            out["wordpress"] = {**s.cats.sync_wordpress(site_id, site.wp_url), "source": "wordpress_rest", "status": "ok"}
+            out["wordpress"] = s.cats.sync_wordpress(site_id, site.wp_url)
         except Exception as e:  # noqa: BLE001
-            wp_error = f"{e.__class__.__name__}: {str(e)[:200]}"
-            # never silent: report the REST failure explicitly; the local snapshot (v0.1 sync) is used only as a clearly-labelled fallback
-            out["wordpress"] = {"source": "wordpress_rest", "status": "failed", "reason": wp_error}
-            try:
-                snap = s.cats.sync_from_local(site_id)
-                out["wordpress_snapshot"] = {**snap, "source": "snapshot", "status": "ok"}
+            wp_error = str(e)
+            try:   # fallback: local snapshot from the v0.1 WordPress sync
+                out["wordpress"] = s.cats.sync_from_local(site_id)
             except ValueError:
-                out["wordpress_snapshot"] = {"source": "snapshot", "status": "empty", "reason": "no_local_snapshot"}
+                pass
     else:
         wp_error = "wordpress_not_configured"
-        out["wordpress"] = {"source": "wordpress_rest", "status": "not_configured", "reason": wp_error}
     if brain:
         out["brain"] = s.cats.sync_brain(site_id, min_keywords)
     out["analysis"] = s.cats.analyze(site_id)

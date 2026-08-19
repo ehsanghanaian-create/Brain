@@ -38,11 +38,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(sites_router, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(sites_router.SiteInitializer, "__init__", _init_with_root(tmp_path), raising=True)
     app = create_app(); app.dependency_overrides[deps.engine] = lambda: eng
-    # a successful WordPress connection now queues the sync → graph pipeline job; keep it in-process and inert here
-    from seo_brain.automation.queue import InProcessJobQueue
-    q = InProcessJobQueue(sync=True); q.register("wordpress_sync", lambda payload: {"noop": True})
-    app.dependency_overrides[deps.job_queue] = lambda: q
-    return {"client": TestClient(app), "eng": eng, "root": tmp_path, "monkeypatch": monkeypatch, "queue": q}
+    return {"client": TestClient(app), "eng": eng, "root": tmp_path, "monkeypatch": monkeypatch}
 
 
 def _init_with_root(root):

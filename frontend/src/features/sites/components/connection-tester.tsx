@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { ApiError, endpoints, type ConnectionKind, type ConnectionResult, type GscProperties, type WpAuthStatus } from '@/lib/api/client';
+import { toast } from 'sonner';
+import { queueMessage } from '../wp-sync';
 import { useEffect, useState } from 'react';
 import { CONNECTION_STATUS_FA } from '../constants';
 
@@ -68,6 +70,8 @@ export function ConnectionTester({
         const a = r.detail?.auth as { configured?: boolean; status?: string; username?: string; key_hint?: string; source?: WpAuthStatus['source'] } | undefined;
         if (a?.configured) setAuthInfo({ configured: true, username: a.username ?? wpUser, key_hint: a.key_hint ?? null, source: a.source ?? 'site' });
         setWpPass(''); // never keep the password in component state after the request
+        const sj = r.detail?.sync_job as { status?: string; job_id?: string | null; error?: string | null } | undefined;
+        if (sj) { const m = queueMessage(sj); (m.ok ? toast.success : toast.error)(`همگام‌سازی وردپرس → گراف: ${m.text}`); }
       }
     } catch (e) {
       setError(e instanceof ApiError ? `${e.message} (${e.code})` : String(e));

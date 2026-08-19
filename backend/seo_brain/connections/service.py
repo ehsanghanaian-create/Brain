@@ -70,6 +70,18 @@ def _token_info() -> dict[str, Any]:
     return {"present": bool(data.get("refresh_token")), "scopes": data.get("scopes") or [], "expiry": data.get("expiry")}
 
 
+def _redact(v: str | None, keep: int = 3) -> str:
+    """Show only the shape of a user-supplied value in traces (never the value itself)."""
+    if not v:
+        return "∅"
+    v = str(v)
+    return v if ("://" in v or "." in v) and " " not in v and len(v) <= 120 else f"«{v[:keep]}…{v[-2:]} ({len(v)} chars)»"
+
+
+def _step(trace: list[str], msg: str) -> None:
+    trace.append(f"[{utcnow()[11:23]}] {msg}")
+
+
 GSC_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly"
 GA4_SCOPE = "https://www.googleapis.com/auth/analytics.readonly"
 
@@ -103,25 +115,35 @@ class ConnectionsService:
         return {"status": "ok", "properties": [{"property": e.get("siteUrl"), "permission": e.get("permissionLevel")} for e in entries]}
 
     def test_gsc(self, site_id: str, wanted: str | None) -> ConnectionResult:
-        res = self._test_gsc(site_id, wanted)
+        trace: list[str] = []
+        res = self._test_gsc(site_id, wanted, trace)
+        res.detail = {**res.detail, "trace": trace}
         self.repo.save(site_id, res)
         return res
 
-    def _test_gsc(self, site_id: str, wanted: str | None) -> ConnectionResult:
+    def _test_gsc(self, site_id: str, wanted: str | None, trace: list[str] | None = None) -> ConnectionResult:
+        trace = trace if trace is not None else []
+        _step(trace, f"input property = {_redact(wanted)}")
         if not wanted:
             return ConnectionResult("gsc", "not_configured", "برای این سایت هیچ property تعریف نشده است", {"hint": "sc-domain:example.com یا https://example.com/"})
+        _step(trace, f"GOOGLE_CLIENT_ID/SECRET in .env: {'yes' if _google_client_configured() else 'NO'}")
         if not _google_client_configured():
             return ConnectionResult("gsc", "not_configured", "GOOGLE_CLIENT_ID/SECRET در .env تنظیم نشده است", {"property": wanted})
         tok = _token_info()
+        _step(trace, f"OAuth token file {resolve_path(env('GSC_TOKEN_PATH', 'tokens/gsc_token.json')).name}: present={tok['present']} scopes={len(tok['scopes'])} expiry={tok.get('expiry') or '?'}")
         if not tok["present"]:
             return ConnectionResult("gsc", "not_authorized", "توکن Google وجود ندارد؛ `sync-gsc.py --auth-only` را اجرا کنید", {"property": wanted})
         if GSC_SCOPE not in tok["scopes"]:
+            _step(trace, f"missing scope {GSC_SCOPE}")
             return ConnectionResult("gsc", "not_authorized", "توکن فعلی اسکوپ Search Console را ندارد", {"property": wanted, "scopes": tok["scopes"]})
+        _step(trace, "scope webmasters.readonly: ok → calling Search Console sites.list / resolve_property")
         try:
             client = self._gsc_client(site_id)
             site_url, permission = client.resolve_property(wanted)
         except Exception as e:  # noqa: BLE001
+            _step(trace, f"API error: {e.__class__.__name__}: {str(e)[:200]}")
             return ConnectionResult("gsc", "error", f"خطا در فراخوانی Search Console: {e.__class__.__name__}: {e}", {"property": wanted})
+        _step(trace, f"resolved: site_url={site_url or '∅'} permission={permission or '∅'}")
         if not site_url:
             return ConnectionResult("gsc", "not_found", "این property در حساب Google متصل دیده نمی‌شود (URL-prefix و Domain هر دو بررسی شد)", {"property": wanted})
         if permission == "siteUnverifiedUser":
@@ -137,6 +159,9 @@ class ConnectionsService:
     # -- GA4
     def test_ga4(self, site_id: str, property_id: str | None) -> ConnectionResult:
         res = self._test_ga4(site_id, property_id)
+        tok = _token_info()
+        res.detail = {**res.detail, "trace": [f"input property id = {_redact(property_id)}", f"google client configured = {_google_client_configured()}",
+                                              f"token present = {tok['present']}, scopes = {len(tok['scopes'])}, analytics.readonly = {GA4_SCOPE in tok['scopes']}", f"status = {res.status}: {res.message}"]}
         self.repo.save(site_id, res)
         return res
 
@@ -172,38 +197,53 @@ class ConnectionsService:
 
     # -- WordPress REST (public, GET only)
     def test_wordpress(self, site_id: str, wp_url: str | None) -> ConnectionResult:
-        res = self._test_wordpress(wp_url)
+        trace: list[str] = []
+        res = self._test_wordpress(wp_url, trace)
+        res.detail = {**res.detail, "trace": trace}
         self.repo.save(site_id, res)
         return res
 
-    def _test_wordpress(self, wp_url: str | None) -> ConnectionResult:
+    def _test_wordpress(self, wp_url: str | None, trace: list[str] | None = None) -> ConnectionResult:
+        trace = trace if trace is not None else []
+        _step(trace, f"input = {_redact(wp_url)}")
         if not wp_url:
             return ConnectionResult("wordpress", "not_configured", "آدرس وردپرس تنظیم نشده است", {})
 
         try:
             base = normalize_wordpress_url(wp_url)
         except InvalidWordPressUrlError as e:
+            _step(trace, f"normalize → rejected: {str(e)[:120]}")
             return ConnectionResult("wordpress", "error", str(e), {})
+        _step(trace, f"normalize → {base}")
 
         root_url = wp_rest_root(base)
+        _step(trace, f"GET {root_url} (timeout 20s, follow_redirects, UA SEO-Brain read-only)")
+        import time as _t
+        t0 = _t.perf_counter()
         try:
             r = self._wp_fetch(root_url)
+            _step(trace, f"response HTTP {r.status_code} in {int((_t.perf_counter() - t0) * 1000)}ms · content-type={r.headers.get('content-type', '?')} · {len(r.content)} bytes" + (f" · final url {r.url}" if str(getattr(r, 'url', '')) not in ('', root_url) else ""))
         except httpx.UnsupportedProtocol:
+            _step(trace, "httpx.UnsupportedProtocol")
             return ConnectionResult("wordpress", "error",
                                     "پروتکل آدرس نامعتبر است؛ آدرس وردپرس باید با http:// یا https:// شروع شود.",
                                     {"url": root_url})
         except httpx.ConnectTimeout:
+            _step(trace, "httpx.ConnectTimeout (TCP connect > timeout)")
             return ConnectionResult("wordpress", "error", "اتصال به سرور در زمان مقرر برقرار نشد (connect timeout).", {"url": root_url})
         except httpx.ReadTimeout:
+            _step(trace, "httpx.ReadTimeout (connected, no response body in time)")
             return ConnectionResult("wordpress", "error", "سرور در زمان مقرر پاسخ نداد (read timeout).", {"url": root_url})
         except httpx.TimeoutException:
             return ConnectionResult("wordpress", "error", "درخواست به دلیل timeout ناموفق بود.", {"url": root_url})
         except httpx.ConnectError as e:
             msg = str(e)
+            _step(trace, f"httpx.ConnectError: {msg[:160]}")
             if any(s in msg for s in ("getaddrinfo failed", "Name or service not known", "nodename nor servname", "Temporary failure in name resolution")):
                 return ConnectionResult("wordpress", "error", "دامنه یافت نشد (خطای DNS)؛ آدرس وردپرس را بررسی کنید.", {"url": root_url})
             return ConnectionResult("wordpress", "error", f"اتصال به {root_url} برقرار نشد.", {"url": root_url})
         except httpx.RequestError as e:
+            _step(trace, f"httpx.{e.__class__.__name__}: {str(e)[:160]}")
             return ConnectionResult("wordpress", "error", f"اتصال به {root_url} برقرار نشد: {e.__class__.__name__}", {"url": root_url})
 
         if r.status_code == 401:
@@ -222,12 +262,65 @@ class ConnectionsService:
         try:
             data = r.json()
         except ValueError:
+            _step(trace, f"body is not JSON (first bytes: {r.text[:80]!r})")
             return ConnectionResult("wordpress", "error", "پاسخ /wp-json/ یک JSON معتبر نیست.", {"url": root_url})
         ns = data.get("namespaces", [])
+        _step(trace, f"JSON ok · name={data.get('name')!r} · namespaces={len(ns)} · wp/v2={'yes' if 'wp/v2' in ns else 'NO'}")
         if "wp/v2" not in ns:
             return ConnectionResult("wordpress", "error",
                                     "پاسخ دریافت شد اما namespace استاندارد wp/v2 پیدا نشد — احتمالاً این یک سایت وردپرسی نیست.",
                                     {"url": root_url, "namespaces": ns[:20]})
+        diag = self._wp_diagnostics(base, root_url, r, trace)
         return ConnectionResult("wordpress", "ok", "REST API وردپرس در دسترس است (فقط خواندنی)",
                                 {"url": root_url, "site_url": base, "rest_endpoint": wp_rest_v2(base),
-                                 "name": data.get("name"), "namespaces": ns[:20], "wp_v2": True})
+                                 "name": data.get("name"), "namespaces": ns[:20], "wp_v2": True, "diagnostics": diag})
+
+    # -- WordPress diagnostics: 3 read-only probes. Credentials (if any) come from env WP_USERNAME/WP_APP_PASSWORD
+    #    and are used only as Basic auth for users/me — never stored, returned or written to logs/traces.
+    def _wp_diagnostics(self, base: str, root_url: str, root_resp: httpx.Response | None, trace: list[str]) -> list[dict[str, Any]]:
+        import base64 as _b64
+        import time as _t
+        out: list[dict[str, Any]] = []
+
+        def probe(name: str, url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+            t0 = _t.perf_counter()
+            try:
+                rr = self._wp_fetch(url) if not headers else httpx.get(url, timeout=20, follow_redirects=True, headers={"User-Agent": "SEO-Brain/0.2 (+local; read-only)", **headers})
+                ms = int((_t.perf_counter() - t0) * 1000)
+                entry = {"step": name, "url": url, "ok": rr.status_code < 400, "status_code": rr.status_code, "ms": ms, "content_type": rr.headers.get("content-type", "")[:60]}
+                _step(trace, f"probe {name}: GET {url} → HTTP {rr.status_code} in {ms}ms")
+                return entry
+            except httpx.RequestError as e:
+                ms = int((_t.perf_counter() - t0) * 1000)
+                _step(trace, f"probe {name}: GET {url} → {e.__class__.__name__}")
+                return {"step": name, "url": url, "ok": False, "status_code": None, "ms": ms, "error": e.__class__.__name__}
+
+        # 1) base URL (the site itself)
+        out.append({**probe("base_url", base + "/"), "fa": "آدرس سایت"})
+        # 2) /wp-json/ (reuse the response we already have)
+        if root_resp is not None:
+            out.append({"step": "wp_json", "url": root_url, "ok": root_resp.status_code == 200, "status_code": root_resp.status_code, "ms": None, "content_type": root_resp.headers.get("content-type", "")[:60], "fa": "REST API ریشه (/wp-json/)"})
+        else:
+            out.append({**probe("wp_json", root_url), "fa": "REST API ریشه (/wp-json/)"})
+        # 3) /wp-json/wp/v2/users/me — authenticated only when env creds exist (optional; SEO Brain stays read-only)
+        user, pw = env("WP_USERNAME"), env("WP_APP_PASSWORD")
+        me_url = wp_rest_v2(base) + "users/me"
+        if user and pw:
+            token = _b64.b64encode(f"{user}:{pw}".encode()).decode()
+            e = probe("users_me_auth", me_url, {"Authorization": f"Basic {token}"})
+            e["fa"] = "احراز هویت (users/me با Application Password از .env)"
+            e["auth"] = "env WP_USERNAME/WP_APP_PASSWORD (not logged)"
+            if e.get("status_code") == 401:
+                e["hint"] = "نام‌کاربری یا Application Password نادرست است (401)."
+            elif e.get("status_code") == 403:
+                e["hint"] = "کاربر مجاز نیست یا احراز هویت Basic/Application Passwords غیرفعال است (403)."
+            out.append(e)
+        else:
+            e = probe("users_me_anon", me_url)
+            e["fa"] = "users/me بدون احراز هویت (اختیاری)"
+            e["ok"] = e.get("status_code") in (200, 401, 403)   # 401/403 = endpoint exists; anonymous access is (correctly) refused
+            e["hint"] = ("401 طبیعی است: SEO Brain فقط‌خواندنی است و برای اتصال به Application Password نیازی ندارد. (برای همگام‌سازی با احراز هویت، WP_USERNAME/WP_APP_PASSWORD را در .env بگذارید)" if e.get("status_code") == 401
+                         else "403 بدون احراز هویت: users/me برای بازدیدکننده ناشناس توسط افزونه امنیتی/فایروال بسته شده — برای قابلیت‌های فقط‌خواندنی SEO Brain مشکلی نیست." if e.get("status_code") == 403
+                         else "پاسخ غیرمنتظره برای users/me؛ فقط اطلاعاتی است و اتصال فقط‌خواندنی را تحت تأثیر قرار نمی‌دهد.")
+            out.append(e)
+        return out

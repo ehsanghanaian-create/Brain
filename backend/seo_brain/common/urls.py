@@ -75,6 +75,11 @@ def normalize_wordpress_url(raw: str | None) -> str:
         )
 
     path = parts.path.rstrip("/")
+    # users often paste the REST root itself — store the SITE base, build /wp-json/ internally
+    for suffix in ("/wp-json/wp/v2", "/wp-json"):
+        if path.lower().endswith(suffix):
+            path = path[: -len(suffix)].rstrip("/")
+            break
     return urlunsplit((parts.scheme, parts.netloc, path, "", ""))
 
 

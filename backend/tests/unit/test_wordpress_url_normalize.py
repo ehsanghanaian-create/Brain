@@ -20,6 +20,9 @@ from seo_brain.common.urls import InvalidWordPressUrlError, normalize_wordpress_
     ("localhost:8080", "https://localhost:8080"),
     ("192.168.1.10", "https://192.168.1.10"),
     ("  example.com  ", "https://example.com"),        # trimmed
+    ("https://example.com/wp-json/", "https://example.com"),          # REST root pasted → site base
+    ("example.com/wp-json", "https://example.com"),
+    ("https://example.com/blog/wp-json/wp/v2/", "https://example.com/blog"),
 ])
 def test_normalize_accepts_and_fixes_valid_inputs(raw, expected):
     assert normalize_wordpress_url(raw) == expected

@@ -40,6 +40,7 @@ export function ConnectionTester({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ConnectionResult | undefined>(initialResult);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<unknown>(null);
   const [gscProps, setGscProps] = useState<GscProperties | null>(null);
 
   useEffect(() => {
@@ -59,6 +60,7 @@ export function ConnectionTester({
       onResult?.(r);
     } catch (e) {
       setError(e instanceof ApiError ? `${e.message} (${e.code})` : String(e));
+      setErrorDetail(e instanceof ApiError ? { code: e.code, status: e.status, details: e.details, request_id: e.requestId } : { error: String(e) });
     } finally {
       setBusy(false);
     }
@@ -97,6 +99,44 @@ export function ConnectionTester({
         </p>
       )}
       {error && <p className='text-destructive mt-2 text-sm'>{error}</p>}
+      {(result || error) && <DiagnosticsLog kind={kind} result={result} errorDetail={errorDetail} />}
     </div>
+  );
+}
+
+type DiagStep = { step: string; fa?: string; url?: string; ok?: boolean; status_code?: number | null; ms?: number | null; content_type?: string; error?: string; hint?: string; auth?: string };
+
+/** Detailed, copyable log of what the backend actually did (normalization → requests → responses). Secrets are redacted server-side. */
+function DiagnosticsLog({ kind, result, errorDetail }: { kind: ConnectionKind; result?: ConnectionResult; errorDetail?: unknown }) {
+  const detail = (result?.detail ?? {}) as Record<string, unknown>;
+  const trace = Array.isArray(detail.trace) ? (detail.trace as string[]) : [];
+  const diags = Array.isArray(detail.diagnostics) ? (detail.diagnostics as DiagStep[]) : [];
+  const rest = Object.fromEntries(Object.entries(detail).filter(([k]) => !['trace', 'diagnostics', 'message'].includes(k)));
+  const text = [`kind: ${kind}`, result ? `status: ${result.status} · ok: ${result.ok} · tested_at: ${result.tested_at}` : '', result ? `message: ${result.message}` : '', ...(trace.length ? ['--- trace', ...trace] : []),
+    ...(diags.length ? ['--- diagnostics', ...diags.map((d) => `${d.ok ? 'OK ' : 'FAIL'} ${d.step} ${d.url ?? ''} → ${d.status_code ?? d.error ?? '-'}${d.ms != null ? ` (${d.ms}ms)` : ''}${d.hint ? ` · ${d.hint}` : ''}`)] : []),
+    Object.keys(rest).length ? `--- detail ${JSON.stringify(rest)}` : '', errorDetail ? `--- api error ${JSON.stringify(errorDetail)}` : ''].filter(Boolean).join('\n');
+  return (
+    <details className='mt-2 rounded border text-xs'>
+      <summary className='cursor-pointer px-2 py-1 font-medium'>جزئیات فنی / لاگ اتصال {trace.length ? `(${trace.length} مرحله)` : ''}</summary>
+      <div className='space-y-2 p-2'>
+        {diags.length > 0 && (
+          <ul className='space-y-1'>
+            {diags.map((d) => (
+              <li key={d.step} className='flex flex-wrap items-center gap-1'>
+                <span className={`inline-block h-2.5 w-2.5 rounded-full ${d.ok ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                <span className='font-medium'>{d.fa ?? d.step}</span>
+                <span className='text-muted-foreground' dir='ltr'>{d.url}</span>
+                <Badge variant='outline' dir='ltr'>{d.status_code ?? d.error ?? '—'}{d.ms != null ? ` · ${d.ms}ms` : ''}</Badge>
+                {d.hint && <span className='text-muted-foreground w-full ps-4'>{d.hint}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        {trace.length > 0 && <pre className='bg-muted max-h-56 overflow-auto rounded p-2 text-[11px] leading-5 whitespace-pre-wrap' dir='ltr'>{trace.join('\n')}</pre>}
+        {Object.keys(rest).length > 0 && <pre className='bg-muted max-h-40 overflow-auto rounded p-2 text-[11px]' dir='ltr'>{JSON.stringify(rest, null, 1)}</pre>}
+        {!!errorDetail && <pre className='bg-muted max-h-40 overflow-auto rounded p-2 text-[11px] text-destructive' dir='ltr'>{JSON.stringify(errorDetail, null, 1)}</pre>}
+        <Button type='button' size='sm' variant='ghost' onClick={() => { navigator.clipboard.writeText(text); }}>کپی لاگ</Button>
+      </div>
+    </details>
   );
 }

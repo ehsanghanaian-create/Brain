@@ -169,8 +169,64 @@ def test_wordpress_url_without_scheme_is_normalized(env):
     r = c.post("/api/v1/sites/demo/connections/wordpress/test", json={"property": "demo.example"}).json()
     assert r["ok"] and r["detail"]["url"] == "https://demo.example/wp-json/"
     assert r["detail"]["rest_endpoint"] == "https://demo.example/wp-json/wp/v2/"
-    assert seen_urls == ["https://demo.example/wp-json/"]
+    assert seen_urls[0] == "https://demo.example/wp-json/"                      # main probe first, then diagnostics
+    assert set(seen_urls) == {"https://demo.example/wp-json/", "https://demo.example/", "https://demo.example/wp-json/wp/v2/users/me"}
     assert c.get("/api/v1/sites/demo").json()["wp_url"] == "https://demo.example"
+    # diagnostics: 3 steps (base, /wp-json/, users/me) + trace lines, nothing secret
+    steps = [d["step"] for d in r["detail"]["diagnostics"]]
+    assert steps == ["base_url", "wp_json", "users_me_anon"] and all("fa" in d for d in r["detail"]["diagnostics"])
+    assert r["detail"]["trace"] and any("normalize → https://demo.example" in t for t in r["detail"]["trace"])
+
+
+@pytest.mark.parametrize("raw,stored", [
+    ("https://demo.example/wp-json/", "https://demo.example"),
+    ("demo.example/wp-json", "https://demo.example"),
+    ("https://demo.example/blog/wp-json/wp/v2/", "https://demo.example/blog"),
+    ("HTTPS://Demo.Example/", "https://Demo.Example"),
+])
+def test_wordpress_rest_root_pasted_is_reduced_to_site_base(env, raw, stored):
+    c = env["client"]; _create(c)
+    def fake_fetch(url):
+        return httpx.Response(200, json={"name": "Demo WP", "namespaces": ["wp/v2"]}, request=httpx.Request("GET", url))
+    c.app.dependency_overrides[sites_router.connections_service] = lambda: ConnectionsService(env["eng"], wp_fetch=fake_fetch)
+    r = c.post("/api/v1/sites/demo/connections/wordpress/test", json={"property": raw}).json()
+    assert r["ok"], r
+    assert r["detail"]["site_url"] == stored and r["detail"]["url"] == stored + "/wp-json/"
+    assert c.get("/api/v1/sites/demo").json()["wp_url"] == stored
+
+
+@pytest.mark.parametrize("raw", ["ftp://demo.example", "demo", "user:pass@demo.example", "https://", "http://?x=1", "mailto:a@b.c", "aaaa bbbb cccc dddd eeee ffff", "xxxxxxxxxxxxxxxxxxxxxxxx"])
+def test_wordpress_malformed_urls_rejected_without_network(env, raw):
+    c = env["client"]; _create(c)
+    calls = []
+    def fake_fetch(url):
+        calls.append(url); raise AssertionError("no network for malformed input")
+    c.app.dependency_overrides[sites_router.connections_service] = lambda: ConnectionsService(env["eng"], wp_fetch=fake_fetch)
+    r = c.post("/api/v1/sites/demo/connections/wordpress/test", json={"property": raw}).json()
+    assert r["status"] == "error" and not r["ok"] and calls == [] and r["detail"].get("trace")
+    assert "xxxxxxxxxxxxxxxxxxxxxxxx" not in r["message"] and "pass@" not in r["message"]
+
+
+def test_wordpress_users_me_auth_probe_uses_env_creds_but_never_leaks_them(env):
+    c = env["client"]; _create(c)
+    seen = []
+    def fake_fetch(url):
+        seen.append(url)
+        return httpx.Response(200, json={"name": "Demo WP", "namespaces": ["wp/v2"]}, request=httpx.Request("GET", url))
+    # env creds present → authenticated users/me probe (we stub httpx.get used by the auth probe)
+    env["monkeypatch"].setattr(conn_service, "env", lambda k, d=None: {"WP_USERNAME": "editor", "WP_APP_PASSWORD": "aaaa bbbb cccc dddd eeee ffff"}.get(k, d))
+    auth_seen = {}
+    def fake_get(url, **kw):
+        auth_seen["auth"] = (kw.get("headers") or {}).get("Authorization", "")
+        return httpx.Response(401, json={"code": "rest_not_logged_in"}, request=httpx.Request("GET", url))
+    env["monkeypatch"].setattr(conn_service.httpx, "get", fake_get)
+    c.app.dependency_overrides[sites_router.connections_service] = lambda: ConnectionsService(env["eng"], wp_fetch=fake_fetch)
+    r = c.post("/api/v1/sites/demo/connections/wordpress/test", json={"property": "https://demo.example"}).json()
+    assert r["ok"]
+    me = next(d for d in r["detail"]["diagnostics"] if d["step"] == "users_me_auth")
+    assert me["status_code"] == 401 and "401" in me["hint"] and auth_seen["auth"].startswith("Basic ")
+    blob = json.dumps(r, ensure_ascii=False)
+    assert "aaaa bbbb" not in blob and "Basic " not in blob and "editor:" not in blob      # password/basic token never returned or traced
 
 
 def test_wordpress_application_password_pasted_as_url_gives_clear_error(env):

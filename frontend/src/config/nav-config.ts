@@ -38,6 +38,8 @@ export const navGroups: NavGroup[] = [
   {
     label: 'هوش مصنوعی و لینک‌سازی',
     items: [
+      { title: 'آزمایش تولید محتوا', url: '/dashboard/ai-content-test', icon: 'flask', items: [],
+        description: 'فضای موقت آزمایش تولید محتوا با Echo یا ارائه‌دهنده واقعی' },
       { title: 'استودیوی AI', url: '/dashboard/ai-studio', icon: 'sparkles', items: [],
         description: 'تولید چندعاملی محتوا با تأیید انسانی (فاز ۹)' },
       { title: 'مدل‌های AI', url: '/dashboard/ai-models', icon: 'ai', items: [],

@@ -493,8 +493,55 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Test Provider Config */
+        /**
+         * Test Provider Config
+         * @description Read-only connection probe (model list) through the Gateway adapter — same transport/keys as real calls; never sends a prompt.
+         */
         post: operations["test_provider_config_api_v1_ai_provider_configs__pid__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/provider-configs/{pid}/recommended-routes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Recommended Routes
+         * @description Curated route table for this provider kind (Claude: Sonnet balanced / Opus quality / Haiku fast). Read-only — nothing changes.
+         */
+        get: operations["recommended_routes_api_v1_ai_provider_configs__pid__recommended_routes_get"];
+        put?: never;
+        /**
+         * Apply Recommended Routes
+         * @description Human action: apply the curated routes as explicit ai_routes (routing never changes automatically).
+         */
+        post: operations["apply_recommended_routes_api_v1_ai_provider_configs__pid__recommended_routes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/provider-configs/{pid}/gateway-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Gateway Status
+         * @description Connection / routing / fallback status of a provider (rich for gateway kinds such as OmniRoute). Read-only, no prompt sent.
+         */
+        get: operations["gateway_status_api_v1_ai_provider_configs__pid__gateway_status_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2837,6 +2884,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/ai-workspace/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Options */
+        get: operations["options_api_v1_sites__site_id__ai_workspace_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/ai-workspace/estimate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Estimate */
+        post: operations["estimate_api_v1_sites__site_id__ai_workspace_estimate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/ai-workspace/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate
+         * @description Runs the single writer step through Gateway (Echo or a configured provider). Output is shown only — saving is a separate human action.
+         */
+        post: operations["generate_api_v1_sites__site_id__ai_workspace_generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/ai-workspace/save-draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save Draft */
+        post: operations["save_draft_api_v1_sites__site_id__ai_workspace_save_draft_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/ai-workspace/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** History */
+        get: operations["history_api_v1_sites__site_id__ai_workspace_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2858,6 +2993,19 @@ export interface components {
             learn_pattern?: string | null;
             /** Learn Evidence */
             learn_evidence?: string | null;
+        };
+        /** ApplyRoutes */
+        ApplyRoutes: {
+            /**
+             * Site Id
+             * @default *
+             */
+            site_id: string;
+            /**
+             * Overwrite
+             * @default true
+             */
+            overwrite: boolean;
         };
         /** Body_import_keywords_api_v1_sites__site_id__keywords_import_post */
         Body_import_keywords_api_v1_sites__site_id__keywords_import_post: {
@@ -3533,6 +3681,21 @@ export interface components {
                 [key: string]: unknown;
             }[] | null;
         };
+        /** SaveDraftBody */
+        SaveDraftBody: {
+            /** Content Id */
+            content_id: number;
+            /** Markdown */
+            markdown: string;
+            /** Title */
+            title?: string | null;
+            /** Meta Description */
+            meta_description?: string | null;
+            /** Meta */
+            meta?: {
+                [key: string]: unknown;
+            } | null;
+        };
         /** ScoringSettings */
         ScoringSettings: {
             /** Weights */
@@ -3556,7 +3719,7 @@ export interface components {
         SiteCreate: {
             /**
              * Site Id
-             * @description stable slug, e.g. emdadmodiran
+             * @description stable slug, e.g. example-site
              */
             site_id: string;
             /**
@@ -3642,6 +3805,45 @@ export interface components {
              * @default true
              */
             enabled: boolean;
+        };
+        /** SpecBody */
+        SpecBody: {
+            /** Title */
+            title: string;
+            /** Keyword */
+            keyword: string;
+            /** Secondary Keywords */
+            secondary_keywords?: string[];
+            /**
+             * Intent
+             * @default informational
+             */
+            intent: string;
+            /**
+             * Content Type
+             * @default article
+             */
+            content_type: string;
+            /** Category */
+            category?: string | null;
+            /** Audience */
+            audience?: string | null;
+            /**
+             * Tone
+             * @default formal
+             */
+            tone: string;
+            /**
+             * Word Count
+             * @default 1200
+             */
+            word_count: number;
+            /** Instructions */
+            instructions?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /** Model */
+            model?: string | null;
         };
         /** SuggestionStatus */
         SuggestionStatus: {
@@ -4878,6 +5080,115 @@ export interface operations {
         };
     };
     test_provider_config_api_v1_ai_provider_configs__pid__test_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                pid: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recommended_routes_api_v1_ai_provider_configs__pid__recommended_routes_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                pid: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_recommended_routes_api_v1_ai_provider_configs__pid__recommended_routes_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                pid: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ApplyRoutes"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gateway_status_api_v1_ai_provider_configs__pid__gateway_status_get: {
         parameters: {
             query?: never;
             header?: {
@@ -10858,6 +11169,195 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    options_api_v1_sites__site_id__ai_workspace_options_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    estimate_api_v1_sites__site_id__ai_workspace_estimate_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpecBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_api_v1_sites__site_id__ai_workspace_generate_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpecBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_draft_api_v1_sites__site_id__ai_workspace_save_draft_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveDraftBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    history_api_v1_sites__site_id__ai_workspace_history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
                 };
             };
             /** @description Validation Error */

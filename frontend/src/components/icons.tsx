@@ -1,4 +1,8 @@
 import {
+  IconArrowsMaximize,
+  IconFlask,
+  IconFocus2,
+  IconMenu2,
   IconAdjustmentsHorizontal,
   IconAlertCircle,
   IconAlertTriangle,
@@ -103,6 +107,10 @@ export const Icons = {
   // General
   alertCircle: IconAlertCircle,
   warning: IconAlertTriangle,
+  focus: IconFocus2,
+  flask: IconFlask,
+  menu: IconMenu2,
+  maximize: IconArrowsMaximize,
   arrowRight: IconArrowRight,
   check: IconCheck,
   checks: IconChecks,

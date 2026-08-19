@@ -64,8 +64,8 @@ export function PlanTable({ siteId, meta, categories, onOpen, refreshKey, onChan
         <span className='ms-auto flex flex-wrap gap-1'>
           <Button size='sm' variant='outline' onClick={() => setColsOpen(true)}>ستون‌ها ({visible.length})</Button>
           <Button size='sm' variant='outline' onClick={() => setImportOpen(true)}>ورود CSV/XLSX/Sheet</Button>
-          <Button size='sm' variant='outline' render={<a href={endpoints.planExportUrl(siteId, 'csv', { status: filters.status, category_id: filters.category_id, page_type: filters.page_type, intent: filters.intent, priority: filters.priority, q: filters.q, columns: visible.join(',') })} />}>خروجی CSV</Button>
-          <Button size='sm' variant='outline' render={<a href={endpoints.planExportUrl(siteId, 'xlsx', { status: filters.status, category_id: filters.category_id, columns: visible.join(',') })} />}>خروجی XLSX</Button>
+          <Button size='sm' variant='outline' nativeButton={false} render={<a href={endpoints.planExportUrl(siteId, 'csv', { status: filters.status, category_id: filters.category_id, page_type: filters.page_type, intent: filters.intent, priority: filters.priority, q: filters.q, columns: visible.join(',') })} />}>خروجی CSV</Button>
+          <Button size='sm' variant='outline' nativeButton={false} render={<a href={endpoints.planExportUrl(siteId, 'xlsx', { status: filters.status, category_id: filters.category_id, columns: visible.join(',') })} />}>خروجی XLSX</Button>
           <Button size='sm' variant='secondary' onClick={async () => { try { const r = await endpoints.planAnalyzeAll(siteId); toast.success(r.mode === 'job' ? `تحلیل در پس‌زمینه (${r.run_id})` : `تحلیل ${r.analyzed} برنامه و ${r.categories} دسته انجام شد`); load(); onChanged(); } catch (e) { err(e); } }}>تحلیل همه با مغز</Button>
         </span>
       </div>

@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from '@/components/ui/native-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ApiError, endpoints, type AiModel, type Budget, type ContentItem, type GenEstimate, type GenerationRun, type Site } from '@/lib/api/client';
 import Link from 'next/link';
@@ -18,6 +18,8 @@ const STEP_FA: Record<string, string> = { research: 'تحقیق', outline: 'سا
 const BUDGET_FA: Record<string, string> = { ok: 'عادی', warning: 'هشدار ۸۰٪', soft_limit: 'حد نرم ۱۰۰٪', hard_stop: 'توقف سخت ۱۲۰٪' };
 const budgetColor = (s: string) => (s === 'ok' ? '#16a34a' : s === 'warning' ? '#f59e0b' : '#dc2626');
 const usd = (v: number | undefined | null) => (typeof v === 'number' ? `${v.toFixed(4)}$` : '—');
+
+const KIND_LABEL: Record<string, string> = { anthropic: 'Claude', openai: 'OpenAI', google: 'Gemini', openrouter: 'OpenRouter', ollama: 'Ollama', custom: 'Custom', omniroute: 'OmniRoute' };
 
 export function AiStudio({ sites, initialSiteId, initialContentId }: { sites: Site[]; initialSiteId: string; initialContentId?: number }) {
   const [siteId, setSiteId] = useState(initialSiteId);
@@ -88,6 +90,7 @@ export function AiStudio({ sites, initialSiteId, initialContentId }: { sites: Si
   const item = items.find((i) => i.id === cid);
   const providerModels = (p: string) => models.filter((m) => m.provider === p);
   const providers = [...new Set(models.map((m) => m.provider).filter(Boolean))] as string[];
+  const kindOf = (p: string) => models.find((m) => m.provider === p)?.kind ?? '';
 
   return (
     <div className='grid gap-4 lg:grid-cols-[320px_1fr]'>
@@ -108,7 +111,7 @@ export function AiStudio({ sites, initialSiteId, initialContentId }: { sites: Si
                 <div className='flex items-center justify-between'><span className='font-medium'>{AGENT_FA[a]}</span>{r && <Badge variant='outline'>{r.policy === 'echo' ? 'Echo (بدون ارائه‌دهنده)' : `${r.provider} / ${r.model}`}</Badge>}</div>
                 {r?.reason && <div className='text-muted-foreground mt-0.5'>{r.reason}</div>}
                 <div className='mt-1 flex gap-1'>
-                  <NativeSelect value={o?.provider ?? ''} onChange={(e) => { const p = e.target.value; setOverrides((s) => ({ ...s, [a]: p ? { provider: p, model: providerModels(p)[0]?.model_id ?? '' } : undefined })); }} className='h-7 text-xs'><NativeSelectOption value=''>خودکار</NativeSelectOption>{providers.map((p) => <NativeSelectOption key={p} value={p}>{p}</NativeSelectOption>)}</NativeSelect>
+                  <NativeSelect value={o?.provider ?? ''} onChange={(e) => { const p = e.target.value; setOverrides((s) => ({ ...s, [a]: p ? { provider: p, model: providerModels(p)[0]?.model_id ?? '' } : undefined })); }} className='h-7 text-xs'><NativeSelectOption value=''>خودکار (مسیریاب SEO Brain)</NativeSelectOption><NativeSelectOptGroup label='ارائه‌دهنده مستقیم (Claude · OpenAI · Gemini · …)'>{providers.filter((p) => kindOf(p) !== 'omniroute').map((p) => <NativeSelectOption key={p} value={p}>{p} · {KIND_LABEL[kindOf(p)] ?? kindOf(p)}</NativeSelectOption>)}</NativeSelectOptGroup>{providers.some((p) => kindOf(p) === 'omniroute') && <NativeSelectOptGroup label='گیت‌وی (OmniRoute → Claude/OpenAI/Gemini/…)'>{providers.filter((p) => kindOf(p) === 'omniroute').map((p) => <NativeSelectOption key={p} value={p}>{p} · OmniRoute</NativeSelectOption>)}</NativeSelectOptGroup>}</NativeSelect>
                   {o && <NativeSelect value={o.model} onChange={(e) => setOverrides((s) => ({ ...s, [a]: { provider: o.provider, model: e.target.value } }))} className='h-7 text-xs'>{providerModels(o.provider).map((m) => <NativeSelectOption key={m.id} value={m.model_id}>{m.model_id} · {m.tier} · {m.price_out_per_m}$/M</NativeSelectOption>)}</NativeSelect>}
                 </div>
               </div>); })}
@@ -145,7 +148,7 @@ export function AiStudio({ sites, initialSiteId, initialContentId }: { sites: Si
                   {run.status === 'succeeded' && (
                     <div className='mt-3 flex flex-wrap gap-2'>
                       {run.mode === 'manual' && !run.draft_id && <Button onClick={() => accept(run)}>ساخت پیش‌نویس از این خروجی (تأیید انسانی)</Button>}
-                      {run.draft_id && <Button variant='secondary' render={<Link href={`/dashboard/content?site=${siteId}`} />}>باز کردن در مغز محتوا (امتیاز/بازبینی/تأیید)</Button>}
+                      {run.draft_id && <Button variant='secondary' nativeButton={false} render={<Link href={`/dashboard/content?site=${siteId}`} />}>باز کردن در مغز محتوا (امتیاز/بازبینی/تأیید)</Button>}
                       <Button variant='outline' onClick={() => setCompare(([a, b]) => (a ? [a, run] : [run, b]))}>افزودن به مقایسه</Button>
                     </div>
                   )}

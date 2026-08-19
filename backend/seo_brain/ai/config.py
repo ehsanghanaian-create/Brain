@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Callable
 
 import httpx
-from sqlalchemy import Engine, and_, delete, select
+from sqlalchemy import Engine, and_, delete, select, text
 
 from ..core.secrets import SecretStore, get_secret_store
 from ..db.repositories.base import Repository, dumps, loads, utcnow
@@ -18,13 +18,21 @@ from ..db.tables import ai_providers, ai_routes
 log = logging.getLogger("ai.config")
 
 PROVIDER_KINDS: dict[str, dict[str, Any]] = {
-    "anthropic": {"label": "Claude (Anthropic)", "base_url": "https://api.anthropic.com", "models": ["claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"], "needs_key": True},
+    "anthropic": {"label": "Claude (Anthropic)", "base_url": "https://api.anthropic.com", "models": ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5", "claude-opus-4-8", "claude-sonnet-4-6", "claude-fable-5"], "needs_key": True,
+                  "setup": {"console_url": "https://platform.claude.com/settings/keys", "key_prefix": "sk-ant-", "docs": "https://platform.claude.com/docs/en/get-started",
+                            "fa": "کلید API را از کنسول Anthropic (Settings → API keys) بسازید و همین‌جا وارد کنید. کلید فقط یک‌بار ارسال می‌شود، با DPAPI روی همین دستگاه رمزنگاری می‌شود و هرگز در پاسخ API، لاگ یا دیتابیس ظاهر نمی‌شود."}},
     "openai": {"label": "ChatGPT (OpenAI)", "base_url": "https://api.openai.com/v1", "models": ["gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4o"], "needs_key": True},
     "google": {"label": "Gemini (Google)", "base_url": "https://generativelanguage.googleapis.com/v1beta", "models": ["gemini-2.5-pro", "gemini-2.5-flash"], "needs_key": True},
     "openrouter": {"label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "models": [], "needs_key": True},
     "ollama": {"label": "مدل محلی (Ollama)", "base_url": "http://127.0.0.1:11434", "models": [], "needs_key": False},
     "custom": {"label": "API سفارشی (سازگار با OpenAI)", "base_url": "", "models": [], "needs_key": False},
+    # external routing gateway (OpenAI-compatible) — SEO Brain Gateway → OmniRoute → Claude/OpenAI/Gemini/…
+    "omniroute": {"label": "OmniRoute (گیت‌وی مسیریابی)", "base_url": "http://127.0.0.1:20128/v1", "models": ["auto", "auto/fast", "auto/cheap", "auto/coding"], "needs_key": False, "is_gateway": True,
+                  "setup": {"console_url": "http://127.0.0.1:20128/dashboard", "key_prefix": "", "docs": "https://github.com/diegosouzapw/OmniRoute",
+                            "fa": "OmniRoute یک گیت‌وی متن‌باز است که Claude/OpenAI/Gemini و صدها ارائه‌دهنده دیگر را پشت یک endpoint سازگار با OpenAI قرار می‌دهد (پیش‌فرض http://127.0.0.1:20128/v1؛ نصب: npm i -g omniroute). کلید API اختیاری است (Dashboard → Endpoints) و فقط در SecretStore نگهداری می‌شود. Gateway خود SEO Brain (بودجه، دفتر مصرف، اعتبارسنجی، مسیردهی) دست‌نخورده می‌ماند."}},
 }
+KEYLESS_KINDS = ("ollama", "custom", "omniroute")      # configured without a stored key
+GATEWAY_KINDS = ("omniroute",)                          # external routers (provider/model ids resolved upstream)
 TASK_KINDS = ("content_writing", "seo_analysis", "research", "brief", "keyword_analysis", "internal_linking", "schema", "generic",
               # phase 9 task kinds
               "outline", "article_section", "article_long", "rewrite", "seo_review", "fact_check", "title_meta", "faq", "translation")
@@ -50,6 +58,10 @@ class ProviderConfig:
         d.pop("secret_ref", None)                    # never leak the reference either
         d["has_key"] = bool(self.secret_ref)
         d["kind_label"] = PROVIDER_KINDS.get(self.kind, {}).get("label", self.kind)
+        d["is_gateway"] = self.kind in GATEWAY_KINDS
+        d["route_kind"] = "gateway" if self.kind in GATEWAY_KINDS else "direct"
+        d["endpoint_url"] = self.base_url                # explicit alias for gateways (same column)
+        d["configured"] = bool(self.enabled and (self.secret_ref or self.kind in KEYLESS_KINDS))
         return d
 
 
@@ -134,6 +146,7 @@ class ProviderConfigRepository(Repository):
         with self.engine.begin() as cx:
             cx.execute(ai_routes.update().where(ai_routes.c.provider_id == pid).values(provider_id=None, model=None, updated_at=utcnow()))
             cx.execute(ai_routes.update().where(ai_routes.c.fallback_provider_id == pid).values(fallback_provider_id=None, fallback_model=None, updated_at=utcnow()))
+            cx.execute(text("DELETE FROM ai_models WHERE provider_id=:p"), {"p": pid})          # catalog rows (FK) — phase 9 tables
             cx.execute(delete(ai_providers).where(ai_providers.c.id == pid))
         return True
 
@@ -177,6 +190,39 @@ class ProviderConfigRepository(Repository):
             self.upsert(cx, ai_routes, vals, conflict=["task_kind", "site_id"])
         return next(r for r in self.routes(site_id if site_id != "*" else None) if r["task_kind"] == task_kind)
 
+    # ---- recommended routes per provider kind (applied only on explicit human action — routing never changes by itself)
+    def recommended_routes(self, p: ProviderConfig) -> list[dict[str, Any]]:
+        """Suggested explicit routes for a provider (model + fallback), by task kind. Only Claude has a curated table for now."""
+        rec = RECOMMENDED_ROUTES.get(p.kind, {})
+        return [{"task_kind": k, "provider_id": p.id, "provider_name": p.name, "model": v[0], "fallback_model": v[1], "policy": "explicit"} for k, v in rec.items() if k in TASK_KINDS]
+
+    def apply_recommended_routes(self, pid: int, site_id: str = "*", overwrite: bool = True) -> list[dict[str, Any]]:
+        p = self.get(pid)
+        if not p:
+            raise ValueError("provider not found")
+        current = {r["task_kind"]: r for r in self.routes(None if site_id == "*" else site_id)}
+        applied = []
+        for rec in self.recommended_routes(p):
+            cur = current.get(rec["task_kind"]) or {}
+            if not overwrite and cur.get("provider_id"):
+                continue
+            applied.append(self.set_route(rec["task_kind"], pid, rec["model"], fallback_provider_id=pid if rec["fallback_model"] else None, fallback_model=rec["fallback_model"], site_id=site_id, policy="explicit"))
+        return applied
+
+
+# task_kind → (primary model, fallback model) — Sonnet balanced, Opus quality, Haiku fast
+RECOMMENDED_ROUTES: dict[str, dict[str, tuple[str, str | None]]] = {
+    # OmniRoute: let its own router pick upstreams; fast tasks → auto/fast; everything falls back to plain auto
+    "omniroute": {k: (("auto/fast", "auto") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic") else ("auto", "auto/fast")) for k in TASK_KINDS},
+    "anthropic": {
+        "article_long": ("claude-sonnet-5", "claude-opus-5"), "article_section": ("claude-sonnet-5", "claude-opus-5"), "content_writing": ("claude-sonnet-5", "claude-opus-5"),
+        "seo_review": ("claude-sonnet-5", "claude-haiku-4-5"), "seo_analysis": ("claude-sonnet-5", "claude-haiku-4-5"), "fact_check": ("claude-sonnet-5", "claude-opus-5"),
+        "research": ("claude-sonnet-5", "claude-haiku-4-5"), "brief": ("claude-sonnet-5", "claude-haiku-4-5"), "translation": ("claude-sonnet-5", "claude-haiku-4-5"),
+        "outline": ("claude-haiku-4-5", "claude-sonnet-5"), "rewrite": ("claude-haiku-4-5", "claude-sonnet-5"), "title_meta": ("claude-haiku-4-5", "claude-sonnet-5"), "faq": ("claude-haiku-4-5", "claude-sonnet-5"),
+        "internal_linking": ("claude-haiku-4-5", "claude-sonnet-5"), "schema": ("claude-haiku-4-5", "claude-sonnet-5"), "keyword_analysis": ("claude-haiku-4-5", "claude-sonnet-5"), "generic": ("claude-haiku-4-5", "claude-sonnet-5"),
+    },
+}
+
 
 # --------------------------------------------------------------------------- connection tests (read-only GETs)
 def test_provider(p: ProviderConfig, api_key: str | None, fetch: Callable[..., httpx.Response] | None = None) -> dict[str, Any]:
@@ -190,7 +236,7 @@ def test_provider(p: ProviderConfig, api_key: str | None, fetch: Callable[..., h
         if p.kind == "anthropic":
             r = get(f"{base}/v1/models", {"x-api-key": api_key or "", "anthropic-version": "2023-06-01"})
             models = [m.get("id") for m in (r.json().get("data") or [])] if r.status_code == 200 else []
-        elif p.kind in ("openai", "openrouter", "custom"):
+        elif p.kind in ("openai", "openrouter", "custom", "omniroute"):
             r = get(f"{base}/models", {"Authorization": f"Bearer {api_key}"} if api_key else {})
             models = [m.get("id") for m in (r.json().get("data") or [])] if r.status_code == 200 else []
         elif p.kind == "google":

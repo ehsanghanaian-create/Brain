@@ -17,7 +17,7 @@ export default async function SitesPage() {
     <PageContainer
       pageTitle='سایت‌ها'
       pageDescription='هر سایت یک فضای کاری مستقل دارد (داده، گراف، حافظه، اتصال‌ها، حالت انتشار).'
-      pageHeaderAction={<Button render={<Link href='/dashboard/sites/new' />}>افزودن سایت</Button>}
+      pageHeaderAction={<Button nativeButton={false} render={<Link href='/dashboard/sites/new' />}>افزودن سایت</Button>}
     >
       {sites.error ? (
         <BackendError error={sites.error} />

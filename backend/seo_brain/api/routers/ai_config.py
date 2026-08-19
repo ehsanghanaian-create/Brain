@@ -7,7 +7,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Engine
 
 from ...ai.config import PROVIDER_KINDS, TASK_KINDS, ProviderConfigRepository, test_provider
-from ..deps import engine
+from ...db.repositories.base import utcnow
+from ..deps import engine, gateway
 from ..errors import ApiError
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -96,13 +97,84 @@ def delete_provider_config(pid: int, repo: ProviderConfigRepository = Depends(cf
 
 
 @router.post("/provider-configs/{pid}/test")
-def test_provider_config(pid: int, repo: ProviderConfigRepository = Depends(cfg_repo)) -> dict:
+def test_provider_config(pid: int, repo: ProviderConfigRepository = Depends(cfg_repo), g=Depends(gateway)) -> dict:
+    """Read-only connection probe (model list) through the Gateway adapter — same transport/keys as real calls; never sends a prompt."""
     p = repo.get(pid)
     if not p:
         raise HTTPException(404, "provider not found")
-    res = test_provider(p, repo.api_key(p))
+    key = repo.api_key(p)
+    if PROVIDER_KINDS.get(p.kind, {}).get("needs_key") and not key:
+        res = {"ok": False, "status": "not_configured", "message": "کلید API ثبت نشده است", "tested_at": utcnow()}
+    else:
+        try:
+            g.invalidate(p.name)
+            r = g.adapter(p.name).test_connection()
+            models = [m for m in (r.get("models") or []) if m]
+            res = ({"ok": True, "status": "ok", "message": f"اتصال برقرار است — {len(models)} مدل در دسترس", "models_found": models[:50], "tested_at": utcnow()} if r.get("ok")
+                   else {"ok": False, "status": "not_authorized" if "unauthorized" in str(r.get("error", "")) else "error", "message": f"اتصال ناموفق: {r.get('error')}", "tested_at": utcnow()})
+        except Exception:  # noqa: BLE001 — fall back to the phase-6 probe
+            res = test_provider(p, key)
     repo.record_test(pid, res)
     return res
+
+
+@router.get("/provider-configs/{pid}/recommended-routes")
+def recommended_routes(pid: int, repo: ProviderConfigRepository = Depends(cfg_repo)) -> dict:
+    """Curated route table for this provider kind (Claude: Sonnet balanced / Opus quality / Haiku fast). Read-only — nothing changes."""
+    p = repo.get(pid)
+    if not p:
+        raise HTTPException(404, "provider not found")
+    return {"provider_id": pid, "kind": p.kind, "routes": repo.recommended_routes(p)}
+
+
+class ApplyRoutes(BaseModel):
+    site_id: str = "*"
+    overwrite: bool = True
+
+
+@router.post("/provider-configs/{pid}/recommended-routes")
+def apply_recommended_routes(pid: int, body: ApplyRoutes | None = None, repo: ProviderConfigRepository = Depends(cfg_repo)) -> dict:
+    """Human action: apply the curated routes as explicit ai_routes (routing never changes automatically)."""
+    body = body or ApplyRoutes()
+    try:
+        applied = repo.apply_recommended_routes(pid, body.site_id, body.overwrite)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {"provider_id": pid, "applied": len(applied), "routes": applied}
+
+
+@router.get("/provider-configs/{pid}/gateway-status")
+def gateway_status(pid: int, repo: ProviderConfigRepository = Depends(cfg_repo), g=Depends(gateway)) -> dict:
+    """Connection / routing / fallback status of a provider (rich for gateway kinds such as OmniRoute). Read-only, no prompt sent."""
+    from sqlalchemy import select as _select
+    from ...db.tables import ai_calls
+    p = repo.get(pid)
+    if not p:
+        raise HTTPException(404, "provider not found")
+    d = p.to_dict()
+    health = next((h for h in g.health() if h["provider"] == p.name), None)
+    caps: dict = {}; last_decision = None; adapter_health = None
+    try:
+        a = g.adapter(p.name)
+        caps = a.capabilities() if hasattr(a, "capabilities") else {}
+        last_decision = getattr(a, "last_decision", None); adapter_health = getattr(a, "last_health", None)
+    except Exception as e:  # noqa: BLE001 — not configured/enabled
+        caps = {"error": str(e)}
+    routes = repo.routes(None)
+    primary = [r["task_kind"] for r in routes if r.get("provider_id") == pid]
+    fallback_for = [r["task_kind"] for r in routes if r.get("fallback_provider_id") == pid or any(fb.get("provider_id") == pid for fb in (r.get("fallbacks") or []))]
+    with g.engine.connect() as cx:
+        recent = [dict(r._mapping) for r in cx.execute(_select(ai_calls.c.id, ai_calls.c.model, ai_calls.c.ok, ai_calls.c.latency_ms, ai_calls.c.cost_usd, ai_calls.c.task_kind, ai_calls.c.created_at, ai_calls.c.error)
+                                                       .where(ai_calls.c.provider == p.name).order_by(ai_calls.c.id.desc()).limit(8)).all()]
+    models = g.models(pid, enabled_only=True)
+    breaker_open = bool(health and health.get("breaker_open_until") and health["breaker_open_until"] > utcnow())
+    status = "missing_credentials" if not d["configured"] else ("error" if (p.last_test and not p.last_test.get("ok")) or breaker_open else ("connected" if p.last_test and p.last_test.get("ok") else "untested"))
+    return {"provider_id": pid, "name": p.name, "kind": p.kind, "is_gateway": d["is_gateway"], "endpoint_url": d["endpoint_url"], "status": status, "has_key": d["has_key"], "last_test": p.last_test,
+            "health": health, "breaker_open": breaker_open, "capabilities": caps, "adapter_health": adapter_health,
+            "routing": {"last_decision": last_decision, "primary_for": primary, "auto_models": caps.get("auto_models") or [], "models_available": len(models),
+                        "models": [m["model_id"] for m in models][:50]},
+            "fallback": {"fallback_for": fallback_for, "chain_fallback": "SEO Brain Gateway: retry once → next RouteStep → Echo only if chain empty", "upstream": caps.get("fallback")},
+            "recent_calls": recent}
 
 
 @router.get("/task-routes")

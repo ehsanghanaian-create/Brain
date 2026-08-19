@@ -41,11 +41,11 @@ Date: 2026-08-17 · Existing contracts unchanged (new `/keywords/*` router, migr
 |---|---|
 | Backend pytest | 63 passed (+6 phase-5: normalize/tokenize; CSV Persian headers dry-run→write→re-import updates; XLSX + mapping override + missing keyword column + empty file; CRUD/filters/409/422; IDF clustering groups by discriminating tokens & keeps manual cluster; end-to-end GSC join → 4 opportunity kinds asserted → status kept across re-analyze → topic-map → manual topic survives recluster → KEYWORD/TOPIC in graph view → delete cascades) |
 | Live validation | 79/79 (+15 keyword checks) |
-| Browser (real site) | table with live GSC (e.g. «امداد مدیران خودرو» #8.8 · 0.8٪ · ۱٬۵۲۳ · ۱۲); topic map cards; opportunities tab (7 → accept works); import dialog: file upload through the proxy, auto-mapping `Keyword/Intent/Volume/Priority/Target URL`, duplicate row skipped, commit → 8 keywords; re-cluster → «امداد خودرو چری» ×3, «امداد خودرو mvm» ×2 |
+| Browser (real site) | table with live GSC (e.g. «نمونه سایت خودرو» #8.8 · 0.8٪ · ۱٬۵۲۳ · ۱۲); topic map cards; opportunities tab (7 → accept works); import dialog: file upload through the proxy, auto-mapping `Keyword/Intent/Volume/Priority/Target URL`, duplicate row skipped, commit → 8 keywords; re-cluster → «امداد خودرو چری» ×3, «امداد خودرو mvm» ×2 |
 | tsc | 0 errors |
 
 ## 6. Notes
-* Sample data: 8 real queries of emdadmodiran were imported during verification (they carry real GSC metrics) — delete them from the UI if you don't want them.
+* Sample data: 8 real queries of example-site were imported during verification (they carry real GSC metrics) — delete them from the UI if you don't want them.
 * Fixed along the way: proxy now forwards `arrayBuffer` (multipart uploads were being corrupted by `text()`); cluster topics were sticky across re-clustering (now only user-set topics are preserved, marked `+manual_topic`).
 * GSC join is exact on normalized text; synonym-aware matching (mvm ↔ ام وی ام) is a Phase 9 (AI) improvement.
 * Content Brain untouched. Next: **Phase 6 — Content Brain (Kanban pipeline)**.

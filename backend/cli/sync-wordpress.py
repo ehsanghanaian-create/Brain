@@ -1,6 +1,6 @@
 """Sync WordPress content (read-only) into SQLite.
 
-    python scripts/sync-wordpress.py --site emdadmodiran [--no-auth]
+    python scripts/sync-wordpress.py --site example-site [--no-auth]
 """
 import _bootstrap  # noqa: F401
 import argparse

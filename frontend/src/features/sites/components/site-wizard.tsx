@@ -132,7 +132,7 @@ export function SiteWizard() {
           <CardContent className='grid gap-4 md:grid-cols-2'>
             <div className='grid gap-1.5'>
               <Label htmlFor='name'>نام سایت</Label>
-              <Input id='name' value={name} onChange={(e) => setName(e.target.value)} placeholder='امداد مدیران' />
+              <Input id='name' value={name} onChange={(e) => setName(e.target.value)} placeholder='نمونه سایت' />
             </div>
             <div className='grid gap-1.5'>
               <Label htmlFor='domain'>دامنه</Label>
@@ -236,8 +236,8 @@ export function SiteWizard() {
               <Button variant='ghost' onClick={() => setStep(2)}>بازگشت</Button>
               {init && (
                 <div className='flex gap-2'>
-                  <Button variant='secondary' render={<Link href={`/dashboard/sites/${site.site_id}?tab=brain`} />}>پیکربندی مغز سایت</Button>
-                  <Button render={<Link href={`/dashboard/sites/${site.site_id}`} />}>رفتن به صفحه سایت</Button>
+                  <Button variant='secondary' nativeButton={false} render={<Link href={`/dashboard/sites/${site.site_id}?tab=brain`} />}>پیکربندی مغز سایت</Button>
+                  <Button nativeButton={false} render={<Link href={`/dashboard/sites/${site.site_id}`} />}>رفتن به صفحه سایت</Button>
                 </div>
               )}
             </div>

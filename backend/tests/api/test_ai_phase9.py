@@ -10,7 +10,7 @@ from seo_brain.ai.config import ProviderConfigRepository
 from seo_brain.ai.gateway import CallMeta, Gateway, RouteStep, TaskRouter
 from seo_brain.ai.gateway.adapters import AnthropicAdapter, GeminiAdapter, OllamaAdapter, OpenAICompatAdapter
 from seo_brain.ai.prompts import PromptError, PromptLibrary, render
-from seo_brain.ai.types import AIMessage, AIRequest, AITask, TaskKind
+from seo_brain.ai.types import AIMessage, AIRequest, AIResponse, AITask, TaskKind
 from seo_brain.api import deps
 from seo_brain.api.main import create_app
 from seo_brain.api.routers import ai_config as ai_config_router
@@ -319,3 +319,246 @@ def test_route_policy_fallbacks_and_budget_put(c):
     assert b["limit_usd"] == 5.0 and b["thresholds"] == {"warning": 0.8, "soft_limit": 1.0, "hard_stop": 1.2}
     assert c.get("/api/v1/ai/budget", params={"site_id": SID}).json()["limit_usd"] == 5.0
     assert c.put("/api/v1/ai/budget", params={"site_id": SID}, json={"budget_usd_month": 0}).status_code == 422
+
+
+def test_ai_workspace_echo_and_real_provider(c):
+    """AI Content Test Workspace: options (echo + configured providers), estimate, generate via Echo (placeholder), generate via a fake OpenAI provider,
+    SEO analysis, prompt/meta, save as draft (human action), history — all through the Gateway abstraction."""
+    _seed_content(c)
+    opts = c.get(f"/api/v1/sites/{SID}/ai-workspace/options").json()
+    echo = next(p for p in opts["providers"] if p["name"] == "echo")
+    assert echo["configured"] and echo["status"] == "offline_fallback" and opts["default"]["provider"] == "echo" and [s["key"] for s in opts["steps"]][:3] == ["research", "outline", "writer"] and opts["prompt"]
+    spec = {"title": "امداد خودرو MVM در تهران", "keyword": "امداد خودرو mvm", "secondary_keywords": ["یدک کش mvm", "امداد خودرو mvm تهران"], "intent": "transactional", "content_type": "service_landing", "category": "MVM",
+            "audience": "مالکان MVM", "tone": "formal", "word_count": 600, "instructions": "شماره تماس در پاراگراف اول"}
+    est = c.post(f"/api/v1/sites/{SID}/ai-workspace/estimate", json={**spec, "provider": "echo"}).json()
+    assert est["provider"] == "echo" and est["input_tokens"] > 0 and est["prompt_ref"].startswith("task.article_test") and est["memory_snapshot_id"] > 0
+    g = c.post(f"/api/v1/sites/{SID}/ai-workspace/generate", json={**spec, "provider": "echo"})
+    assert g.status_code == 200, g.text
+    out = g.json()
+    assert out["ok"] and out["meta"]["provider"] == "echo" and out["meta"]["placeholder"] is True and out["result"]["markdown"].startswith("# ") and out["result"]["sections"] and out["result"]["faq"]
+    assert out["seo"]["total_checks"] == 9 and any(ch["key"] == "kw_in_title" and ch["ok"] for ch in out["seo"]["checks"]) and "memory_pack" not in out["prompt"]["user"] and "حافظه سایت" in out["prompt"]["user"]
+    assert "امداد خودرو mvm" in out["result"]["markdown"] and out["result"]["word_count"] > 0
+    # real (fake-transport) provider
+    _add_provider(c, "OpenAI", "openai")
+    opts2 = c.get(f"/api/v1/sites/{SID}/ai-workspace/options").json()
+    oa = next(p for p in opts2["providers"] if p["name"] == "OpenAI")
+    assert oa["configured"] and any(m["model_id"] == "gpt-4o-mini" for m in oa["models"])
+    g2r = c.post(f"/api/v1/sites/{SID}/ai-workspace/generate", json={**spec, "provider": "OpenAI", "model": "gpt-4o-mini"}); assert g2r.status_code == 200, g2r.text; g2 = g2r.json()
+    assert g2["meta"]["provider"] == "OpenAI" and g2["meta"]["model"] == "gpt-4o-mini" and g2["meta"]["placeholder"] is False and g2["result"]["sections"] and g2["meta"]["input_tokens"] >= 0
+    hist = c.get(f"/api/v1/sites/{SID}/ai-workspace/history").json()
+    assert len(hist) >= 2 and hist[0]["provider"] == "OpenAI"
+    # save as draft into an existing content item (human hand-off)
+    cid = c.get(f"/api/v1/sites/{SID}/content").json()["items"][0]["id"]
+    sd = c.post(f"/api/v1/sites/{SID}/ai-workspace/save-draft", json={"content_id": cid, "markdown": out["result"]["markdown"], "title": out["result"]["title"], "meta_description": out["result"]["meta_description"], "meta": out["meta"]})
+    assert sd.status_code == 201 and sd.json()["draft_id"]
+    d = c.get(f"/api/v1/sites/{SID}/content/{cid}/drafts").json()[0]
+    assert d["source"] == "ai:echo" and d["review_status"] == "none"
+    assert c.post(f"/api/v1/sites/{SID}/ai-workspace/save-draft", json={"content_id": 99999, "markdown": "# x"}).status_code == 404
+
+
+# --------------------------------------------------------------------------- Claude (Anthropic) integration
+def _sse(events: list[dict]) -> bytes:
+    return "".join(f"event: {e['type']}\ndata: {json.dumps(e, ensure_ascii=False)}\n\n" for e in events).encode()
+
+
+def test_anthropic_adapter_streaming_sampling_count_tokens_and_refusal():
+    from seo_brain.ai.providers.base import ProviderError
+    seen = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        body = json.loads(req.content or b"{}") if req.method == "POST" else {}
+        seen[req.url.path] = body
+        assert req.headers.get("x-api-key") == "sk-ant-test" and req.headers.get("anthropic-version")
+        if req.url.path == "/v1/messages/count_tokens":
+            return httpx.Response(200, json={"input_tokens": 321})
+        if req.url.path == "/v1/models":
+            return httpx.Response(200, json={"data": [{"id": "claude-sonnet-5"}, {"id": "claude-opus-5"}], "has_more": False})
+        if body.get("model") == "refuse-me":
+            return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=_sse([
+                {"type": "message_start", "message": {"id": "m0", "model": "refuse-me", "usage": {"input_tokens": 5}}},
+                {"type": "message_delta", "delta": {"stop_reason": "refusal", "stop_details": {"category": "cyber"}}, "usage": {"output_tokens": 0}}]))
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=_sse([
+            {"type": "message_start", "message": {"id": "msg_s", "model": body.get("model"), "usage": {"input_tokens": 100, "output_tokens": 1}}},
+            {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+            {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "```json\n{\"title\": \"سلام\","}},
+            {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": " \"sections\": []}\n```"}},
+            {"type": "content_block_stop", "index": 0},
+            {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 42}},
+            {"type": "message_stop"}]))
+
+    a = AnthropicAdapter("anthropic", "sk-ant-test", None, [], {"claude-sonnet-5": (3.0, 15.0)}, transport=httpx.MockTransport(handler))
+    # sonnet-5: streamed, no temperature, fences stripped, usage merged from message_start + message_delta
+    deltas = []
+    r = a.complete(AIRequest(model="claude-sonnet-5", messages=[AIMessage("system", "s"), AIMessage("user", "u")], max_tokens=500, temperature=0.4, json_schema={"properties": {"title": {}, "sections": {}}}), on_delta=deltas.append)
+    assert seen["/v1/messages"]["stream"] is True and "temperature" not in seen["/v1/messages"] and seen["/v1/messages"]["system"] == "s"
+    assert json.loads(r.text)["title"] == "سلام" and r.input_tokens == 100 and r.output_tokens == 42 and r.cost_usd == pytest.approx((100 * 3 + 42 * 15) / 1e6) and r.raw["streamed"] and len(deltas) == 2
+    # legacy model keeps temperature
+    a.complete(AIRequest(model="claude-sonnet-4-5", messages=[AIMessage("user", "u")], max_tokens=50, temperature=0.2))
+    assert seen["/v1/messages"]["temperature"] == 0.2 and AnthropicAdapter.accepts_temperature("claude-haiku-4-5") and not AnthropicAdapter.accepts_temperature("claude-opus-5")
+    # exact estimate via count_tokens
+    est = a.estimate(AIRequest(model="claude-sonnet-5", messages=[AIMessage("user", "متن")], max_tokens=1000, temperature=0.4))
+    assert est["exact"] and est["input_tokens"] == 321 and "max_tokens" not in seen["/v1/messages/count_tokens"] and "stream" not in seen["/v1/messages/count_tokens"]
+    assert a.list_models() == ["claude-sonnet-5", "claude-opus-5"] and a.test_connection()["ok"]
+    # refusal → non-retryable
+    with pytest.raises(ProviderError) as ei:
+        a.complete(AIRequest(model="refuse-me", messages=[AIMessage("user", "u")], max_tokens=50, temperature=0))
+    assert ei.value.retryable is False and "refusal" in str(ei.value)
+    # no key → heuristic estimate, no network
+    est2 = AnthropicAdapter("anthropic", None, None, [], {}, transport=httpx.MockTransport(lambda rq: httpx.Response(500))).estimate(AIRequest(model="claude-sonnet-5", messages=[AIMessage("user", "متن")], max_tokens=1000, temperature=0.4))
+    assert est2["input_tokens"] > 0 and not est2.get("exact")
+
+
+def test_claude_provider_setup_routes_and_workspace_default(c):
+    """Claude provider via SecretStore: catalog seeded (Sonnet/Opus/Haiku), key never returned, recommended routes are a human action,
+    workspace defaults to Claude Sonnet with Echo kept as offline fallback, generation metadata carries prompt version + memory snapshot."""
+    _seed_content(c)
+    p = _add_provider(c, "anthropic", "anthropic", "sk-ant-api03-abcdefgh1234")
+    assert p["has_key"] and p["key_hint"] == "1234" and "secret_ref" not in p and "api_key" not in json.dumps(p) and p["default_model"] == "claude-sonnet-5"
+    kinds = {k["kind"]: k for k in c.get("/api/v1/ai/provider-kinds").json()}
+    assert kinds["anthropic"]["setup"]["console_url"].startswith("https://platform.claude.com") and "claude-haiku-4-5" in kinds["anthropic"]["models"]
+    models = {m["model_id"]: m for m in c.get(f"/api/v1/ai/models?provider_id={p['id']}").json()}
+    assert {"claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5"} <= set(models) and models["claude-sonnet-5"]["tier"] == "balanced" and models["claude-opus-5"]["tier"] == "quality" and models["claude-haiku-4-5"]["tier"] == "fast"
+    assert models["claude-sonnet-5"]["price_out_per_m"] == 15.0 and models["claude-opus-5"]["price_in_per_m"] == 5.0
+    # discovery merges live model ids without duplicating catalog rows
+    sync = c.post(f"/api/v1/ai/models/sync?provider_id={p['id']}").json()
+    assert sync["anthropic"]["discovered"] == 2 and all("claude" in m for m in models)
+    # test connection (fake transport) → status recorded, no key in response
+    t = c.post(f"/api/v1/ai/provider-configs/{p['id']}/test").json()
+    assert t["ok"] and "sk-ant" not in json.dumps(t)
+    # recommended routes: preview is read-only, applying is explicit
+    rec = c.get(f"/api/v1/ai/provider-configs/{p['id']}/recommended-routes").json()["routes"]
+    by = {r["task_kind"]: r for r in rec}
+    assert by["article_long"]["model"] == "claude-sonnet-5" and by["article_long"]["fallback_model"] == "claude-opus-5" and by["seo_review"]["model"] == "claude-sonnet-5" and by["title_meta"]["model"] == "claude-haiku-4-5"
+    assert all(r["provider_id"] is None for r in c.get("/api/v1/ai/task-routes").json()["routes"])
+    ap = c.post(f"/api/v1/ai/provider-configs/{p['id']}/recommended-routes", json={}).json()
+    assert ap["applied"] == len(rec)
+    routes = {r["task_kind"]: r for r in c.get("/api/v1/ai/task-routes").json()["routes"]}
+    assert routes["article_long"]["provider_name"] == "anthropic" and routes["article_long"]["model"] == "claude-sonnet-5" and routes["article_long"]["fallback_model"] == "claude-opus-5" and routes["article_long"]["policy"] == "explicit"
+    assert routes["faq"]["model"] == "claude-haiku-4-5"
+    prev = c.get("/api/v1/ai/routing/preview?task_kind=article_long").json()
+    assert prev["policy"] == "explicit" and [s["model"] for s in prev["chain"][:2]] == ["claude-sonnet-5", "claude-opus-5"]
+    # workspace: Claude Sonnet is the default, Echo remains available (last)
+    opts = c.get(f"/api/v1/sites/{SID}/ai-workspace/options").json()
+    assert opts["default"] == {"provider": "anthropic", "model": "claude-sonnet-5", "kind": "anthropic"} and opts["providers"][-1]["name"] == "echo"
+    cl = next(pp for pp in opts["providers"] if pp["name"] == "anthropic")
+    assert cl["status"] == "connected" and cl["models"][0]["model_id"] == "claude-sonnet-5" and cl["models"][0]["display"] == "Claude Sonnet 5" and cl["last_test"]["ok"]
+    spec = {"title": "امداد خودرو رنو ساندرو", "keyword": "امداد خودرو رنو ساندرو", "secondary_keywords": ["امداد خودرو ساندرو تهران"], "intent": "commercial", "content_type": "service_landing", "word_count": 500}
+    est = c.post(f"/api/v1/sites/{SID}/ai-workspace/estimate", json={**spec, "provider": "anthropic"}).json()      # provider without model → default model
+    assert est["provider"] == "anthropic" and est["model"] == "claude-sonnet-5" and est["cost_usd"] > 0
+    g = c.post(f"/api/v1/sites/{SID}/ai-workspace/generate", json={**spec, "provider": "anthropic", "model": "claude-sonnet-5"}); assert g.status_code == 200, g.text
+    m = g.json()["meta"]
+    assert m["provider"] == "anthropic" and m["provider_kind"] == "anthropic" and m["model"] == "claude-sonnet-5" and m["placeholder"] is False and m["prompt_version"].startswith("task.article_test") and m["memory_snapshot_id"] > 0 and m["run_id"].startswith("ws-")
+    assert m["input_tokens"] == 120 and m["output_tokens"] == 80 and m["cost_usd"] == pytest.approx((120 * 3 + 80 * 15) / 1e6)
+    hist = c.get(f"/api/v1/sites/{SID}/ai-workspace/history").json()
+    assert hist[0]["provider"] == "anthropic" and hist[0]["run_id"] == m["run_id"]
+    # Echo still works as explicit offline fallback
+    e = c.post(f"/api/v1/sites/{SID}/ai-workspace/generate", json={**spec, "provider": "echo"}).json()
+    assert e["meta"]["provider"] == "echo" and e["meta"]["placeholder"] is True
+    # provider without key → missing_credentials in options, router ignores it
+    p2 = c.post("/api/v1/ai/provider-configs", json={"name": "claude-nokey", "kind": "anthropic"}).json()
+    o2 = next(pp for pp in c.get(f"/api/v1/sites/{SID}/ai-workspace/options").json()["providers"] if pp["name"] == "claude-nokey")
+    assert o2["status"] == "missing_credentials" and not o2["configured"] and p2["has_key"] is False
+
+
+# --------------------------------------------------------------------------- OmniRoute (external gateway behind the SEO Brain Gateway)
+def _omni_transport(grouped: bool = False, key_required: str | None = None):
+    seen: dict = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen[req.url.path] = json.loads(req.content or b"{}") if req.method == "POST" else {}
+        seen["auth"] = req.headers.get("authorization")
+        if key_required and req.headers.get("authorization") != f"Bearer {key_required}":
+            return httpx.Response(401, json={"error": "unauthorized"})
+        if req.url.path.endswith("/models"):
+            if grouped:
+                return httpx.Response(200, json={"data": {"claude": [{"id": "opus-5"}, {"id": "claude/sonnet-5"}], "openai": [{"id": "gpt-4o"}]}})
+            return httpx.Response(200, json={"object": "list", "data": [{"id": "claude/sonnet-5", "owned_by": "claude"}, {"id": "openai/gpt-4o", "owned_by": "openai"}, {"id": "gemini/gemini-2.5-flash"}]})
+        body = seen[req.url.path]
+        want_json = bool(body.get("response_format"))
+        out = json.dumps({"title": "ساندرو", "sections": [{"h2": "خدمات", "paragraphs": ["متن"]}], "faq": [], "internal_links": [], "meta_description": "م", "h1": "ه", "keywords_used": [], "notes": ""}, ensure_ascii=False) if want_json else "پاسخ OmniRoute"
+        hdr = {"X-OmniRoute-Decision": "strategy=auto;provider=claude;model=claude-sonnet-5;latency=812", "X-OmniRoute-Cost": "0.0012"}
+        if body.get("stream"):
+            chunks = [{"id": "c1", "model": "claude/sonnet-5", "choices": [{"delta": {"content": out[:5]}}]}, {"id": "c1", "model": "claude/sonnet-5", "choices": [{"delta": {"content": out[5:]}, "finish_reason": "stop"}]},
+                      {"id": "c1", "model": "claude/sonnet-5", "choices": [], "usage": {"prompt_tokens": 90, "completion_tokens": 33}}]
+            content = "".join(f"data: {json.dumps(ch, ensure_ascii=False)}\n\n" for ch in chunks) + "data: [DONE]\n\n"
+            return httpx.Response(200, headers={"content-type": "text/event-stream", **hdr}, content=content.encode())
+        return httpx.Response(200, headers=hdr, json={"id": "cmpl-o", "model": "claude/sonnet-5", "choices": [{"message": {"content": out}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 100, "completion_tokens": 40}})
+    return httpx.MockTransport(handler), seen
+
+
+def test_omniroute_adapter_contract():
+    from seo_brain.ai.gateway.providers import OmniRouteAdapter, ProviderAdapter
+    from seo_brain.ai.providers.base import ProviderError
+    t, seen = _omni_transport()
+    a = OmniRouteAdapter("omniroute", None, None, [], {"claude/sonnet-5": (3.0, 15.0)}, transport=t)
+    assert isinstance(a, ProviderAdapter) and a.base_url == "http://127.0.0.1:20128/v1"
+    caps = a.capabilities(); assert caps["gateway"] and caps["streaming"] and "auto" in caps["auto_models"] and caps["decision_header"] == "X-OmniRoute-Decision"
+    ms = a.list_models(); assert ms[:4] == ["auto", "auto/fast", "auto/cheap", "auto/coding"] and "claude/sonnet-5" in ms and "gemini/gemini-2.5-flash" in ms and seen["auth"] is None
+    tr = a.test(); assert tr["ok"] and tr["gateway"] and a.last_health["ok"]
+    req = AIRequest(model="claude/sonnet-5", messages=[AIMessage("system", "s"), AIMessage("user", "u")], max_tokens=300, temperature=0.4, json_schema={"properties": {"title": {}, "sections": {}}})
+    r = a.complete(req)
+    assert json.loads(r.text)["title"] == "ساندرو" and r.input_tokens == 90 and r.output_tokens == 33 and r.cost_usd == pytest.approx((90 * 3 + 33 * 15) / 1e6) and r.raw["streamed"]   # complete() consumes the stream (OmniRoute may SSE regardless)
+    assert r.raw["gateway"] == "omniroute" and r.raw["decision"]["decision"].startswith("strategy=auto;provider=claude") and a.last_decision["cost"] == "0.0012"
+    assert seen["/v1/chat/completions"]["response_format"] == {"type": "json_object"} and "temperature" not in seen["/v1/chat/completions"]  # sonnet-5 → no sampling params
+    a.complete(AIRequest(model="openai/gpt-4o", messages=[AIMessage("user", "u")], max_tokens=50, temperature=0.2)); assert seen["/v1/chat/completions"]["temperature"] == 0.2
+    # streaming: deltas then final AIResponse with usage from the last chunk
+    items = list(a.stream(req)); deltas, final = items[:-1], items[-1]
+    assert len(deltas) == 2 and isinstance(final, AIResponse) and final.raw["streamed"] and final.input_tokens == 90 and final.output_tokens == 33 and json.loads(final.text)["title"] == "ساندرو"
+    assert seen["/v1/chat/completions"]["stream"] is True
+    # grouped /models shape + bearer key + 401 handling
+    t2, seen2 = _omni_transport(grouped=True, key_required="omni-key")
+    b = OmniRouteAdapter("omniroute", "omni-key", None, [], {}, transport=t2)
+    assert {"claude/opus-5", "claude/sonnet-5", "openai/gpt-4o"} <= set(b.list_models()) and seen2["auth"] == "Bearer omni-key"
+    bad = OmniRouteAdapter("omniroute", "wrong", None, [], {}, transport=t2)
+    with pytest.raises(ProviderError) as ei:
+        bad.list_models()
+    assert ei.value.retryable is False
+    # default adapters also satisfy the contract (stream = single chunk)
+    at, _ = fake_transport("anthropic")
+    an = AnthropicAdapter("anthropic", "sk-ant-test", None, [], {}, transport=at)
+    assert isinstance(an, ProviderAdapter) and an.capabilities()["gateway"] is False and isinstance(list(an.stream(AIRequest(model="claude-sonnet-5", messages=[AIMessage("user", "u")], max_tokens=20, temperature=0)))[-1], AIResponse)
+
+
+def test_omniroute_provider_end_to_end(c):
+    """OmniRoute registered as a provider kind: keyless config counts as configured, catalog seeds auto models, discovery adds provider/model ids,
+    workspace exposes route_kind gateway, gateway-status endpoint reports routing/fallback, generation runs through the SEO Brain Gateway (ledger, budget)."""
+    _seed_content(c)
+    t, seen = _omni_transport()
+    orig = c.gw._transport_factory
+    c.gw._transport_factory = lambda kind: t if kind == "omniroute" else orig(kind)
+    kinds = {k["kind"]: k for k in c.get("/api/v1/ai/provider-kinds").json()}
+    assert kinds["omniroute"]["is_gateway"] and kinds["omniroute"]["needs_key"] is False and kinds["omniroute"]["base_url"].endswith(":20128/v1")
+    p = c.post("/api/v1/ai/provider-configs", json={"name": "omniroute", "kind": "omniroute"}).json()
+    assert p["configured"] and p["is_gateway"] and p["route_kind"] == "gateway" and p["endpoint_url"] == "http://127.0.0.1:20128/v1" and p["has_key"] is False and p["default_model"] == "auto"
+    c.gw.seed_catalog(p["id"], "omniroute"); c.gw.invalidate()
+    models = {m["model_id"]: m for m in c.get(f"/api/v1/ai/models?provider_id={p['id']}").json()}
+    assert {"auto", "auto/fast", "auto/cheap", "auto/coding"} <= set(models) and models["auto"]["tier"] == "balanced"
+    sync = c.post(f"/api/v1/ai/models/sync?provider_id={p['id']}").json()["omniroute"]
+    assert sync["discovered"] >= 5 and sync["added"] >= 3
+    models = {m["model_id"]: m for m in c.get(f"/api/v1/ai/models?provider_id={p['id']}").json()}
+    assert models["claude/sonnet-5"]["tier"] == "balanced" and models["openai/gpt-4o"]["source"] == "discovered"
+    tst = c.post(f"/api/v1/ai/provider-configs/{p['id']}/test").json(); assert tst["ok"] and "auto" in tst["models_found"]
+    # optional API key → SecretStore, never returned
+    p2 = c.patch(f"/api/v1/ai/provider-configs/{p['id']}", json={"api_key": "omni-secret-7777"}).json()
+    assert p2["has_key"] and p2["key_hint"] == "7777" and "omni-secret" not in json.dumps(p2)
+    # gateway status (routing/fallback) before any call
+    gs = c.get(f"/api/v1/ai/provider-configs/{p['id']}/gateway-status").json()
+    assert gs["is_gateway"] and gs["status"] == "connected" and gs["capabilities"]["gateway"] and gs["routing"]["auto_models"][0] == "auto" and gs["routing"]["models_available"] >= 7 and gs["fallback"]["fallback_for"] == []
+    # recommended routes for the gateway → apply → article_long routed to omniroute/auto
+    ap = c.post(f"/api/v1/ai/provider-configs/{p['id']}/recommended-routes", json={}).json(); assert ap["applied"] == 17
+    prev = c.get("/api/v1/ai/routing/preview?task_kind=article_long").json(); assert prev["chain"][0]["provider"] == "omniroute" and prev["chain"][0]["model"] == "auto"
+    # workspace: gateway route kind exposed, generation goes through the SEO Brain Gateway (ledger row, decision captured)
+    opts = c.get(f"/api/v1/sites/{SID}/ai-workspace/options").json()
+    om = next(x for x in opts["providers"] if x["name"] == "omniroute"); assert om["route_kind"] == "gateway" and om["configured"] and om["status"] == "connected"
+    assert next(x for x in opts["providers"] if x["name"] == "echo")["route_kind"] == "offline"
+    spec = {"title": "امداد خودرو رنو ساندرو", "keyword": "امداد خودرو رنو ساندرو", "secondary_keywords": ["امداد خودرو ساندرو تهران"], "intent": "commercial", "content_type": "service_landing", "word_count": 400}
+    g = c.post(f"/api/v1/sites/{SID}/ai-workspace/generate", json={**spec, "provider": "omniroute", "model": "claude/sonnet-5"}); assert g.status_code == 200, g.text
+    m = g.json()["meta"]
+    assert m["provider"] == "omniroute" and m["provider_kind"] == "omniroute" and m["placeholder"] is False and m["gateway_decision"]["decision"].startswith("strategy=auto") and m["served_model"] == "claude/sonnet-5"
+    assert m["input_tokens"] == 90 and m["output_tokens"] == 33 and m["memory_snapshot_id"] > 0 and m["prompt_version"].startswith("task.article_test")
+    hist = c.get(f"/api/v1/sites/{SID}/ai-workspace/history").json(); assert hist[0]["provider"] == "omniroute"
+    gs2 = c.get(f"/api/v1/ai/provider-configs/{p['id']}/gateway-status").json()
+    assert gs2["routing"]["last_decision"]["decision"].startswith("strategy=auto") and gs2["recent_calls"][0]["ok"] == 1 and "article_long" in gs2["routing"]["primary_for"]
+    # Echo untouched
+    e = c.post(f"/api/v1/sites/{SID}/ai-workspace/generate", json={**spec, "provider": "echo"}).json(); assert e["meta"]["placeholder"] is True
+    c.gw._transport_factory = orig

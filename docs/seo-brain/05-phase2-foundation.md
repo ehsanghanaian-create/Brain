@@ -29,9 +29,9 @@ C: after cleanup ≈ 450 MB free — still low, but the frontend no longer touch
 | `tsc --noEmit` | 0 errors |
 | `GET /dashboard/{overview,sites,graph,settings,keywords}` | 200 |
 | Proxy `GET /api/backend/health` | 200 `{"status":"ok","version":"0.2.0",…}` |
-| Proxy `GET /api/backend/sites/emdadmodiran/graph/summary` | 200 · 91 nodes / 356 edges |
+| Proxy `GET /api/backend/sites/example-site/graph/summary` | 200 · 91 nodes / 356 edges |
 | Proxy error passthrough `GET /api/backend/sites/nope` | 404 with the contract envelope + `request_id` |
-| DOM (browser pane) | `dir=rtl`, `lang=fa`, `.dark`, 11 Persian menu items, sites row `امداد مدیران … sc-domain:emdadmodiran.com … دستی`, KPIs `۱ / ۹۱ / ۳۵۶ / v0.2.0 · sqlite`, `document.fonts` → Vazirmatn loaded |
+| DOM (browser pane) | `dir=rtl`, `lang=fa`, `.dark`, 11 Persian menu items, sites row `نمونه سایت … sc-domain:example.com … دستی`, KPIs `۱ / ۹۱ / ۳۵۶ / v0.2.0 · sqlite`, `document.fonts` → Vazirmatn loaded |
 | Console | no errors from the current build (two stale 500s from the very first mis-configured start remained in the console buffer) |
 
 ## 4. Deviations / notes

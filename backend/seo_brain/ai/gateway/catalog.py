@@ -7,11 +7,14 @@ from typing import Any
 TIERS = ("fast", "balanced", "quality", "reasoning")
 
 DEFAULT_CATALOG: dict[str, list[dict[str, Any]]] = {
+    # Anthropic list prices (USD / 1M tokens) as of 2026-08; aliases without date suffix are the stable IDs.
     "anthropic": [
-        {"model_id": "claude-fable-5", "display": "Claude Fable 5", "tier": "quality", "tags": ["persian", "long_form", "reasoning", "json"], "context_tokens": 200000, "price_in_per_m": 15.0, "price_out_per_m": 75.0},
-        {"model_id": "claude-opus-5", "display": "Claude Opus 5", "tier": "quality", "tags": ["persian", "long_form", "reasoning", "json"], "context_tokens": 200000, "price_in_per_m": 15.0, "price_out_per_m": 75.0},
-        {"model_id": "claude-sonnet-5", "display": "Claude Sonnet 5", "tier": "balanced", "tags": ["persian", "long_form", "json"], "context_tokens": 200000, "price_in_per_m": 3.0, "price_out_per_m": 15.0},
-        {"model_id": "claude-haiku-4-5-20251001", "display": "Claude Haiku 4.5", "tier": "fast", "tags": ["cheap", "json"], "context_tokens": 200000, "price_in_per_m": 1.0, "price_out_per_m": 5.0},
+        {"model_id": "claude-sonnet-5", "display": "Claude Sonnet 5", "tier": "balanced", "tags": ["persian", "long_form", "json", "translation"], "context_tokens": 1000000, "price_in_per_m": 3.0, "price_out_per_m": 15.0},
+        {"model_id": "claude-opus-5", "display": "Claude Opus 5", "tier": "quality", "tags": ["persian", "long_form", "reasoning", "json"], "context_tokens": 1000000, "price_in_per_m": 5.0, "price_out_per_m": 25.0},
+        {"model_id": "claude-haiku-4-5", "display": "Claude Haiku 4.5", "tier": "fast", "tags": ["cheap", "json", "translation"], "context_tokens": 200000, "price_in_per_m": 1.0, "price_out_per_m": 5.0},
+        {"model_id": "claude-opus-4-8", "display": "Claude Opus 4.8", "tier": "quality", "tags": ["persian", "long_form", "reasoning", "json"], "context_tokens": 1000000, "price_in_per_m": 5.0, "price_out_per_m": 25.0},
+        {"model_id": "claude-sonnet-4-6", "display": "Claude Sonnet 4.6", "tier": "balanced", "tags": ["persian", "long_form", "json"], "context_tokens": 1000000, "price_in_per_m": 3.0, "price_out_per_m": 15.0},
+        {"model_id": "claude-fable-5", "display": "Claude Fable 5", "tier": "reasoning", "tags": ["persian", "long_form", "reasoning", "json"], "context_tokens": 1000000, "price_in_per_m": 10.0, "price_out_per_m": 50.0},
     ],
     "openai": [
         {"model_id": "gpt-5", "display": "GPT-5", "tier": "reasoning", "tags": ["reasoning", "long_form", "json"], "context_tokens": 400000, "price_in_per_m": 1.25, "price_out_per_m": 10.0},
@@ -26,6 +29,13 @@ DEFAULT_CATALOG: dict[str, list[dict[str, Any]]] = {
     "openrouter": [],
     "ollama": [],
     "custom": [],
+    # OmniRoute auto-routing entries (prices unknown → 0, user-editable); real provider/model ids are discovered from /v1/models
+    "omniroute": [
+        {"model_id": "auto", "display": "OmniRoute auto (14-factor routing)", "tier": "balanced", "tags": ["json", "long_form", "gateway"], "context_tokens": None, "price_in_per_m": 0.0, "price_out_per_m": 0.0},
+        {"model_id": "auto/fast", "display": "OmniRoute auto/fast", "tier": "fast", "tags": ["json", "cheap", "gateway"], "context_tokens": None, "price_in_per_m": 0.0, "price_out_per_m": 0.0},
+        {"model_id": "auto/cheap", "display": "OmniRoute auto/cheap", "tier": "fast", "tags": ["json", "cheap", "gateway"], "context_tokens": None, "price_in_per_m": 0.0, "price_out_per_m": 0.0},
+        {"model_id": "auto/coding", "display": "OmniRoute auto/coding", "tier": "balanced", "tags": ["json", "gateway", "coding"], "context_tokens": None, "price_in_per_m": 0.0, "price_out_per_m": 0.0},
+    ],
 }
 
 
@@ -35,7 +45,11 @@ def default_models_for(kind: str) -> list[dict[str, Any]]:
 
 def guess_tier(model_id: str) -> tuple[str, list[str]]:
     m = model_id.lower()
-    if any(x in m for x in ("opus", "fable", "gpt-4.1", "sonnet")):
+    if "sonnet" in m:
+        return "balanced", ["persian", "long_form", "json"]
+    if "haiku" in m:
+        return "fast", ["cheap", "json"]
+    if any(x in m for x in ("opus", "fable", "gpt-4.1")):
         return "quality", ["long_form", "json"]
     if any(x in m for x in ("o1", "o3", "gpt-5", "reason", "pro", "r1", "think")):
         return "reasoning", ["reasoning", "json"]

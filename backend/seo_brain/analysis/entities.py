@@ -192,7 +192,7 @@ def extract_entities(conn: sqlite3.Connection, site: SiteConfig) -> dict:
             if not stoks or subject in assigned:
                 continue
             btoks = set(toks(brand.name))
-            if stoks <= btoks or btoks <= stoks:      # R6 same brand (token subset, e.g. "مدیران" ~ "مدیران خودرو")
+            if stoks <= btoks or btoks <= stoks:      # R6 same brand (token subset, e.g. "مدیران" ~ "برند نمونه")
                 if stoks != btoks:
                     brand.aliases.add(subject)
                     brand.evidence.append({"rule": "R6", "alias": subject, "reason": "token subset", "titles": cnt})

@@ -47,7 +47,7 @@ def main() -> int:
     global BASE
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://127.0.0.1:8000")
-    ap.add_argument("--site", default="emdadmodiran", help="existing site with graph data (read-only checks)")
+    ap.add_argument("--site", default="example-site", help="existing site with graph data (read-only checks)")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
     BASE = a.base.rstrip("/")
@@ -55,6 +55,26 @@ def main() -> int:
     H = {"X-API-Token": os.environ.get("API_TOKEN", "")} if os.environ.get("API_TOKEN") else {}
     sid = a.site
     tmp = f"zz-validation-{uuid.uuid4().hex[:6]}"
+
+    # Validation must be deterministic and never spend real tokens: temporarily disable every enabled provider (Claude/OmniRoute/…)
+    # so all AI paths fall back to Echo; the original enabled flags are restored at exit (also on exceptions). Real adapters are
+    # covered by pytest fake transports; the dedicated phase-9 blocks below re-create throw-away providers and delete them.
+    import atexit
+    _paused: list[int] = []
+    try:
+        for p in httpx.get(api + "/ai/provider-configs", headers=H, timeout=30).json():
+            if p.get("enabled"):
+                httpx.patch(api + f"/ai/provider-configs/{p['id']}", headers=H, json={"enabled": False}, timeout=30); _paused.append(p["id"])
+    except Exception:  # noqa: BLE001
+        pass
+
+    def _restore():
+        for pid_ in _paused:
+            try:
+                httpx.patch(api + f"/ai/provider-configs/{pid_}", headers=H, json={"enabled": True}, timeout=30)
+            except Exception:  # noqa: BLE001
+                pass
+    atexit.register(_restore)
 
     # ---- health / meta
     check("root", "GET", BASE + "/", 200, lambda r: r.json()["api"] == "/api/v1")
@@ -137,7 +157,7 @@ def main() -> int:
     check("connections status (empty)", "GET", api + f"/sites/{tmp}/connections", 200, lambda r: r.json()["status"] == {} and "configured" in r.json(), headers=H)
     check("gsc test without property → not_configured", "POST", api + f"/sites/{tmp}/connections/gsc/test", 200, lambda r: r.json()["status"] == "not_configured" and r.json()["ok"] is False, headers=H, json={})
     check("ga4 test bad id → not_configured", "POST", api + f"/sites/{tmp}/connections/ga4/test", 200, lambda r: r.json()["status"] == "not_configured", headers=H, json={"property": "abc"})
-    check("wordpress test (real site, read-only)", "POST", api + f"/sites/{tmp}/connections/wordpress/test", 200, lambda r: r.json()["status"] in ("ok", "error", "not_found"), headers=H, json={"property": "https://emdadmodiran.com"})
+    check("wordpress test (real site, read-only)", "POST", api + f"/sites/{tmp}/connections/wordpress/test", 200, lambda r: r.json()["status"] in ("ok", "error", "not_found"), headers=H, json={"property": "https://example.com"})
     check("connections status (3 kinds)", "GET", api + f"/sites/{tmp}/connections", 200, lambda r: set(r.json()["status"]) == {"gsc", "ga4", "wordpress"}, headers=H)
     check("gsc properties listing", "GET", api + "/connections/gsc/properties", 200, lambda r: r.json()["status"] in ("ok", "not_configured", "not_authorized", "error"), headers=H)
     check("unknown connection kind → 404", "POST", api + f"/sites/{tmp}/connections/nope/test", 404, headers=H, json={})
@@ -205,6 +225,23 @@ def main() -> int:
     check("ai route set", "PUT", api + "/ai/task-routes/brief", 200, lambda r: r.json()["provider_name"] == "zz-validation-provider", headers=H, json={"provider_id": pid, "model": "llama3"})
     check("ai route reset", "PUT", api + "/ai/task-routes/brief", 200, lambda r: r.json()["provider_id"] is None, headers=H, json={})
     check("ai provider delete", "DELETE", api + f"/ai/provider-configs/{pid}", 200, lambda r: r.json()["deleted"] == pid, headers=H)
+    # ---- phase 9 (Claude): catalog + setup metadata + recommended routes (read-only preview) + no secret leakage — a temporary key-less provider
+    check("claude provider kind setup", "GET", api + "/ai/provider-kinds", 200, lambda r: next(k for k in r.json() if k["kind"] == "anthropic")["setup"]["console_url"].startswith("https://platform.claude.com") and "claude-sonnet-5" in next(k for k in r.json() if k["kind"] == "anthropic")["models"], headers=H)
+    r = check("claude provider create (no key)", "POST", api + "/ai/provider-configs", 201, lambda r: r.json()["has_key"] is False and r.json()["default_model"] == "claude-sonnet-5" and "secret_ref" not in r.json(), headers=H,
+              json={"name": "zz-validation-claude", "kind": "anthropic"})
+    cpid = r.json()["id"] if r is not None and r.status_code == 201 else 0
+    check("claude catalog seeded", "GET", api + f"/ai/models?provider_id={cpid}", 200, lambda r: {m["model_id"]: m["tier"] for m in r.json()}.items() >= {"claude-sonnet-5": "balanced", "claude-opus-5": "quality", "claude-haiku-4-5": "fast"}.items(), headers=H)
+    check("claude test without key → not_configured", "POST", api + f"/ai/provider-configs/{cpid}/test", 200, lambda r: r.json()["ok"] is False and r.json()["status"] == "not_configured", headers=H)
+    check("claude recommended routes (preview)", "GET", api + f"/ai/provider-configs/{cpid}/recommended-routes", 200, lambda r: next(x for x in r.json()["routes"] if x["task_kind"] == "article_long")["model"] == "claude-sonnet-5" and next(x for x in r.json()["routes"] if x["task_kind"] == "faq")["model"] == "claude-haiku-4-5", headers=H)
+    check("claude provider delete (cascades catalog)", "DELETE", api + f"/ai/provider-configs/{cpid}", 200, lambda r: r.json()["deleted"] == cpid, headers=H)
+    # ---- phase 9 (OmniRoute external gateway): keyless kind counts as configured, auto models seeded, gateway-status read-only (no OmniRoute process needed)
+    r = check("omniroute provider create (keyless gateway)", "POST", api + "/ai/provider-configs", 201, lambda r: r.json()["configured"] is True and r.json()["is_gateway"] is True and r.json()["route_kind"] == "gateway" and r.json()["default_model"] == "auto" and r.json()["endpoint_url"].endswith(":20128/v1"), headers=H,
+              json={"name": "zz-validation-omniroute", "kind": "omniroute"})
+    opid = r.json()["id"] if r is not None and r.status_code == 201 else 0
+    check("omniroute catalog (auto models)", "GET", api + f"/ai/models?provider_id={opid}", 200, lambda r: {"auto", "auto/fast", "auto/cheap", "auto/coding"} <= {m["model_id"] for m in r.json()}, headers=H)
+    check("omniroute gateway-status", "GET", api + f"/ai/provider-configs/{opid}/gateway-status", 200, lambda r: r.json()["is_gateway"] and r.json()["capabilities"].get("gateway") is True and r.json()["routing"]["auto_models"][0] == "auto" and "fallback_for" in r.json()["fallback"], headers=H)
+    check("omniroute recommended routes (auto / auto-fast)", "GET", api + f"/ai/provider-configs/{opid}/recommended-routes", 200, lambda r: next(x for x in r.json()["routes"] if x["task_kind"] == "article_long")["model"] == "auto" and next(x for x in r.json()["routes"] if x["task_kind"] == "faq")["model"] == "auto/fast", headers=H)
+    check("omniroute provider delete", "DELETE", api + f"/ai/provider-configs/{opid}", 200, lambda r: r.json()["deleted"] == opid, headers=H)
 
     # ---- phase 8: internal linking (real site read-only analyze is heavy → run on the temporary site; plus read checks on real site)
     check("links meta", "GET", api + f"/sites/{sid}/links/meta", 200, lambda r: len(r.json()["confidence"]) == 3 and r.json()["future_scopes"] == ["external", "backlink", "competitor"], headers=H)
@@ -246,7 +283,9 @@ def main() -> int:
         check("content brief for generation", "POST", api + f"/sites/{tmp}/content/{cid}/brief", 200, lambda r: bool(r.json()["h1"]), headers=H, json={"use_ai": True, "mark_ready": True})
         check("gen estimate", "POST", api + f"/sites/{tmp}/content/{cid}/generate/estimate", 200, lambda r: r.json()["total"]["input_tokens"] > 0 and r.json()["sections"] >= 1 and r.json()["memory_snapshot_id"] > 0, headers=H, json={})
         check("gen start invalid mode (autopilot) → 422", "POST", api + f"/sites/{tmp}/content/{cid}/generate", 422, headers=H, json={"mode": "autopilot"})
-        gr = check("gen start (manual, 202)", "POST", api + f"/sites/{tmp}/content/{cid}/generate", 202, lambda r: r.json()["run_id"].startswith("gen-") and r.json()["mode"] == "manual", headers=H, json={"mode": "manual"})
+        # validation never spends real tokens: pin every agent to Echo (explicit override) — real providers/gateways are exercised by pytest fake transports
+        echo_models = {a: {"provider": "echo", "model": "echo-1"} for a in ("research", "outline", "writer", "fact_check", "seo", "linking", "reviewer")}
+        gr = check("gen start (manual, 202, echo-pinned)", "POST", api + f"/sites/{tmp}/content/{cid}/generate", 202, lambda r: r.json()["run_id"].startswith("gen-") and r.json()["mode"] == "manual", headers=H, json={"mode": "manual", "models": echo_models})
         if gr is not None and gr.status_code == 202:
             rid = gr.json()["run_id"]
             for _ in range(40):
@@ -309,6 +348,14 @@ def main() -> int:
     check("planner backfill", "POST", api + f"/sites/{tmp}/content-plans/backfill", 200, lambda r: "created" in r.json(), headers=H)
     check("planner plan 404", "GET", api + f"/sites/{tmp}/content-plans/999999", 404, headers=H)
 
+    # ---- ai content test workspace (Echo — no external calls)
+    check("ai workspace options (echo = offline fallback, default resolved)", "GET", api + f"/sites/{tmp}/ai-workspace/options", 200, lambda r: any(p["name"] == "echo" and p["status"] == "offline_fallback" for p in r.json()["providers"]) and "provider" in r.json()["default"] and len(r.json()["steps"]) == 7, headers=H)
+    ws_spec = {"title": "امداد خودرو تست", "keyword": "امداد خودرو تست", "secondary_keywords": ["یدک کش تست"], "intent": "transactional", "content_type": "service_landing", "tone": "formal", "word_count": 400, "provider": "echo", "model": "echo-1"}
+    check("ai workspace estimate", "POST", api + f"/sites/{tmp}/ai-workspace/estimate", 200, lambda r: r.json()["provider"] == "echo" and r.json()["input_tokens"] > 0 and r.json()["prompt_ref"].startswith("task.article_test"), headers=H, json=ws_spec)
+    check("ai workspace generate (echo placeholder)", "POST", api + f"/sites/{tmp}/ai-workspace/generate", 200, lambda r: r.json()["ok"] and r.json()["meta"]["placeholder"] is True and r.json()["result"]["markdown"].startswith("# ") and r.json()["seo"]["total_checks"] == 9, headers=H, json=ws_spec)
+    check("ai workspace history", "GET", api + f"/sites/{tmp}/ai-workspace/history", 200, lambda r: len(r.json()) >= 1, headers=H)
+    check("ai workspace save-draft 404", "POST", api + f"/sites/{tmp}/ai-workspace/save-draft", 404, headers=H, json={"content_id": 999999, "markdown": "# x"})
+
     # ---- legacy + cleanup
     check("legacy dashboard", "GET", BASE + "/legacy/", 200)
     check("legacy api", "GET", BASE + "/legacy/api/sites", 200)
@@ -337,6 +384,7 @@ def main() -> int:
               "  phase 8: links meta/analyze/summary/suggestions/pages/patterns/settings/export ·",
               "  phase 9: ai task-kinds/models/health/budget(get/put/422)/usage/routing preview/route policy+fallbacks/prompts (seeded, get, preview, version 422/create/approve)/feedback tags ·",
               "  phase 9: generation meta/memory-preview/estimate/start (202, autopilot 422)/run detail+provenance/SSE/list/accept (+idempotent)/404/feedback (+422)/single agent/insights ·",
+              "  ai workspace: options/estimate/generate (echo)/history/save-draft 404 ·",
               "  phase 8.5: planner meta/categories (sync brain, manual, tree)/plan create+PATCH+transitions (researching, 409 gate)/brief→item/generation job prepared/publishing metadata/link prep/recommendations/list/board/calendar/import (dry-run, apply, upsert)/export csv+xlsx/template/sheet source/keyword mapping+suggest/suggestions/analyze/graph mode+focus+details/insights/backfill/404 ·",
               "  graph (summary, nodes, node, 404, neighbors, filtered neighbors, subgraph, 422, search, path, orphans, unknown site) ·",
               "  memory (get, put, context, learned pattern) · AI orchestrator (routes, providers, text run, JSON run + learn, 422) · jobs (enqueue, poll, list, 422, 404) · legacy mount.",

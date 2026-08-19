@@ -46,8 +46,8 @@ export function PlanSheet({ siteId, pid, meta, categories, onClose, onChanged }:
               <Button size='sm' variant='secondary' disabled={!!busy || !(p.primary_keyword || p.primary_keyword_id)} onClick={() => run('b', () => endpoints.planBrief(siteId, p.id), 'بریف ساخته شد')} title='ساخت بریف Phase-6 با نکات برنامه (سرفصل‌ها، کلمات ثانویه، اهداف لینک)'>{busy === 'b' ? '…' : 'ساخت بریف'}</Button>
               <Button size='sm' variant='secondary' disabled={!!busy} onClick={() => run('l', () => endpoints.planLinkPrep(siteId, p.id), 'لینک‌های داخلی آماده شد')}>آماده‌سازی لینک داخلی</Button>
               <Button size='sm' variant='outline' disabled={!!busy} onClick={() => run('g', async () => { const j = await endpoints.planGenPrepare(siteId, p.id, 'article'); toast.info(j.note); }, 'کار تولید AI آماده شد (بدون اجرا)')} title='برنامه → کار تولید → آیتم محتوا → پیش‌نویس؛ اجرا فقط در استودیوی AI با تأیید انسانی'>آماده‌سازی تولید AI</Button>
-              {p.content_item && <Button size='sm' variant='outline' render={<Link href={`/dashboard/ai-studio?site=${siteId}&content=${p.content_item.id}`} />}>استودیوی AI</Button>}
-              {p.content_item && <Button size='sm' variant='outline' render={<Link href={`/dashboard/graph?site=${siteId}`} />}>گراف دانش</Button>}
+              {p.content_item && <Button size='sm' variant='outline' nativeButton={false} render={<Link href={`/dashboard/ai-studio?site=${siteId}&content=${p.content_item.id}`} />}>استودیوی AI</Button>}
+              {p.content_item && <Button size='sm' variant='outline' nativeButton={false} render={<Link href={`/dashboard/graph?site=${siteId}`} />}>گراف دانش</Button>}
               <Button size='sm' variant='ghost' className='text-destructive ms-auto' disabled={!!busy} onClick={() => { if (confirm('این برنامه حذف شود؟ (آیتم محتوا حفظ می‌شود)')) run('d', async () => { await endpoints.planDelete(siteId, p.id); onClose(); }, 'حذف شد'); }}>حذف</Button>
             </div>
             {/* recommendation card */}

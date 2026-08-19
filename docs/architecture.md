@@ -40,7 +40,7 @@ CLAUDE DESKTOP ──stdio──▶ backend/mcp_server/server.py (MCPServer, rea
 
 ## Multi-site
 
-Every table and node carries `site_id`; `config/site.yaml` holds a list of sites; scripts accept `--site`. Only `emdadmodiran` is configured in Phase 1.
+Every table and node carries `site_id`; `config/site.yaml` holds a list of sites; scripts accept `--site`. Only `example-site` is configured in Phase 1.
 
 ## Future integration hooks (not implemented)
 

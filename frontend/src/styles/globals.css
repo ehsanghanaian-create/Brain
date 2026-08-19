@@ -647,3 +647,34 @@
   --font-sans: var(--font-vazirmatn), Vazirmatn, 'Segoe UI', Tahoma, system-ui, sans-serif;
   font-family: var(--font-sans);
 }
+
+/* ---------------------------------------------------------------------------
+   SEO Brain — SaaS polish layer (Persian/RTL, light + dark). Additive: tightens typography, tables, cards, forms and
+   focus states without changing component APIs. */
+@layer components {
+  html { font-feature-settings: 'ss01', 'cv01'; }
+  body { font-size: 0.9375rem; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  h1, h2, h3, h4 { letter-spacing: -0.01em; text-wrap: balance; }
+  p, li, td, th { text-wrap: pretty; }
+  [data-slot='card'] { @apply shadow-xs transition-shadow duration-200; }
+  [data-slot='card']:hover { @apply shadow-sm; }
+  [data-slot='card-title'] { @apply text-[0.95rem] font-semibold; }
+  [data-slot='card-description'] { @apply text-xs leading-relaxed; }
+  [data-slot='table'] th { @apply text-muted-foreground bg-muted/40 text-[11px] font-medium tracking-wide; }
+  [data-slot='table'] td { @apply py-2 align-middle; }
+  [data-slot='table'] tr:hover td { @apply bg-accent/30; }
+  table th, table td { @apply whitespace-nowrap; }
+  input[type='date'], input[type='number'] { direction: ltr; }
+  [data-slot='input'], [data-slot='native-select'], [data-slot='textarea'], select { @apply bg-background/60 transition-colors; }
+  [data-slot='input']:focus-visible, [data-slot='textarea']:focus-visible, select:focus-visible { @apply border-ring ring-ring/30 ring-[3px]; }
+  [data-slot='button'] { @apply transition-[background-color,box-shadow,transform] duration-150 active:scale-[0.98]; }
+  [data-slot='badge'] { @apply font-medium; }
+  [role='tablist'] { @apply bg-muted/60; }
+  details > summary { @apply text-muted-foreground hover:text-foreground list-none transition-colors; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: '›'; @apply me-1 inline-block transition-transform rtl:rotate-180; }
+  details[open] > summary::before { @apply rotate-90 rtl:rotate-90; }
+  pre { @apply text-[12px] leading-relaxed; }
+  .page-grid { @apply grid gap-4; }
+  @media (min-width: 1536px) { .page-grid { gap: 1.25rem; } }
+}

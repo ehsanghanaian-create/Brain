@@ -1,6 +1,6 @@
 # SEO Brain — Phase 4: Knowledge Graph UI = SEO Command Center (React Flow)
 
-Date: 2026-08-17 · Contracts unchanged (three additive endpoints) · Backend 57/57 · Frontend vitest 5/5 · Live validation 65/65 · verified in the browser on the real emdadmodiran graph.
+Date: 2026-08-17 · Contracts unchanged (three additive endpoints) · Backend 57/57 · Frontend vitest 5/5 · Live validation 65/65 · verified in the browser on the real example-site graph.
 
 ## 1. Backend (additive)
 

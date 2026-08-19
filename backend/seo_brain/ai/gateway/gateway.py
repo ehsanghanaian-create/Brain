@@ -198,7 +198,17 @@ class Gateway:
         for m in self.models():
             if m["model_id"] == step.model:
                 price = (m["price_in_per_m"], m["price_out_per_m"]); break
-        return {"provider": step.provider, "model": step.model, "input_tokens": inp, "output_tokens": out, "cost_usd": cost_usd(inp, out, *price)}
+        exact = False
+        if step.provider != "echo":
+            # adapters may know better (Anthropic: /v1/messages/count_tokens); never fail the estimate on network problems
+            try:
+                a = self.adapter(step.provider)
+                r = a.estimate(AIRequest(model=step.model, messages=task.messages, max_tokens=task.max_tokens, temperature=task.temperature, json_schema=task.json_schema))
+                if r.get("exact"):
+                    inp, out, exact = int(r["input_tokens"]), int(r["output_tokens"]), True
+            except Exception:  # noqa: BLE001
+                pass
+        return {"provider": step.provider, "model": step.model, "input_tokens": inp, "output_tokens": out, "cost_usd": cost_usd(inp, out, *price), "exact": exact}
 
     # ------------------------------------------------------------ run
     def run(self, task: AITask, chain: list[RouteStep], meta: CallMeta | None = None) -> OrchestrationResult:

@@ -1,0 +1,7 @@
+{
+  "business_rules": ["Service area: Example City only", "Response time is stated as a range, never a promise"],
+  "tone": {"voice": "formal", "person": "second", "language": "fa-IR"},
+  "cta_rules": ["Phone number in the first paragraph", "One CTA per H2 section"],
+  "forbidden_claims": ["cheapest", "guaranteed", "#1"],
+  "entities": {"brands": ["Example Brand"], "models": ["Model A", "Model B"], "locations": ["Example City"], "services": ["roadside assistance", "towing"]}
+}

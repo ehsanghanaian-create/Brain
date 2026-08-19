@@ -1,0 +1,26 @@
+# Per-site configuration. Copy to site.yaml. One entry per site (Phase 1: single site).
+sites:
+  - site_id: example-site
+    name: "Example Auto Care"
+    canonical_url: "https://example.com/"
+    wp_url: "https://example.com"
+    language: "en"
+    gsc_property: "https://example.com/"
+    crawler:
+      max_urls: 20            # first validation crawl; raise after validation
+      concurrency: 2
+      delay_seconds: 1.0
+      timeout_seconds: 20
+      max_retries: 3
+      user_agent: "SEO-KG-Crawler/0.1 (+local; read-only)"
+      respect_robots: true
+      allowed_hosts: ["example.com", "www.example.com"]
+      exclude_patterns: ["/wp-json/", "/feed/", "?s=", "/wp-admin/", "/wp-login"]
+    gsc:
+      lookback_days: 1        # first validation sync; raise to 30 after validation
+      dimensions: ["date", "query", "page", "country", "device"]
+      row_limit: 25000
+    graph:
+      important_query_min_impressions: 50
+      important_query_min_clicks: 5
+      max_query_nodes: 200

@@ -21,7 +21,7 @@ import { Icons } from '@/components/icons';
 import { usePathname } from 'next/navigation';
 import * as React from 'react';
 
-const INFOBAR_WIDTH = '22rem';
+const INFOBAR_WIDTH = '20rem';
 const INFOBAR_WIDTH_MOBILE = '22rem';
 const INFOBAR_WIDTH_ICON = '3rem';
 const INFOBAR_KEYBOARD_SHORTCUT = 'i';

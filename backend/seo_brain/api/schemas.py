@@ -9,7 +9,7 @@ Mode = Literal["manual", "assisted", "autopilot"]
 
 
 class SiteCreate(BaseModel):
-    site_id: str = Field(pattern=r"^[a-z0-9][a-z0-9\-]{1,62}$", description="stable slug, e.g. emdadmodiran")
+    site_id: str = Field(pattern=r"^[a-z0-9][a-z0-9\-]{1,62}$", description="stable slug, e.g. example-site")
     timezone: str | None = "Asia/Tehran"
     name: str
     canonical_url: HttpUrl

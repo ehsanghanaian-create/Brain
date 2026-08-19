@@ -1,7 +1,7 @@
 """Run the read-only crawler.
 
-    python scripts/crawl.py --site emdadmodiran --max-urls 20
-    python scripts/crawl.py --site emdadmodiran --full          # uses no cap beyond a safety ceiling
+    python scripts/crawl.py --site example-site --max-urls 20
+    python scripts/crawl.py --site example-site --full          # uses no cap beyond a safety ceiling
 """
 import _bootstrap  # noqa: F401
 import argparse

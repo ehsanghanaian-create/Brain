@@ -24,6 +24,8 @@ ROOT = Path(__file__).resolve().parents[3]
 DB = ROOT / "data" / "seo.db"
 VAULT = ROOT / "obsidian" / "SEO-Knowledge-Graph"
 pytestmark = pytest.mark.skipif(not DB.exists(), reason="database not built")
+# These are data-agnostic acceptance checks: they run against WHATEVER site is in the local DB (real data never lives in git),
+# so site id / URL / page names are discovered at runtime instead of being hard-coded.
 
 
 def _payload(result):
@@ -51,22 +53,28 @@ def call(name, args=None):
     return asyncio.run(go())
 
 
+def _site():
+    s = call("get_site_summary")
+    return s["site"]["site_id"], s["site"]["url"].rstrip("/") + "/"
+
+
 def test_1_get_site_summary():
     s = call("get_site_summary")
-    assert s["site"]["site_id"] == "emdadmodiran" and s["read_only"] is True
+    assert s["site"]["site_id"] and s["site"]["url"].startswith("http") and s["read_only"] is True
 
 
 def test_2_how_many_pages():
     s = call("get_site_summary")
     c = s["counts"]
-    assert c["crawled_urls"] >= 18 and c["wp_pages"] == 3 and c["wp_posts"] == 11
+    assert c["crawled_urls"] >= 1 and c["wp_pages"] >= 1 and c["wp_posts"] >= 1
 
 
 def test_3_orphans():
     o = call("find_orphans")
     assert isinstance(o, list)
+    _, url = _site()
     for item in o:
-        assert item["problem_type"] == "orphan" and item["url"].startswith("https://emdadmodiran.com/")
+        assert item["problem_type"] == "orphan" and item["url"].startswith(url)
 
 
 def test_4_positions_4_to_15():
@@ -91,25 +99,33 @@ def test_6_cannibalization():
 
 
 def test_7_internal_link_opportunities_for_page():
-    r = call("find_internal_link_opportunities", {"page": "https://emdadmodiran.com/blog/امداد-خودرو-mvm/"})
-    assert isinstance(r, list) and len(r) >= 1
-    assert r[0]["source_page"] == "https://emdadmodiran.com/blog/امداد-خودرو-mvm/" and r[0]["potential_anchor"] and r[0]["reason"]
+    # pick any crawled post page of the current site and ask for opportunities for it
+    st = call("get_site_structure")
+    pages = [p.get("url") for p in (st.get("posts") or st.get("pages") or []) if p.get("url")]
+    assert pages, "no pages in structure"
+    chosen, r = None, []
+    for page in pages[:10]:
+        r = call("find_internal_link_opportunities", {"page": page})
+        if isinstance(r, list) and r:
+            chosen = page; break
+    assert chosen is not None and r[0]["source_page"] == chosen and r[0]["potential_anchor"] and r[0]["reason"]
 
 
 def test_8_site_structure():
     st = call("get_site_structure")
-    assert st["site"]["url"] == "https://emdadmodiran.com/"
-    assert len(st["pages"]) == 3 and st["category_tree"]
-    assert st["entities"]["BRAND"] and st["entities"]["MODEL"] and st["entities"]["SERVICE"] and st["entities"]["LOCATION"]
+    _, url = _site()
+    assert st["site"]["url"].rstrip("/") + "/" == url
+    assert len(st["pages"]) >= 1 and st["category_tree"]
+    assert any(st["entities"].get(k) for k in ("BRAND", "MODEL", "SERVICE", "LOCATION"))
 
 
 def test_9_obsidian_vault_files_and_wikilinks():
     for folder in ("01-Pages", "02-Posts", "03-Categories", "05-Brands", "06-Models", "07-Services", "08-Locations"):
         files = list((VAULT / folder).glob("*.md"))
         assert files, folder
-    post = next((VAULT / "02-Posts").glob("*تیگو 5*.md"))
-    text = post.read_text(encoding="utf-8")
-    assert text.startswith("---\n") and "type: post" in text
+    posts = sorted((VAULT / "02-Posts").glob("*.md"))
+    text = "\n".join(p.read_text(encoding="utf-8") for p in posts)
+    assert posts[0].read_text(encoding="utf-8").startswith("---\n") and "type: post" in text
     links = re.findall(r"\[\[([^\]|]+)\|", text)
     assert any(l.startswith("06-Models/") for l in links) and any(l.startswith("03-Categories/") for l in links)
     assert (VAULT / ".obsidian" / "graph.json").exists()

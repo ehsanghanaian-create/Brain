@@ -1,0 +1,5 @@
+keyword,intent,priority,volume
+car roadside assistance example city,transactional,high,1300
+example brand roadside assistance,local,medium,200
+how to jump start a car,informational,low,5400
+tow truck example city,commercial,medium,880

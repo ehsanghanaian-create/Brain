@@ -47,7 +47,7 @@ export function ContentBrainPage({ sites, initialSiteId }: { sites: Site[]; init
       <div className='flex flex-wrap items-center gap-2'>
         <NativeSelect value={siteId} onChange={(e) => setSiteId(e.target.value)} className='w-44'>{sites.map((s) => <NativeSelectOption key={s.site_id} value={s.site_id}>{s.name}</NativeSelectOption>)}</NativeSelect>
         <Button onClick={() => setEditing('new')}>محتوای جدید</Button>
-        <Button variant='outline' render={<Link href={`/dashboard/keywords?site=${siteId}`} />}>از فرصت‌های کلمات کلیدی</Button>
+        <Button variant='outline' nativeButton={false} render={<Link href={`/dashboard/keywords?site=${siteId}`} />}>از فرصت‌های کلمات کلیدی</Button>
         <Button variant='ghost' onClick={syncGraph}>همگام‌سازی گراف</Button>
         <Link href={`/dashboard/calendar?site=${siteId}`} className='text-xs underline'>تقویم محتوایی</Link>
         <Link href={`/dashboard/graph?site=${siteId}`} className='text-xs underline'>گراف</Link>

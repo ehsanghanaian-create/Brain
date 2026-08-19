@@ -81,7 +81,7 @@ export function DraftPanel({ siteId, cid, onChanged }: { siteId: string; cid: nu
         )}
         {selected && !editing && <Button size='sm' variant='secondary' onClick={() => startEdit(selected)}>ویرایش → نسخه جدید</Button>}
         {!editing && drafts.length === 0 && <Button size='sm' onClick={() => startEdit(null)}>ثبت پیش‌نویس</Button>}
-        {!editing && <Button size='sm' variant='outline' render={<Link href={`/dashboard/ai-studio?site=${encodeURIComponent(siteId)}&content=${cid}`} />} title='تولید چندعاملی با تزریق حافظه سایت؛ خروجی فقط پیش‌نویس است'>تولید با AI</Button>}
+        {!editing && <Button size='sm' variant='outline' nativeButton={false} render={<Link href={`/dashboard/ai-studio?site=${encodeURIComponent(siteId)}&content=${cid}`} />} title='تولید چندعاملی با تزریق حافظه سایت؛ خروجی فقط پیش‌نویس است'>تولید با AI</Button>}
         {selected && !editing && (
           <>
             <Button size='sm' disabled={!!busy} onClick={() => runReview(false)}>{busy === 'review' ? '…' : 'بازبینی و امتیاز'}</Button>

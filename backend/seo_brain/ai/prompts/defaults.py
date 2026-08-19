@@ -142,4 +142,18 @@ summary_fa: یک جمله""",
 
 برای صفحه‌ای درباره «{{keyword}}» (اینتنت {{intent}}) ۳ عنوان (≤۶۰ نویسه) و ۲ توضیحات متا (۱۲۰–۱۶۰) بده. خروجی JSON با کلیدهای titles و metas.""",
      "variables": ["keyword", "intent"], "model_hints": {"tier": "fast", "temperature": 0.5, "max_tokens": 500}},
+    {"key": "task.article_test", "scope": "task", "title": "تولید مقاله کامل (فضای آزمایش) v1", "description": "تولید یک مقاله کامل در یک فراخوانی برای فضای آزمایش تولید محتوا — پایه عامل نگارش آینده",
+     "template": """{{memory_pack}}
+
+یک محتوای کامل و ساخت‌یافته بنویس.
+- عنوان کاری: «{{title}}»
+- کلمه کلیدی اصلی: «{{keyword}}» (اینتنت: {{intent}})
+- کلمات کلیدی ثانویه: {{secondary_keywords}}
+- نوع محتوا: {{content_type}} · دسته: {{category}} · مخاطب هدف: {{audience}} · لحن: {{tone}}
+- طول هدف: حدود {{word_count}} کلمه
+- دستورالعمل‌های اضافی: {{instructions}}
+
+الزامات: کلمه کلیدی اصلی در عنوان، H1، پاراگراف اول و حداقل یک H2؛ کلمات ثانویه به‌صورت طبیعی؛ ۴ تا ۸ بخش H2 (در صورت نیاز H3)؛ پاراگراف‌های کوتاه؛ بخش سؤالات متداول (۳ تا ۶ پرسش)؛ پیشنهاد ۳ تا ۶ لینک داخلی (انکر + موضوع صفحه مقصد)؛ هیچ ادعای ممنوع یا بی‌پشتوانه؛ فقط از اطلاعات همین پرامپت و حافظه سایت استفاده کن و اعداد/مشخصات را حدس نزن.
+خروجی را فقط به‌صورت JSON با فیلدهای زیر بده: title, meta_description, h1, sections (آرایه‌ای از {h2, h3: [], paragraphs: []}), faq (آرایه‌ای از {question, answer}), internal_links (آرایه‌ای از {anchor, target_topic}), keywords_used (آرایه رشته), notes.""",
+     "variables": ["title", "keyword", "intent", "secondary_keywords", "content_type", "category", "audience", "tone", "word_count", "instructions"], "model_hints": {"tier": "quality", "temperature": 0.4, "max_tokens": 4000}},
 ]

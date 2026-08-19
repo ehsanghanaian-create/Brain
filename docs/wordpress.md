@@ -1,6 +1,6 @@
 # WordPress connector (read-only)
 
-Endpoint: `https://emdadmodiran.com/wp-json/` (discovered 2026-08-16: WordPress + Elementor 4.2.2 + Yoast SEO 28.2).
+Endpoint: `https://example.com/wp-json/` (discovered 2026-08-16: WordPress + Elementor 4.2.2 + Yoast SEO 28.2).
 
 ## What it does
 
@@ -10,7 +10,7 @@ Endpoint: `https://emdadmodiran.com/wp-json/` (discovered 2026-08-16: WordPress 
 4. For each taxonomy: terms → `categories` (hierarchical) or `tags` (flat), relations → `post_terms`.
 5. `GET /wp/v2/media?_fields=…` → `media` (alt text is used for the images-missing-alt analysis).
 
-Discovered structure of emdadmodiran.com: 3 pages, 11 posts, 5 categories (2-level tree), 0 tags, 62 media, **no public CPTs, no custom taxonomies**.
+Discovered structure of example.com: 3 pages, 11 posts, 5 categories (2-level tree), 0 tags, 62 media, **no public CPTs, no custom taxonomies**.
 
 ## Authentication
 

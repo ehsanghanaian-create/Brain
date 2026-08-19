@@ -143,7 +143,7 @@ def test_provider_config_secret_store_and_routes(c):
     r = c.post("/api/v1/ai/provider-configs", json={"name": "Claude", "kind": "anthropic", "api_key": "sk-ant-abcdefghijk1234"})
     assert r.status_code == 201, r.text
     p = r.json()
-    assert p["has_key"] and p["key_hint"] == "1234" and "api_key" not in p and "secret_ref" not in p and p["default_model"] == "claude-fable-5"
+    assert p["has_key"] and p["key_hint"] == "1234" and "api_key" not in p and "secret_ref" not in p and p["default_model"] == "claude-sonnet-5"
     # secret is encrypted on disk, readable back only through the store
     files = list((c.tmp / "secrets").glob("*.bin"))
     assert len(files) == 1 and b"sk-ant" not in files[0].read_bytes()

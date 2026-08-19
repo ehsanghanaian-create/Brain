@@ -1,25 +1,77 @@
-# secrets
+# ============================================================================
+# SEO Brain — repository contains ONLY application source, migrations, docs and
+# safe templates. Runtime/site data, databases, exports, secrets never enter git.
+# ============================================================================
+
+# ---- secrets
 .env
+.env.*
+!.env.example
 credentials/
 tokens/
 secrets/
+data/secrets/
+data/tokens/
 *.pem
 *.key
 client_secret*.json
 
-# databases
+# ---- runtime data (all real site data lives here) — only the folder skeleton (.keep) is versioned
+data/*
+!data/.keep
+!data/sites/
+data/sites/*
+!data/sites/.keep
+!data/logs/
+data/logs/*
+!data/logs/.keep
+!data/raw/
+data/raw/*
+!data/raw/.keep
+!data/processed/
+data/processed/*
+!data/processed/.keep
+storage/
+workspace/
+
+# ---- databases
+*.sqlite
+*.sqlite3
 *.db
 *.db-wal
 *.db-shm
-*.sqlite
-*.sqlite3
 
-# raw / processed data (production data never committed)
-data/raw/
-data/processed/
-data/logs/
+# ---- generated / exported files (GSC, GA4, keywords, plans, drafts, logs)
+*.json
+*.csv
+*.xlsx
+*.log
+*.jsonl
+# …but keep source/config JSON that is part of the app
+!package.json
+!pnpm-workspace.yaml
+!tsconfig.json
+!tsconfig.*.json
+!components.json
+!.oxfmtrc.json
+!.oxlintrc.json
+!manifest.json
+!docs/seo-brain/openapi.v1.json
+!obsidian/SEO-Knowledge-Graph/.obsidian/*.json
+!obsidian/SEO-Knowledge-Graph/.obsidian/plugins/*/manifest.json
+!sample-site/**
+!**/sample-site/**
+!.claude/launch.json
 
-# python
+# ---- private / generated docs (real-site reports, run artifacts)
+docs/_private/
+docs/seo-brain/03-phase1.5-api-validation.md
+
+# ---- active site configuration (real domains) — commit only the example
+config/site.yaml
+config/sites.yaml
+
+# ---- python
 __pycache__/
 *.py[cod]
 .venv/
@@ -29,23 +81,24 @@ venv/
 build/
 dist/
 
-# node (not used in MVP, reserved)
+# ---- node / next
 node_modules/
+.next/
+.turbo/
+*.tsbuildinfo
 
-# obsidian runtime state (vault content is generated; keep out of git except templates)
+# ---- obsidian vault: only templates + app config are versioned; generated notes are derived from site data
+obsidian/SEO-Knowledge-Graph/[0-9][0-9]-*/
+obsidian/SEO-Knowledge-Graph/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].md
+obsidian/SEO-Knowledge-Graph/Untitled*
 obsidian/SEO-Knowledge-Graph/.obsidian/workspace*.json
 obsidian/SEO-Knowledge-Graph/.obsidian/cache
 obsidian/SEO-Knowledge-Graph/.trash/
+obsidian/SEO-Knowledge-Graph/.obsidian/plugins/*/main.js
+obsidian/SEO-Knowledge-Graph/.obsidian/plugins/*/styles.css
 
-# OS / editors
+# ---- OS / editors
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
-
-# generated vault notes (derived from production data) — regenerate with build-graph.py
-obsidian/SEO-Knowledge-Graph/[0-9][0-9]-*/
-obsidian/SEO-Knowledge-Graph/.obsidian/plugins/*/main.js
-obsidian/SEO-Knowledge-Graph/.obsidian/plugins/*/styles.css
-data/sites/
-data/secrets/

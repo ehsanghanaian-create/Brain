@@ -41,4 +41,4 @@ One node per normalized URL: a crawled category archive URL is merged into the C
 
 R1 service = dominant leading generic phrase of titles/categories · R2 location = trailing "در X" · R3 brand = content category name minus generic words (hierarchy follows category tree) · R4 alias = digit-free title subject in ≥ 50 % of a brand category's post titles · R5 model = other title subjects inside a brand category (most specific category wins) · R6 token-subset merge. Overrides: `config/entities.yaml` (`aliases:`, `types:`), empty by default. Every entity stores its `evidence` JSON.
 
-Result for emdadmodiran.com (2026-08-16): SERVICE امداد خودرو · BRAND مدیران خودرو → MVM (alias ام وی ام), چری · MODEL تیگو 5, تیگو 7, فونیکس (→ چری) · LOCATION تهران.
+Result for example.com (2026-08-16): SERVICE امداد خودرو · BRAND برند نمونه → MVM (alias ام وی ام), چری · MODEL تیگو 5, تیگو 7, فونیکس (→ چری) · LOCATION تهران.

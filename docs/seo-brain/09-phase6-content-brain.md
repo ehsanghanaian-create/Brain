@@ -46,7 +46,7 @@ keyword row · cluster siblings (→ H2s with volume) · GSC queries overlapping
 | tsc | 0 errors |
 
 ## 9. Notes
-* One sample content item («راهنمای امداد خودرو MVM در تهران», with a real brief) was left on emdadmodiran as an example.
+* One sample content item («راهنمای امداد خودرو MVM در تهران», with a real brief) was left on example-site as an example.
 * Automatic publishing is **not** enabled — no WordPress write path exists; `published` is a manual state requiring a URL.
 * Next: **Phase 7 — Content Calendar import (Sheet/CSV) + week view + drag&drop refinements**, then AI providers become live in Phase 9.
 

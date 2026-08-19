@@ -1,6 +1,6 @@
 """Pre-flight checks. Prints PASS/WARNING/FAIL per component with reason and fix.
 
-    python scripts/preflight.py [--site emdadmodiran] [--json]
+    python scripts/preflight.py [--site example-site] [--json]
 Runs with the system python or the venv python (venv is checked as a component).
 """
 import _bootstrap  # noqa: F401

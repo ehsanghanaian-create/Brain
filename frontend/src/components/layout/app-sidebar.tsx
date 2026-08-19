@@ -43,8 +43,17 @@ export default function AppSidebar() {
   }, [isOpen]);
 
   return (
-    <Sidebar collapsible='icon'>
-      <SidebarHeader />
+    <Sidebar collapsible='icon' side='right'>
+      <SidebarHeader className='border-b'>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton size='lg' tooltip='SEO Brain' render={<Link href='/dashboard/overview' />} className='data-[state=open]:bg-sidebar-accent'>
+              <span className='bg-primary text-primary-foreground flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold'>SB</span>
+              <span className='grid flex-1 text-start leading-tight'><span className='truncate text-sm font-semibold'>SEO Brain</span><span className='text-muted-foreground truncate text-[11px]'>سیستم‌عامل سئوی محلی</span></span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarHeader>
       <SidebarContent className='overflow-x-hidden'>
         {filteredGroups.map((group) => (
           <SidebarGroup key={group.label || 'ungrouped'} className='py-0'>

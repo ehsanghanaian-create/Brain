@@ -1,6 +1,6 @@
 # Google Search Console connector
 
-Status (2026-08-17): **LIVE — connected to `sc-domain:emdadmodiran.com` (siteOwner), 30-day sync done, graph rebuilt.** See `gsc-integration-report.md`.
+Status (2026-08-17): **LIVE — connected to `sc-domain:example.com` (siteOwner), 30-day sync done, graph rebuilt.** See `gsc-integration-report.md`.
 
 ## One-time setup (you)
 
@@ -10,7 +10,7 @@ Status (2026-08-17): **LIVE — connected to `sc-domain:emdadmodiran.com` (siteO
    ```
    GOOGLE_CLIENT_ID=...
    GOOGLE_CLIENT_SECRET=...
-   GSC_PROPERTY=https://emdadmodiran.com/      # or sc-domain:emdadmodiran.com
+   GSC_PROPERTY=https://example.com/      # or sc-domain:example.com
    ```
 4. `python backend/cli/sync-gsc.py --auth-only` → a browser opens once (loopback `127.0.0.1`, random port), you consent, the refresh token is written to `tokens/gsc_token.json` (git-ignored).
 5. `python backend/cli/sync-gsc.py --list-sites` shows the properties the account can see; `resolve_property()` accepts URL-prefix or Domain form automatically.

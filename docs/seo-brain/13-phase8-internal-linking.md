@@ -24,7 +24,7 @@ Forward-only, additive; `DELETE /sites/{id}` clears the three tables. Applied li
 ## 3. Graph changes
 * Relation vocabulary + `LINK_OPPORTUNITY` (new suggestion, props anchor/kind/confidence/reason), `SUPPORTS` (topical ≥ 0.6 **and** meaningful journey; weight = topical similarity), existing `SUGGESTED_LINK` now = accepted/done (props anchor/done/suggestion_id).
 * Links map («نقشه لینک داخلی») shows LINKS_TO · SUGGESTED_LINK · LINK_OPPORTUNITY · SUPPORTS with relation chips and includes CONTENT nodes; node details for pages gain **`link_health`** (score, breakdown, flags) and `link_suggestions` (to/from/supports).
-* Live: 23 LINK_OPPORTUNITY + 5 SUPPORTS edges on emdadmodiran; no edges for same-level or backwards pairs (tested).
+* Live: 23 LINK_OPPORTUNITY + 5 SUPPORTS edges on example-site; no edges for same-level or backwards pairs (tested).
 
 ## 4. API changes — `/api/v1/sites/{id}/links/*` (contract §13, OpenAPI 81 paths)
 `GET /meta` · `POST /analyze` (200 sync ≤ threshold, **202 job** `links_analyze` otherwise) · `GET /summary` · `GET /suggestions?kind&status&confidence&min_score&target&source&q&sort` · `GET/PATCH /suggestions/{sid}` (`{status, anchor?}`) · `POST /suggestions/{sid}/content-task` (planned Content Brain item, links back via `content_task_id`) · `GET /pages?flag&sort&order&q` · `GET /pages/{node_id}` · `GET/PATCH /patterns` · `GET/PUT /settings` · `GET /export.csv?status`. Job handler registered in the app; `DELETE /sites/{id}` cascades.

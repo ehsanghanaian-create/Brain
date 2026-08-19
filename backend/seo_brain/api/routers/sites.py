@@ -103,9 +103,11 @@ def connections_service(eng: Engine = Depends(engine)) -> ConnectionsService:
 @router.get("/{site_id}/connections")
 def get_connections(site_id: str, site: Site = Depends(require_site), svc: ConnectionsService = Depends(connections_service)) -> dict:
     """Last known status per connection kind (gsc | ga4 | wordpress) + what is configured on the site."""
+    from ...wordpress.auth import auth_status
     return {"site_id": site_id,
             "configured": {"gsc": site.gsc_property, "ga4": site.ga4_property, "wordpress": site.wp_url},
-            "status": svc.status(site_id)}
+            "status": svc.status(site_id),
+            "wordpress_auth": auth_status(site_id)}        # additive: configured/username/key_hint/source — never the password
 
 
 @router.post("/{site_id}/connections/{kind}/test")
@@ -122,10 +124,17 @@ def test_connection(site_id: str, kind: str, body: ConnectionTestRequest | None 
         if res.ok and body.property and body.property != site.ga4_property:
             repo.set_fields(site_id, ga4_property=res.detail.get("property") or body.property)
     elif kind == "wordpress":
-        res = svc.test_wordpress(site_id, body.property or site.wp_url)
+        from ...wordpress.auth import clear_site_auth, save_site_auth
+        if body.clear_wp_credentials:
+            clear_site_auth(site_id)
+        res = svc.test_wordpress(site_id, body.property or site.wp_url, body.wp_username, body.wp_app_password)
         normalized = res.detail.get("site_url") if res.ok else None
         if normalized and normalized != site.wp_url:
             repo.set_fields(site_id, wp_url=normalized)
+        # persist the Application Password (SecretStore only) when the identity check succeeded with the supplied credentials
+        if body.wp_username and body.wp_app_password and (res.detail.get("auth") or {}).get("status") == "ok":
+            save_site_auth(site_id, body.wp_username, body.wp_app_password)
+            res.detail["auth"]["stored"] = True
     else:
         raise ApiError(404, f"unknown connection kind '{kind}'", code="not_found", details={"kinds": ["gsc", "ga4", "wordpress"]})
     return res.to_dict()

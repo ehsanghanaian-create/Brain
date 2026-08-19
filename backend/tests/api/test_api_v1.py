@@ -23,6 +23,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(sites_router, "PROJECT_ROOT", tmp_path)                       # workspaces under tmp, not data/
     app = create_app()
     app.dependency_overrides[deps.engine] = lambda: eng
+    from seo_brain.ai.gateway import Gateway as _GW
+    app.dependency_overrides[deps.gateway] = (lambda g: (lambda: g))(_GW(eng))   # isolate: never the live DB gateway
     c = TestClient(app)
     c.eng = eng  # type: ignore[attr-defined]
     return c
@@ -116,6 +118,8 @@ def test_api_token_enforced_when_set(tmp_path, monkeypatch):
     eng = make_engine("sqlite:///" + (tmp_path / "tok.db").as_posix()); migrate(eng)
     monkeypatch.setenv("API_TOKEN", "s3cret")
     app = create_app(); app.dependency_overrides[deps.engine] = lambda: eng
+    from seo_brain.ai.gateway import Gateway as _GW
+    app.dependency_overrides[deps.gateway] = (lambda g: (lambda: g))(_GW(eng))
     c = TestClient(app)
     assert c.get("/api/v1/health").status_code == 200                # health is open
     assert c.get("/api/v1/sites").status_code == 401

@@ -87,9 +87,10 @@ def _router() -> AIRouter:
     return r
 
 
-def orchestrator(mem: SiteMemoryRepository = Depends(memory_repo)):
-    """Phase 9: gateway-backed orchestrator (same .run(task) contract as AIOrchestrator)."""
-    return GatewayOrchestrator(gateway(), MemoryService(mem))
+def orchestrator(mem: SiteMemoryRepository = Depends(memory_repo), gw=Depends(gateway)):
+    """Phase 9: gateway-backed orchestrator (same .run(task) contract as AIOrchestrator). `gw` is injected so
+    dependency overrides (tests) never fall through to the live-DB gateway."""
+    return GatewayOrchestrator(gw, MemoryService(mem))
 
 
 def require_site(site_id: str = Path(...), repo: SitesRepository = Depends(sites_repo)):

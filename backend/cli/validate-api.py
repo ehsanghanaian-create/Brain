@@ -47,13 +47,29 @@ def main() -> int:
     global BASE
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="http://127.0.0.1:8000")
-    ap.add_argument("--site", default="example-site", help="existing site with graph data (read-only checks)")
+    ap.add_argument("--site", default=None, help="existing site with graph data (read-only checks); default: first site returned by /sites")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
     BASE = a.base.rstrip("/")
     api = BASE + "/api/v1"
     H = {"X-API-Token": os.environ.get("API_TOKEN", "")} if os.environ.get("API_TOKEN") else {}
     sid = a.site
+    if not sid:
+        try:
+            sites = httpx.get(api + "/sites", headers=H, timeout=30).json()
+            best, best_n = None, -1
+            for s_ in sites:                                  # prefer the site with the most graph nodes (read-only checks need data)
+                if str(s_["site_id"]).startswith("zz-"):
+                    continue
+                try:
+                    n = int(httpx.get(api + f"/sites/{s_['site_id']}/graph/summary", headers=H, timeout=30).json().get("nodes") or 0)
+                except Exception:  # noqa: BLE001
+                    n = 0
+                if n > best_n:
+                    best, best_n = s_["site_id"], n
+            sid = best or (sites[0]["site_id"] if sites else "example-site")
+        except Exception:  # noqa: BLE001
+            sid = "example-site"
     tmp = f"zz-validation-{uuid.uuid4().hex[:6]}"
 
     # Validation must be deterministic and never spend real tokens: temporarily disable every enabled provider (Claude/OmniRoute/…)

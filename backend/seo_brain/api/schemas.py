@@ -46,8 +46,13 @@ class MemoryUpdate(BaseModel):
 
 
 class ConnectionTestRequest(BaseModel):
-    """Optional override of the property to test; when omitted the site's stored property is used."""
+    """Optional override of the property to test; when omitted the site's stored property is used.
+    WordPress only (additive): `wp_username` + `wp_app_password` run the Application-Password identity check and, when it
+    succeeds, are stored encrypted in the SecretStore for this site (never returned); `clear_wp_credentials` removes them."""
     property: str | None = None
+    wp_username: str | None = Field(default=None, max_length=120)
+    wp_app_password: str | None = Field(default=None, max_length=200)
+    clear_wp_credentials: bool = False
 
 
 class AIRunRequest(BaseModel):

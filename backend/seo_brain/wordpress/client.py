@@ -31,11 +31,13 @@ class WordPressClient:
         self.base = wp_url.rstrip("/") + "/wp-json"
         self.site_id = site_id
         auth = None
-        user, pw = env("WP_USERNAME"), env("WP_APP_PASSWORD")
         self.authenticated = False
-        if use_auth and user and pw:
-            auth = (user, pw)
-            self.authenticated = True
+        if use_auth:
+            from .auth import resolve_auth          # per-site SecretStore credentials first, then .env (legacy)
+            a = resolve_auth(site_id)
+            if a:
+                auth = a.basic
+                self.authenticated = True
         self.http = ReadOnlyClient(user_agent=user_agent, min_interval=min_interval, auth=auth)
         self.save_raw = save_raw
         self.raw_dir: Path = raw_data_dir() / "wordpress" / site_id

@@ -170,11 +170,12 @@ def test_wordpress_url_without_scheme_is_normalized(env):
     assert r["ok"] and r["detail"]["url"] == "https://demo.example/wp-json/"
     assert r["detail"]["rest_endpoint"] == "https://demo.example/wp-json/wp/v2/"
     assert seen_urls[0] == "https://demo.example/wp-json/"                      # main probe first, then diagnostics
-    assert set(seen_urls) == {"https://demo.example/wp-json/", "https://demo.example/", "https://demo.example/wp-json/wp/v2/users/me"}
+    # public stage only: base URL + /wp-json/ — users/me is NEVER requested without credentials
+    assert set(seen_urls) == {"https://demo.example/wp-json/", "https://demo.example/"}
     assert c.get("/api/v1/sites/demo").json()["wp_url"] == "https://demo.example"
-    # diagnostics: 3 steps (base, /wp-json/, users/me) + trace lines, nothing secret
-    steps = [d["step"] for d in r["detail"]["diagnostics"]]
-    assert steps == ["base_url", "wp_json", "users_me_anon"] and all("fa" in d for d in r["detail"]["diagnostics"])
+    steps = [(d["step"], d["stage"]) for d in r["detail"]["diagnostics"]]
+    assert steps == [("base_url", "public"), ("rest_public", "public"), ("auth", "auth")] and all("fa" in d for d in r["detail"]["diagnostics"])
+    assert r["detail"]["diagnostics"][2]["skipped"] is True and r["detail"]["auth"] == {"configured": False, "status": "not_configured", "message": "بدون احراز هویت (اختیاری)"}
     assert r["detail"]["trace"] and any("normalize → https://demo.example" in t for t in r["detail"]["trace"])
 
 
@@ -207,26 +208,84 @@ def test_wordpress_malformed_urls_rejected_without_network(env, raw):
     assert "xxxxxxxxxxxxxxxxxxxxxxxx" not in r["message"] and "pass@" not in r["message"]
 
 
-def test_wordpress_users_me_auth_probe_uses_env_creds_but_never_leaks_them(env):
-    c = env["client"]; _create(c)
-    seen = []
+def _wp_auth_env(env, tmp_secret_dir="secrets"):
+    """Isolated SecretStore for per-site WordPress credentials + public /wp-json/ fake + capture of authenticated probes."""
+    from seo_brain.core.secrets import SecretStore
+    from seo_brain.wordpress import auth as wp_auth
+    store = SecretStore(env["root"] / tmp_secret_dir)
+    env["monkeypatch"].setattr(wp_auth, "get_secret_store", lambda: store)
+    env["monkeypatch"].setattr(conn_service, "env", lambda k, d=None: d)         # no .env credentials
+    public_urls = []
     def fake_fetch(url):
-        seen.append(url)
+        public_urls.append(url)
         return httpx.Response(200, json={"name": "Demo WP", "namespaces": ["wp/v2"]}, request=httpx.Request("GET", url))
-    # env creds present → authenticated users/me probe (we stub httpx.get used by the auth probe)
-    env["monkeypatch"].setattr(conn_service, "env", lambda k, d=None: {"WP_USERNAME": "editor", "WP_APP_PASSWORD": "aaaa bbbb cccc dddd eeee ffff"}.get(k, d))
-    auth_seen = {}
-    def fake_get(url, **kw):
-        auth_seen["auth"] = (kw.get("headers") or {}).get("Authorization", "")
-        return httpx.Response(401, json={"code": "rest_not_logged_in"}, request=httpx.Request("GET", url))
-    env["monkeypatch"].setattr(conn_service.httpx, "get", fake_get)
-    c.app.dependency_overrides[sites_router.connections_service] = lambda: ConnectionsService(env["eng"], wp_fetch=fake_fetch)
+    auth_calls = []
+    def fake_fetch_auth(url, basic, _responses={}):
+        auth_calls.append((url, basic))
+        user, pw = basic
+        if pw == "aaaa bbbb cccc dddd eeee ffff" and user == "editor":
+            return httpx.Response(200, json={"id": 7, "name": "Editor Demo", "roles": ["editor"], "capabilities": {"read": True}}, request=httpx.Request("GET", url))
+        if pw == "blocked":
+            return httpx.Response(403, json={"code": "rest_forbidden"}, request=httpx.Request("GET", url))
+        if pw == "slow":
+            raise httpx.ConnectTimeout("timeout")
+        return httpx.Response(401, json={"code": "incorrect_password"}, request=httpx.Request("GET", url))
+    env["client"].app.dependency_overrides[sites_router.connections_service] = lambda: ConnectionsService(env["eng"], wp_fetch=fake_fetch, wp_fetch_auth=fake_fetch_auth)
+    return store, public_urls, auth_calls
+
+
+def test_wordpress_public_rest_works_without_credentials_and_users_me_is_not_called(env):
+    c = env["client"]; _create(c)
+    store, public_urls, auth_calls = _wp_auth_env(env)
     r = c.post("/api/v1/sites/demo/connections/wordpress/test", json={"property": "https://demo.example"}).json()
-    assert r["ok"]
-    me = next(d for d in r["detail"]["diagnostics"] if d["step"] == "users_me_auth")
-    assert me["status_code"] == 401 and "401" in me["hint"] and auth_seen["auth"].startswith("Basic ")
+    assert r["ok"] and r["status"] == "ok"
+    assert auth_calls == [] and not any("users/me" in u for u in public_urls)          # never anonymous users/me
+    assert r["detail"]["auth"]["configured"] is False and r["detail"]["diagnostics"][-1]["skipped"] is True
+    st = c.get("/api/v1/sites/demo/connections").json()
+    assert st["wordpress_auth"] == {"configured": False, "username": None, "key_hint": None, "source": None}
+
+
+def test_wordpress_valid_application_password_connects_user_and_is_stored_encrypted(env):
+    c = env["client"]; _create(c)
+    store, public_urls, auth_calls = _wp_auth_env(env)
+    r = c.post("/api/v1/sites/demo/connections/wordpress/test", json={"property": "https://demo.example", "wp_username": "editor", "wp_app_password": "aaaa bbbb cccc dddd eeee ffff"}).json()
+    assert r["ok"], r
+    a = r["detail"]["auth"]
+    assert a["status"] == "ok" and a["user_name"] == "Editor Demo" and a["roles"] == ["editor"] and a["username"] == "editor" and a["key_hint"] == "ffff" and a["stored"] is True and a["source"] == "explicit"
+    assert "احراز هویت تأیید شد" in r["message"]
+    step = next(d for d in r["detail"]["diagnostics"] if d["step"] == "auth")
+    assert step["ok"] is True and step["status_code"] == 200 and "Editor Demo" in step["hint"]
+    assert auth_calls[0][0] == "https://demo.example/wp-json/wp/v2/users/me?context=edit" and auth_calls[0][1] == ("editor", "aaaa bbbb cccc dddd eeee ffff")
+    # password never leaks into the response/trace; stored only in the SecretStore (encrypted) — and reused on the next test without resending
+    import base64
     blob = json.dumps(r, ensure_ascii=False)
-    assert "aaaa bbbb" not in blob and "Basic " not in blob and "editor:" not in blob      # password/basic token never returned or traced
+    assert "aaaa bbbb" not in blob and base64.b64encode(b"editor:aaaa bbbb cccc dddd eeee ffff").decode() not in blob
+    assert store.exists("wp-auth-demo")
+    st = c.get("/api/v1/sites/demo/connections").json()["wordpress_auth"]
+    assert st == {"configured": True, "username": "editor", "key_hint": "ffff", "source": "site"}
+    r2 = c.post("/api/v1/sites/demo/connections/wordpress/test", json={"property": "https://demo.example"}).json()
+    assert r2["detail"]["auth"]["status"] == "ok" and r2["detail"]["auth"]["source"] == "site"
+    # clear credentials → back to public-only
+    r3 = c.post("/api/v1/sites/demo/connections/wordpress/test", json={"property": "https://demo.example", "clear_wp_credentials": True}).json()
+    assert r3["detail"]["auth"]["configured"] is False and not store.exists("wp-auth-demo")
+
+
+@pytest.mark.parametrize("pw,expected_status,substr,code", [
+    ("wrong-password-1234", "not_authorized", "نادرست", 401),
+    ("blocked", "forbidden", "403", 403),
+    ("slow", "timeout", "timeout", None),
+])
+def test_wordpress_invalid_application_password_gives_clear_error(env, pw, expected_status, substr, code):
+    c = env["client"]; _create(c)
+    store, public_urls, auth_calls = _wp_auth_env(env)
+    r = c.post("/api/v1/sites/demo/connections/wordpress/test", json={"property": "https://demo.example", "wp_username": "editor", "wp_app_password": pw}).json()
+    assert r["ok"] and r["status"] == "ok"                      # public REST still fine — auth failure is reported separately, never as UnsupportedProtocol
+    a = r["detail"]["auth"]
+    assert a["configured"] is True and a["status"] == expected_status and substr in a["message"] and "احراز هویت ناموفق" in r["message"]
+    step = next(d for d in r["detail"]["diagnostics"] if d["step"] == "auth")
+    assert step["ok"] is False and step["status_code"] == code and step["hint"]
+    assert not store.exists("wp-auth-demo")                     # failed credentials are NOT stored
+    assert pw not in json.dumps(r, ensure_ascii=False) and pw not in " ".join(r["detail"]["trace"])
 
 
 def test_wordpress_application_password_pasted_as_url_gives_clear_error(env):

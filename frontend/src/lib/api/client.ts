@@ -83,10 +83,12 @@ export type ConnectionResult = {
   detail: Record<string, unknown>;
   tested_at: string;
 };
+export type WpAuthStatus = { configured: boolean; username: string | null; key_hint: string | null; source: 'explicit' | 'site' | 'env' | null };
 export type ConnectionsStatus = {
   site_id: string;
   configured: { gsc: string | null; ga4: string | null; wordpress: string | null };
   status: Partial<Record<ConnectionKind, ConnectionResult>>;
+  wordpress_auth?: WpAuthStatus;
 };
 export type GscProperties = { status: string; message?: string; properties: { property: string; permission: string }[] };
 export type InitializeResult = {
@@ -198,8 +200,8 @@ export const endpoints = {
   updateSite: (id: string, body: SiteUpdateBody) => api<Site>(`/sites/${encodeURIComponent(id)}`, { method: 'PATCH', json: body }),
   deleteSite: (id: string, force = false) => api<{ deleted: string }>(`/sites/${encodeURIComponent(id)}${force ? '?force=true' : ''}`, { method: 'DELETE' }),
   connections: (id: string) => api<ConnectionsStatus>(`/sites/${encodeURIComponent(id)}/connections`),
-  testConnection: (id: string, kind: ConnectionKind, property?: string | null) =>
-    api<ConnectionResult>(`/sites/${encodeURIComponent(id)}/connections/${kind}/test`, { method: 'POST', json: { property: property || null } }),
+  testConnection: (id: string, kind: ConnectionKind, property?: string | null, extra?: { wp_username?: string | null; wp_app_password?: string | null; clear_wp_credentials?: boolean }) =>
+    api<ConnectionResult>(`/sites/${encodeURIComponent(id)}/connections/${kind}/test`, { method: 'POST', json: { property: property || null, ...(extra ?? {}) } }),
   gscProperties: () => api<GscProperties>('/connections/gsc/properties'),
   initializeSite: (id: string) => api<InitializeResult>(`/sites/${encodeURIComponent(id)}/initialize`, { method: 'POST' }),
   // phase 4 — graph command center

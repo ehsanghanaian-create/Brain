@@ -11,7 +11,10 @@ from sqlalchemy import Engine, select
 from ..common.config import env, resolve_path
 from ..common.urls import InvalidWordPressUrlError, normalize_wordpress_url, wp_rest_root, wp_rest_v2
 from ..db.repositories.base import Repository, dumps, loads, utcnow
+from ..core.secrets import SecretStore
 from ..db.tables import site_connections
+
+SecretStoreHint = SecretStore.hint
 
 log = logging.getLogger("connections")
 
@@ -90,11 +93,14 @@ class ConnectionsService:
     """`gsc_client_factory` / `ga4_report_factory` are injectable for tests (no network in CI)."""
 
     def __init__(self, engine: Engine, gsc_client_factory: Callable[[str], Any] | None = None,
-                 ga4_report_factory: Callable[[str], dict] | None = None, wp_fetch: Callable[[str], httpx.Response] | None = None):
+                 ga4_report_factory: Callable[[str], dict] | None = None, wp_fetch: Callable[[str], httpx.Response] | None = None,
+                 wp_fetch_auth: Callable[[str, tuple[str, str]], httpx.Response] | None = None):
         self.repo = ConnectionsRepository(engine)
         self._gsc_factory = gsc_client_factory
         self._ga4_report = ga4_report_factory
         self._wp_fetch = wp_fetch or (lambda url: httpx.get(url, timeout=20, follow_redirects=True, headers={"User-Agent": "SEO-Brain/0.2 (+local; read-only)"}))
+        if wp_fetch_auth is not None:
+            self._wp_fetch_auth = wp_fetch_auth  # type: ignore[method-assign]
 
     # -- status
     def status(self, site_id: str) -> dict[str, dict]:
@@ -196,14 +202,17 @@ class ConnectionsService:
         return svc.properties().runReport(property=f"properties/{pid}", body=body).execute()
 
     # -- WordPress REST (public, GET only)
-    def test_wordpress(self, site_id: str, wp_url: str | None) -> ConnectionResult:
+    def test_wordpress(self, site_id: str, wp_url: str | None, username: str | None = None, app_password: str | None = None) -> ConnectionResult:
+        """Stage 1: public REST (`/wp-json/`, no credentials). Stage 2: Application-Password identity check
+        (`/wp-json/wp/v2/users/me`, Basic auth) — ONLY when credentials exist (body → SecretStore → .env); never anonymously."""
+        from ..wordpress.auth import resolve_auth
         trace: list[str] = []
-        res = self._test_wordpress(wp_url, trace)
+        res = self._test_wordpress(wp_url, trace, auth=resolve_auth(site_id, username, app_password))
         res.detail = {**res.detail, "trace": trace}
         self.repo.save(site_id, res)
         return res
 
-    def _test_wordpress(self, wp_url: str | None, trace: list[str] | None = None) -> ConnectionResult:
+    def _test_wordpress(self, wp_url: str | None, trace: list[str] | None = None, auth=None) -> ConnectionResult:
         trace = trace if trace is not None else []
         _step(trace, f"input = {_redact(wp_url)}")
         if not wp_url:
@@ -270,57 +279,80 @@ class ConnectionsService:
             return ConnectionResult("wordpress", "error",
                                     "پاسخ دریافت شد اما namespace استاندارد wp/v2 پیدا نشد — احتمالاً این یک سایت وردپرسی نیست.",
                                     {"url": root_url, "namespaces": ns[:20]})
-        diag = self._wp_diagnostics(base, root_url, r, trace)
-        return ConnectionResult("wordpress", "ok", "REST API وردپرس در دسترس است (فقط خواندنی)",
+        diag, auth_detail = self._wp_diagnostics(base, root_url, r, trace, auth)
+        msg = "REST API وردپرس در دسترس است (فقط خواندنی)"
+        if auth_detail["configured"]:
+            msg += " · " + ("احراز هویت تأیید شد" + (f" ({auth_detail.get('user_name') or auth_detail.get('username')})" if auth_detail.get("status") == "ok" else "") if auth_detail.get("status") == "ok" else f"احراز هویت ناموفق: {auth_detail.get('message')}")
+        return ConnectionResult("wordpress", "ok", msg,
                                 {"url": root_url, "site_url": base, "rest_endpoint": wp_rest_v2(base),
-                                 "name": data.get("name"), "namespaces": ns[:20], "wp_v2": True, "diagnostics": diag})
+                                 "name": data.get("name"), "namespaces": ns[:20], "wp_v2": True, "diagnostics": diag, "auth": auth_detail})
 
-    # -- WordPress diagnostics: 3 read-only probes. Credentials (if any) come from env WP_USERNAME/WP_APP_PASSWORD
-    #    and are used only as Basic auth for users/me — never stored, returned or written to logs/traces.
-    def _wp_diagnostics(self, base: str, root_url: str, root_resp: httpx.Response | None, trace: list[str]) -> list[dict[str, Any]]:
-        import base64 as _b64
+    # -- WordPress diagnostics (read-only). Stage 1 = public REST (base URL + /wp-json/), Stage 2 = Application-Password
+    #    identity check on /wp-json/wp/v2/users/me with Basic auth — executed ONLY when credentials are available
+    #    (explicit → per-site SecretStore → .env). Credentials are never stored here, returned, logged or traced.
+    def _wp_diagnostics(self, base: str, root_url: str, root_resp: httpx.Response | None, trace: list[str], auth=None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         import time as _t
         out: list[dict[str, Any]] = []
 
-        def probe(name: str, url: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+        def probe(name: str, url: str, basic: tuple[str, str] | None = None) -> dict[str, Any]:
             t0 = _t.perf_counter()
             try:
-                rr = self._wp_fetch(url) if not headers else httpx.get(url, timeout=20, follow_redirects=True, headers={"User-Agent": "SEO-Brain/0.2 (+local; read-only)", **headers})
+                rr = self._wp_fetch(url) if basic is None else self._wp_fetch_auth(url, basic)
                 ms = int((_t.perf_counter() - t0) * 1000)
-                entry = {"step": name, "url": url, "ok": rr.status_code < 400, "status_code": rr.status_code, "ms": ms, "content_type": rr.headers.get("content-type", "")[:60]}
-                _step(trace, f"probe {name}: GET {url} → HTTP {rr.status_code} in {ms}ms")
-                return entry
+                _step(trace, f"probe {name}: GET {url}{' (authenticated as ' + basic[0] + ')' if basic else ''} → HTTP {rr.status_code} in {ms}ms")
+                return {"step": name, "url": url, "ok": rr.status_code < 400, "status_code": rr.status_code, "ms": ms, "content_type": rr.headers.get("content-type", "")[:60], "_resp": rr}
+            except httpx.TimeoutException as e:
+                _step(trace, f"probe {name}: GET {url} → timeout ({e.__class__.__name__})")
+                return {"step": name, "url": url, "ok": False, "status_code": None, "ms": int((_t.perf_counter() - t0) * 1000), "error": "timeout"}
             except httpx.RequestError as e:
-                ms = int((_t.perf_counter() - t0) * 1000)
                 _step(trace, f"probe {name}: GET {url} → {e.__class__.__name__}")
-                return {"step": name, "url": url, "ok": False, "status_code": None, "ms": ms, "error": e.__class__.__name__}
+                return {"step": name, "url": url, "ok": False, "status_code": None, "ms": int((_t.perf_counter() - t0) * 1000), "error": e.__class__.__name__}
 
-        # 1) base URL (the site itself)
-        out.append({**probe("base_url", base + "/"), "fa": "آدرس سایت"})
-        # 2) /wp-json/ (reuse the response we already have)
+        # ---- Stage 1: public REST
+        e1 = probe("base_url", base + "/"); e1.pop("_resp", None); e1.update({"stage": "public", "fa": "آدرس سایت"}); out.append(e1)
         if root_resp is not None:
-            out.append({"step": "wp_json", "url": root_url, "ok": root_resp.status_code == 200, "status_code": root_resp.status_code, "ms": None, "content_type": root_resp.headers.get("content-type", "")[:60], "fa": "REST API ریشه (/wp-json/)"})
+            out.append({"step": "rest_public", "stage": "public", "fa": "REST API عمومی (/wp-json/)", "url": root_url, "ok": root_resp.status_code == 200, "status_code": root_resp.status_code, "ms": None, "content_type": root_resp.headers.get("content-type", "")[:60]})
         else:
-            out.append({**probe("wp_json", root_url), "fa": "REST API ریشه (/wp-json/)"})
-        # 3) /wp-json/wp/v2/users/me — authenticated only when env creds exist (optional; SEO Brain stays read-only)
-        user, pw = env("WP_USERNAME"), env("WP_APP_PASSWORD")
-        me_url = wp_rest_v2(base) + "users/me"
-        if user and pw:
-            token = _b64.b64encode(f"{user}:{pw}".encode()).decode()
-            e = probe("users_me_auth", me_url, {"Authorization": f"Basic {token}"})
-            e["fa"] = "احراز هویت (users/me با Application Password از .env)"
-            e["auth"] = "env WP_USERNAME/WP_APP_PASSWORD (not logged)"
-            if e.get("status_code") == 401:
-                e["hint"] = "نام‌کاربری یا Application Password نادرست است (401)."
-            elif e.get("status_code") == 403:
-                e["hint"] = "کاربر مجاز نیست یا احراز هویت Basic/Application Passwords غیرفعال است (403)."
-            out.append(e)
+            e2 = probe("rest_public", root_url); e2.pop("_resp", None); e2.update({"stage": "public", "fa": "REST API عمومی (/wp-json/)"}); out.append(e2)
+
+        # ---- Stage 2: Application Password (optional, never anonymous)
+        me_url = wp_rest_v2(base) + "users/me?context=edit"
+        if auth is None:
+            out.append({"step": "auth", "stage": "auth", "fa": "احراز هویت (Application Password)", "url": me_url, "ok": None, "status_code": None, "ms": None, "skipped": True,
+                        "hint": "نام‌کاربری و Application Password وارد نشده — اتصال فقط‌خواندنی عمومی فعال است. برای تأیید هویت و خواندن احراز‌هویت‌شده، آن‌ها را وارد کنید."})
+            return out, {"configured": False, "status": "not_configured", "message": "بدون احراز هویت (اختیاری)"}
+        e3 = probe("auth", me_url, auth.basic)
+        rr = e3.pop("_resp", None)
+        e3.update({"stage": "auth", "fa": "احراز هویت (users/me با Application Password)", "username": auth.username, "source": auth.source})
+        code = e3.get("status_code")
+        if code == 200:
+            info = {}
+            try:
+                j = rr.json() if rr is not None else {}
+                info = {"user_id": j.get("id"), "user_name": j.get("name"), "roles": (j.get("roles") or [])[:5], "capabilities_read": bool((j.get("capabilities") or {}).get("read", True))}
+            except ValueError:
+                pass
+            e3["ok"] = True; e3["hint"] = f"کاربر متصل شد: {info.get('user_name') or auth.username}" + (f" · نقش‌ها: {', '.join(info['roles'])}" if info.get("roles") else "")
+            st = {"configured": True, "status": "ok", "message": "احراز هویت تأیید شد", **info}
+        elif code == 401:
+            e3["ok"] = False; e3["hint"] = "۴۰۱ — نام‌کاربری یا Application Password اشتباه است (یا Application Passwords در وردپرس غیرفعال است)."
+            st = {"configured": True, "status": "not_authorized", "message": "نام‌کاربری یا Application Password نادرست است (401)"}
+        elif code == 403:
+            e3["ok"] = False; e3["hint"] = "۴۰۳ — کاربر مجاز نیست یا افزونه امنیتی/فایروال درخواست‌های Basic auth را مسدود می‌کند."
+            st = {"configured": True, "status": "forbidden", "message": "دسترسی رد شد (403) — مجوز کاربر یا افزونه امنیتی"}
+        elif e3.get("error") == "timeout":
+            e3["hint"] = "timeout — مشکل اتصال به سرور هنگام احراز هویت."
+            st = {"configured": True, "status": "timeout", "message": "اتصال هنگام احراز هویت timeout شد"}
+        elif e3.get("error"):
+            e3["hint"] = f"خطای شبکه: {e3['error']}"
+            st = {"configured": True, "status": "error", "message": f"خطای شبکه هنگام احراز هویت ({e3['error']})"}
         else:
-            e = probe("users_me_anon", me_url)
-            e["fa"] = "users/me بدون احراز هویت (اختیاری)"
-            e["ok"] = e.get("status_code") in (200, 401, 403)   # 401/403 = endpoint exists; anonymous access is (correctly) refused
-            e["hint"] = ("401 طبیعی است: SEO Brain فقط‌خواندنی است و برای اتصال به Application Password نیازی ندارد. (برای همگام‌سازی با احراز هویت، WP_USERNAME/WP_APP_PASSWORD را در .env بگذارید)" if e.get("status_code") == 401
-                         else "403 بدون احراز هویت: users/me برای بازدیدکننده ناشناس توسط افزونه امنیتی/فایروال بسته شده — برای قابلیت‌های فقط‌خواندنی SEO Brain مشکلی نیست." if e.get("status_code") == 403
-                         else "پاسخ غیرمنتظره برای users/me؛ فقط اطلاعاتی است و اتصال فقط‌خواندنی را تحت تأثیر قرار نمی‌دهد.")
-            out.append(e)
-        return out
+            e3["ok"] = False; e3["hint"] = f"پاسخ غیرمنتظره HTTP {code}"
+            st = {"configured": True, "status": "error", "message": f"پاسخ غیرمنتظره HTTP {code}"}
+        st.update({"username": auth.username, "source": auth.source, "key_hint": SecretStoreHint(auth.app_password)})
+        out.append(e3)
+        return out, st
+
+    def _wp_fetch_auth(self, url: str, basic: tuple[str, str]) -> httpx.Response:
+        """Authenticated GET (Basic = Application Password). Separate hook so tests can fake it; the password never reaches logs."""
+        return httpx.get(url, timeout=20, follow_redirects=True, auth=basic, headers={"User-Agent": "SEO-Brain/0.2 (+local; read-only)"})

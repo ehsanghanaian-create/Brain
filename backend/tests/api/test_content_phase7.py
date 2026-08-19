@@ -69,6 +69,8 @@ def c(tmp_path, monkeypatch):
     monkeypatch.setattr(graph_router, "connect", lambda: legacy_connect(dbfile))
     monkeypatch.setattr(sites_router, "PROJECT_ROOT", tmp_path)
     app = create_app(); app.dependency_overrides[deps.engine] = lambda: eng
+    from seo_brain.ai.gateway import Gateway as _GW
+    app.dependency_overrides[deps.gateway] = (lambda g: (lambda: g))(_GW(eng))   # isolate from the live DB gateway
     client = TestClient(app)
     assert client.post("/api/v1/sites", json={"site_id": SID, "name": "Demo", "canonical_url": "https://demo.example/"}).status_code == 201
     client.post(f"/api/v1/sites/{SID}/initialize")

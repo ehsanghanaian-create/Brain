@@ -117,7 +117,7 @@ export function SiteDetail({
             </div>
             <ConnectionTester siteId={site.site_id} kind='gsc' label='Google Search Console' hint='sc-domain:example.com' initialValue={site.gsc_property} initialResult={connections.status.gsc} />
             <ConnectionTester siteId={site.site_id} kind='ga4' label='GA4 Property ID' hint='123456789' initialValue={site.ga4_property} initialResult={connections.status.ga4} />
-            <ConnectionTester siteId={site.site_id} kind='wordpress' label='WordPress REST' hint='https://example.com' initialValue={site.wp_url} initialResult={connections.status.wordpress} />
+            <ConnectionTester siteId={site.site_id} kind='wordpress' label='WordPress REST' hint='https://example.com' initialValue={site.wp_url} initialResult={connections.status.wordpress} initialAuth={connections.wordpress_auth ?? null} />
           </CardContent>
         </Card>
       </TabsContent>

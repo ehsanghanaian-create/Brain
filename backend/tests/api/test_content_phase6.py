@@ -31,6 +31,9 @@ def c(tmp_path, monkeypatch):
     store = SecretStore(tmp_path / "secrets")
     app = create_app(); app.dependency_overrides[deps.engine] = lambda: eng
     app.dependency_overrides[ai_config_router.cfg_repo] = lambda: ProviderConfigRepository(eng, store)
+    from seo_brain.ai.gateway import Gateway as _GW
+    _gw = _GW(eng); _gw.cfg = ProviderConfigRepository(eng, store)
+    app.dependency_overrides[deps.gateway] = lambda: _gw            # isolate from the live DB gateway
     client = TestClient(app)
     assert client.post("/api/v1/sites", json={"site_id": SID, "name": "Demo", "canonical_url": "https://demo.example/"}).status_code == 201
     client.post(f"/api/v1/sites/{SID}/initialize")

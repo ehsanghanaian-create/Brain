@@ -159,6 +159,63 @@ def test_wordpress_probe_with_fake_http(env):
     assert c.post("/api/v1/sites/demo/connections/nope/test", json={}).status_code == 404
 
 
+def test_wordpress_url_without_scheme_is_normalized(env):
+    c = env["client"]; _create(c)
+    seen_urls = []
+    def fake_fetch(url):
+        seen_urls.append(url)
+        return httpx.Response(200, json={"name": "Demo WP", "namespaces": ["wp/v2"]}, request=httpx.Request("GET", url))
+    c.app.dependency_overrides[sites_router.connections_service] = lambda: ConnectionsService(env["eng"], wp_fetch=fake_fetch)
+    r = c.post("/api/v1/sites/demo/connections/wordpress/test", json={"property": "demo.example"}).json()
+    assert r["ok"] and r["detail"]["url"] == "https://demo.example/wp-json/"
+    assert r["detail"]["rest_endpoint"] == "https://demo.example/wp-json/wp/v2/"
+    assert seen_urls == ["https://demo.example/wp-json/"]
+    assert c.get("/api/v1/sites/demo").json()["wp_url"] == "https://demo.example"
+
+
+def test_wordpress_application_password_pasted_as_url_gives_clear_error(env):
+    """Regression for the reported bug: an Application-Password-like value must never reach
+    httpx as a URL (which raised UnsupportedProtocol on something like `<token>/wp-json/`)."""
+    c = env["client"]; _create(c)
+    calls = []
+    def fake_fetch(url):
+        calls.append(url)
+        raise AssertionError("must not attempt an HTTP request for a non-URL value")
+    c.app.dependency_overrides[sites_router.connections_service] = lambda: ConnectionsService(env["eng"], wp_fetch=fake_fetch)
+    r = c.post("/api/v1/sites/demo/connections/wordpress/test", json={"property": "f6wOsgR8NahkD5waVkCHKxXu"})
+    body = r.json()
+    assert not body["ok"] and body["status"] == "error"
+    assert "f6wOsgR8NahkD5waVkCHKxXu" not in body["message"]
+    assert calls == []  # no network call attempted
+    assert c.get("/api/v1/sites/demo").json()["wp_url"] is None  # nothing bad got stored
+
+
+@pytest.mark.parametrize("exc,expected_status,expected_substr", [
+    (httpx.UnsupportedProtocol("bad"), "error", "پروتکل"),
+    (httpx.ConnectTimeout("timeout"), "error", "timeout"),
+    (httpx.ConnectError("[Errno -2] Name or service not known"), "error", "DNS"),
+])
+def test_wordpress_network_errors_are_differentiated(env, exc, expected_status, expected_substr):
+    c = env["client"]; _create(c)
+    def fake_fetch(url):
+        raise exc
+    c.app.dependency_overrides[sites_router.connections_service] = lambda: ConnectionsService(env["eng"], wp_fetch=fake_fetch)
+    r = c.post("/api/v1/sites/demo/connections/wordpress/test", json={"property": "https://demo.example"}).json()
+    assert r["status"] == expected_status
+    assert expected_substr in r["message"]
+
+
+@pytest.mark.parametrize("status_code,expected_status", [(401, "not_authorized"), (403, "not_authorized"), (404, "not_found")])
+def test_wordpress_http_error_statuses_are_differentiated(env, status_code, expected_status):
+    c = env["client"]; _create(c)
+    def fake_fetch(url):
+        return httpx.Response(status_code, json={}, request=httpx.Request("GET", url))
+    c.app.dependency_overrides[sites_router.connections_service] = lambda: ConnectionsService(env["eng"], wp_fetch=fake_fetch)
+    r = c.post("/api/v1/sites/demo/connections/wordpress/test", json={"property": "https://demo.example"}).json()
+    assert r["status"] == expected_status
+    assert r["detail"]["status_code"] == status_code
+
+
 def test_concurrent_connection_tests_do_not_overwrite_each_other(env):
     """Regression: three parallel tests each saving the whole row lost the GSC property (last writer wins)."""
     c = env["client"]; _create(c)

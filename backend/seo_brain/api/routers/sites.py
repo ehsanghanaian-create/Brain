@@ -123,8 +123,9 @@ def test_connection(site_id: str, kind: str, body: ConnectionTestRequest | None 
             repo.set_fields(site_id, ga4_property=res.detail.get("property") or body.property)
     elif kind == "wordpress":
         res = svc.test_wordpress(site_id, body.property or site.wp_url)
-        if res.ok and body.property and body.property != site.wp_url:
-            repo.set_fields(site_id, wp_url=body.property.rstrip("/"))
+        normalized = res.detail.get("site_url") if res.ok else None
+        if normalized and normalized != site.wp_url:
+            repo.set_fields(site_id, wp_url=normalized)
     else:
         raise ApiError(404, f"unknown connection kind '{kind}'", code="not_found", details={"kinds": ["gsc", "ga4", "wordpress"]})
     return res.to_dict()

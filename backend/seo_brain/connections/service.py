@@ -9,6 +9,7 @@ import httpx
 from sqlalchemy import Engine, select
 
 from ..common.config import env, resolve_path
+from ..common.urls import InvalidWordPressUrlError, normalize_wordpress_url, wp_rest_root, wp_rest_v2
 from ..db.repositories.base import Repository, dumps, loads, utcnow
 from ..db.tables import site_connections
 
@@ -178,17 +179,55 @@ class ConnectionsService:
     def _test_wordpress(self, wp_url: str | None) -> ConnectionResult:
         if not wp_url:
             return ConnectionResult("wordpress", "not_configured", "آدرس وردپرس تنظیم نشده است", {})
-        url = wp_url.rstrip("/") + "/wp-json/"
+
         try:
-            r = self._wp_fetch(url)
-        except Exception as e:  # noqa: BLE001
-            return ConnectionResult("wordpress", "error", f"اتصال به {url} برقرار نشد: {e.__class__.__name__}", {"url": url})
+            base = normalize_wordpress_url(wp_url)
+        except InvalidWordPressUrlError as e:
+            return ConnectionResult("wordpress", "error", str(e), {})
+
+        root_url = wp_rest_root(base)
+        try:
+            r = self._wp_fetch(root_url)
+        except httpx.UnsupportedProtocol:
+            return ConnectionResult("wordpress", "error",
+                                    "پروتکل آدرس نامعتبر است؛ آدرس وردپرس باید با http:// یا https:// شروع شود.",
+                                    {"url": root_url})
+        except httpx.ConnectTimeout:
+            return ConnectionResult("wordpress", "error", "اتصال به سرور در زمان مقرر برقرار نشد (connect timeout).", {"url": root_url})
+        except httpx.ReadTimeout:
+            return ConnectionResult("wordpress", "error", "سرور در زمان مقرر پاسخ نداد (read timeout).", {"url": root_url})
+        except httpx.TimeoutException:
+            return ConnectionResult("wordpress", "error", "درخواست به دلیل timeout ناموفق بود.", {"url": root_url})
+        except httpx.ConnectError as e:
+            msg = str(e)
+            if any(s in msg for s in ("getaddrinfo failed", "Name or service not known", "nodename nor servname", "Temporary failure in name resolution")):
+                return ConnectionResult("wordpress", "error", "دامنه یافت نشد (خطای DNS)؛ آدرس وردپرس را بررسی کنید.", {"url": root_url})
+            return ConnectionResult("wordpress", "error", f"اتصال به {root_url} برقرار نشد.", {"url": root_url})
+        except httpx.RequestError as e:
+            return ConnectionResult("wordpress", "error", f"اتصال به {root_url} برقرار نشد: {e.__class__.__name__}", {"url": root_url})
+
+        if r.status_code == 401:
+            return ConnectionResult("wordpress", "not_authorized", "REST API نیاز به احراز هویت دارد (401 Unauthorized).",
+                                    {"url": root_url, "status_code": 401})
+        if r.status_code == 403:
+            return ConnectionResult("wordpress", "not_authorized",
+                                    "دسترسی به REST API مسدود است (403 Forbidden) — احتمالاً توسط افزونه امنیتی یا فایروال.",
+                                    {"url": root_url, "status_code": 403})
+        if r.status_code == 404:
+            return ConnectionResult("wordpress", "not_found",
+                                    "مسیر REST API پیدا نشد (404) — بررسی کنید که آدرس درست است و REST API غیرفعال نشده باشد.",
+                                    {"url": root_url, "status_code": 404})
         if r.status_code != 200:
-            return ConnectionResult("wordpress", "not_found", f"REST API پاسخ {r.status_code} داد", {"url": url, "status_code": r.status_code})
+            return ConnectionResult("wordpress", "not_found", f"REST API پاسخ {r.status_code} داد", {"url": root_url, "status_code": r.status_code})
         try:
             data = r.json()
         except ValueError:
-            return ConnectionResult("wordpress", "error", "پاسخ /wp-json/ JSON نیست", {"url": url})
+            return ConnectionResult("wordpress", "error", "پاسخ /wp-json/ یک JSON معتبر نیست.", {"url": root_url})
         ns = data.get("namespaces", [])
+        if "wp/v2" not in ns:
+            return ConnectionResult("wordpress", "error",
+                                    "پاسخ دریافت شد اما namespace استاندارد wp/v2 پیدا نشد — احتمالاً این یک سایت وردپرسی نیست.",
+                                    {"url": root_url, "namespaces": ns[:20]})
         return ConnectionResult("wordpress", "ok", "REST API وردپرس در دسترس است (فقط خواندنی)",
-                                {"url": url, "name": data.get("name"), "namespaces": ns[:20], "wp_v2": "wp/v2" in ns})
+                                {"url": root_url, "site_url": base, "rest_endpoint": wp_rest_v2(base),
+                                 "name": data.get("name"), "namespaces": ns[:20], "wp_v2": True})

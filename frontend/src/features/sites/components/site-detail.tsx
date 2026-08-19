@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { BUSINESS_CATEGORIES, MODE_FA } from '../constants';
 import { ConnectionTester, StatusBadge } from './connection-tester';
 import { SiteBrainForm } from './site-brain-form';
+import { WordPressSyncCard } from './wordpress-sync-card';
 
 const fa = new Intl.NumberFormat('fa-IR');
 
@@ -33,6 +34,7 @@ export function SiteDetail({
   const [mode, setMode] = useState(site.mode);
   const [busy, setBusy] = useState(false);
   const [init, setInit] = useState<InitializeResult | null>(null);
+  const [wpRefresh, setWpRefresh] = useState(0);
 
   async function changeMode(next: 'manual' | 'assisted' | 'autopilot') {
     setBusy(true);
@@ -117,9 +119,11 @@ export function SiteDetail({
             </div>
             <ConnectionTester siteId={site.site_id} kind='gsc' label='Google Search Console' hint='sc-domain:example.com' initialValue={site.gsc_property} initialResult={connections.status.gsc} />
             <ConnectionTester siteId={site.site_id} kind='ga4' label='GA4 Property ID' hint='123456789' initialValue={site.ga4_property} initialResult={connections.status.ga4} />
-            <ConnectionTester siteId={site.site_id} kind='wordpress' label='WordPress REST' hint='https://example.com' initialValue={site.wp_url} initialResult={connections.status.wordpress} initialAuth={connections.wordpress_auth ?? null} />
+            <ConnectionTester siteId={site.site_id} kind='wordpress' label='WordPress REST' hint='https://example.com' initialValue={site.wp_url} initialResult={connections.status.wordpress} initialAuth={connections.wordpress_auth ?? null} onResult={() => setWpRefresh((n) => n + 1)} />
           </CardContent>
         </Card>
+
+        <WordPressSyncCard siteId={site.site_id} refreshKey={wpRefresh} />
       </TabsContent>
 
       <TabsContent value='brain'>

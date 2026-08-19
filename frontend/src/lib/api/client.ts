@@ -84,6 +84,16 @@ export type ConnectionResult = {
   tested_at: string;
 };
 export type WpAuthStatus = { configured: boolean; username: string | null; key_hint: string | null; source: 'explicit' | 'site' | 'env' | null };
+export type WpSyncStep = { key: string; fa?: string; status: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | string; started_at?: string | null; finished_at?: string | null; items?: Record<string, unknown>; error?: string | null; note?: string | null };
+export type WpSyncCounts = { categories: number; pages: number; posts: number; content_items?: number; taxonomies?: number; crawled: number; graph_nodes: number; graph_edges: number; graph_by_type?: Record<string, number> };
+export type WpSyncStatus = {
+  site_id: string; wp_url: string | null;
+  status: 'never' | 'queued' | 'running' | 'succeeded' | 'completed_with_errors' | 'failed' | string;
+  step: string | null; step_fa: string | null; progress: number; stage: 'full' | 'graph_only' | null;
+  started_at: string | null; finished_at: string | null; items: Record<string, unknown>; errors: string[]; steps: WpSyncStep[];
+  run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null; counts: WpSyncCounts; steps_fa: Record<string, string>;
+};
+export type WpSyncQueued = { status: 'queued' | 'already_running' | 'not_queued' | string; job_id?: string | null; run_id?: string | null; stage?: string; step?: string | null; error?: string | null };
 export type ConnectionsStatus = {
   site_id: string;
   configured: { gsc: string | null; ga4: string | null; wordpress: string | null };
@@ -204,6 +214,10 @@ export const endpoints = {
     api<ConnectionResult>(`/sites/${encodeURIComponent(id)}/connections/${kind}/test`, { method: 'POST', json: { property: property || null, ...(extra ?? {}) } }),
   gscProperties: () => api<GscProperties>('/connections/gsc/properties'),
   initializeSite: (id: string) => api<InitializeResult>(`/sites/${encodeURIComponent(id)}/initialize`, { method: 'POST' }),
+  // WordPress → sync → graph pipeline (job-based; never inline)
+  wpSyncStart: (id: string, body: { crawl?: boolean; max_urls?: number | null } = {}) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/wordpress/sync`, { method: 'POST', json: body }),
+  wpSyncStatus: (id: string) => api<WpSyncStatus>(`/sites/${encodeURIComponent(id)}/wordpress/sync/status`),
+  graphRebuild: (id: string) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/graph/rebuild`, { method: 'POST' }),
   // phase 4 — graph command center
   graphModes: (id: string) => api<GraphMode[]>(`/sites/${encodeURIComponent(id)}/graph/modes`),
   graphView: (id: string, params: { mode: string; types?: string[]; relation_types?: string[]; limit?: number; include_isolated?: boolean }) => {

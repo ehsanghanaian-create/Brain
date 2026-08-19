@@ -26,13 +26,17 @@ def database_url(path: str | Path | None = None) -> str:
 
 def make_engine(url: str | None = None) -> Engine:
     url = url or database_url()
-    eng = create_engine(url, future=True)
+    is_sqlite = url.startswith("sqlite")
+    # background jobs (WordPress sync / graph build) hold write transactions for a while; API writers must wait instead of
+    # failing with "database is locked" after sqlite's 5 s default — same 30 s as database/db.py::connect
+    eng = create_engine(url, future=True, connect_args={"timeout": 30} if is_sqlite else {})
     if eng.dialect.name == "sqlite":
         @event.listens_for(eng, "connect")
         def _sqlite_pragmas(dbapi_conn, _record):  # noqa: ANN001
             cur = dbapi_conn.cursor()
             cur.execute("PRAGMA foreign_keys = ON")
             cur.execute("PRAGMA journal_mode = WAL")
+            cur.execute("PRAGMA busy_timeout = 30000")
             cur.close()
     return eng
 

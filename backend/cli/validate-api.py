@@ -173,10 +173,21 @@ def main() -> int:
     check("connections status (empty)", "GET", api + f"/sites/{tmp}/connections", 200, lambda r: r.json()["status"] == {} and "configured" in r.json(), headers=H)
     check("gsc test without property → not_configured", "POST", api + f"/sites/{tmp}/connections/gsc/test", 200, lambda r: r.json()["status"] == "not_configured" and r.json()["ok"] is False, headers=H, json={})
     check("ga4 test bad id → not_configured", "POST", api + f"/sites/{tmp}/connections/ga4/test", 200, lambda r: r.json()["status"] == "not_configured", headers=H, json={"property": "abc"})
-    check("wordpress test (real site, read-only)", "POST", api + f"/sites/{tmp}/connections/wordpress/test", 200, lambda r: r.json()["status"] in ("ok", "error", "not_found"), headers=H, json={"property": "https://example.com"})
+    check("wordpress test (real site, read-only)", "POST", api + f"/sites/{tmp}/connections/wordpress/test", 200, lambda r: r.json()["status"] in ("ok", "error", "not_found"), headers=H, json={"property": "https://example.com", "auto_sync": False})
     check("connections status (3 kinds)", "GET", api + f"/sites/{tmp}/connections", 200, lambda r: set(r.json()["status"]) == {"gsc", "ga4", "wordpress"}, headers=H)
     check("gsc properties listing", "GET", api + "/connections/gsc/properties", 200, lambda r: r.json()["status"] in ("ok", "not_configured", "not_authorized", "error"), headers=H)
     check("unknown connection kind → 404", "POST", api + f"/sites/{tmp}/connections/nope/test", 404, headers=H, json={})
+    # ---- WordPress → sync → graph pipeline (job-based; never inline)
+    check("wp sync status (never)", "GET", api + f"/sites/{tmp}/wordpress/sync/status", 200, lambda r: r.json()["status"] == "never" and "counts" in r.json() and set(r.json()["steps_fa"]) >= {"categories", "pages", "posts", "build_graph"}, headers=H)
+    check("wp sync start without wp_url → 409", "POST", api + f"/sites/{tmp}/wordpress/sync", 409, lambda r: r.json()["error"]["code"] == "wordpress_not_configured", headers=H, json={})
+    check("graph rebuild queued (202)", "POST", api + f"/sites/{tmp}/graph/rebuild", 202, lambda r: r.json()["status"] == "queued" and r.json()["job_id"].startswith("job-") and r.json()["stage"] == "graph_only", headers=H)
+    for _ in range(30):
+        _st = httpx.get(api + f"/sites/{tmp}/wordpress/sync/status", headers=H, timeout=30).json()
+        if _st.get("status") not in ("queued", "running"):
+            break
+        time.sleep(0.5)
+    check("graph rebuild finished via job", "GET", api + f"/sites/{tmp}/wordpress/sync/status", 200, lambda r: r.json()["status"] == "succeeded" and r.json()["stage"] == "graph_only" and r.json()["progress"] == 1.0 and r.json()["job"]["status"] == "succeeded" and r.json()["counts"]["graph_nodes"] >= 1, headers=H)
+    check("wp sync status (real site)", "GET", api + f"/sites/{sid}/wordpress/sync/status", 200, lambda r: r.json()["site_id"] == sid and {"categories", "pages", "posts", "graph_nodes"} <= set(r.json()["counts"]), headers=H)
     check("initialize", "POST", api + f"/sites/{tmp}/initialize", 200, lambda r: r.json()["graph"]["site_node"] == f"site:{tmp}" and r.json()["memory"]["existed"] is True, headers=H)
     check("initialize idempotent", "POST", api + f"/sites/{tmp}/initialize", 200, lambda r: r.json()["graph"]["existed"] is True, headers=H)
     check("site brain put (audience/cta/forbidden)", "PUT", api + f"/sites/{tmp}/memory", 200, lambda r: r.json()["forbidden_claims"] == ["ارزان‌ترین"] and r.json()["audience"]["segments"] == ["مالکان MVM"], headers=H,
@@ -395,6 +406,7 @@ def main() -> int:
     lines += ["", "## Coverage", "",
               "* health / openapi / docs / request-id · error envelope (404, 409, 422) · sites CRUD (create, get, list, patch, delete-refuse, delete-force, 404 after) ·",
               "  phase 3: connections status/tests (gsc/ga4/wordpress + 404 kind), gsc properties listing, initialize (idempotent), site brain fields + AI context ·",
+              "  wordpress pipeline: sync status (never), start without wp_url → 409, graph rebuild 202 → job succeeded, real-site status counters ·",
               "  phase 6: content create/transition guard/brief/board/calendar/graph sync/delete · ai provider config (masked key)/task routes ·",
               "  phase 7: drafts v1/v2, score, review, intelligence history, scoring/analytics settings, snapshot/learn/overview/insights ·",
               "  phase 8: links meta/analyze/summary/suggestions/pages/patterns/settings/export ·",

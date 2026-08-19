@@ -53,6 +53,7 @@ class ConnectionTestRequest(BaseModel):
     wp_username: str | None = Field(default=None, max_length=120)
     wp_app_password: str | None = Field(default=None, max_length=200)
     clear_wp_credentials: bool = False
+    auto_sync: bool = True           # WordPress only: queue the sync → graph pipeline after a successful connection (never inline)
 
 
 class AIRunRequest(BaseModel):

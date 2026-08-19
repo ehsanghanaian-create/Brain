@@ -30,7 +30,13 @@ def word_count(text: str) -> int:
     return len([w for w in text.split() if w])
 
 
-def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = True) -> dict:
+def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = True, progress=None) -> dict:
+    """`progress(step, info)` (optional) is called as the sync moves through taxonomies → categories → pages/posts → media so a
+    caller (the WordPress sync orchestrator) can report live progress; it never receives credentials."""
+    def _p(step: str, **info):
+        if progress:
+            try: progress(step, info)
+            except Exception: pass  # noqa: BLE001 — progress reporting must never break the sync
     run_id = new_run_id("wp")
     ensure_site(conn, site)
     conn.execute("INSERT INTO sync_runs(run_id, site_id, source, started_at, status) VALUES (?,?,?,?,?)",
@@ -43,6 +49,7 @@ def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = 
         log.info(f"WP site: {root.get('name')} — {root.get('url')} (auth={'app-password' if client.authenticated else 'public'})")
 
         # taxonomies
+        _p("taxonomies")
         taxes = client.content_taxonomies()
         for slug, t in taxes.items():
             upsert(conn, "taxonomies", {
@@ -50,6 +57,7 @@ def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = 
                 "hierarchical": 1 if t.get("hierarchical") else 0, "object_types": j(t.get("types")),
             }, ["site_id", "slug"])
             table = "categories" if t.get("hierarchical") else "tags"
+            _p("categories" if slug == "category" else "taxonomies", taxonomy=slug)
             n = 0
             try:
                 for term in client.fetch_all(t["rest_base"], {"hide_empty": "false"}):
@@ -72,6 +80,7 @@ def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = 
         types = client.public_content_types()
         for slug, t in types.items():
             n = 0
+            _p("pages" if slug == "page" else "posts", post_type=slug)
             try:
                 items = client.fetch_all(t["rest_base"], {"status": "publish", "_embed": "0"})
             except WPError as e:
@@ -110,6 +119,7 @@ def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = 
             stats["posts"] += n
 
         # media (alt text is SEO-relevant)
+        _p("media")
         try:
             for m in client.fetch_all("media", {"_fields": "id,source_url,alt_text,title,mime_type,post"}):
                 upsert(conn, "media", {

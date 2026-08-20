@@ -94,10 +94,12 @@ class ConnectionsService:
 
     def __init__(self, engine: Engine, gsc_client_factory: Callable[[str], Any] | None = None,
                  ga4_report_factory: Callable[[str], dict] | None = None, wp_fetch: Callable[[str], httpx.Response] | None = None,
-                 wp_fetch_auth: Callable[[str, tuple[str, str]], httpx.Response] | None = None):
+                 wp_fetch_auth: Callable[[str, tuple[str, str]], httpx.Response] | None = None,
+                 ga4_admin_factory: Callable[[], Any] | None = None):
         self.repo = ConnectionsRepository(engine)
         self._gsc_factory = gsc_client_factory
         self._ga4_report = ga4_report_factory
+        self._ga4_admin = ga4_admin_factory
         self._wp_fetch = wp_fetch or (lambda url: httpx.get(url, timeout=20, follow_redirects=True, headers={"User-Agent": "SEO-Brain/0.2 (+local; read-only)"}))
         if wp_fetch_auth is not None:
             self._wp_fetch_auth = wp_fetch_auth  # type: ignore[method-assign]
@@ -163,6 +165,40 @@ class ConnectionsService:
         return GscClient(site_id, interactive=False, save_raw=False)
 
     # -- GA4
+    def list_ga4_properties(self) -> dict[str, Any]:
+        """GA4 property discovery (Analytics Admin API accountSummaries) — same shared Google token, read-only."""
+        if not _google_client_configured():
+            return {"status": "not_configured", "properties": [], "message": "GOOGLE_CLIENT_ID/SECRET تنظیم نشده است"}
+        tok = _token_info()
+        if not tok["present"]:
+            return {"status": "not_authorized", "properties": [], "message": "توکن Google وجود ندارد؛ ابتدا «اتصال حساب گوگل» را انجام دهید"}
+        if GA4_SCOPE not in tok["scopes"]:
+            return {"status": "not_authorized", "properties": [], "message": "توکن فعلی اسکوپ analytics.readonly ندارد؛ حساب گوگل را دوباره متصل کنید"}
+        try:
+            svc = self._ga4_admin() if self._ga4_admin else self._build_ga4_admin()
+            out: list[dict[str, Any]] = []
+            token = None
+            while True:
+                resp = svc.accountSummaries().list(pageSize=200, pageToken=token).execute() if token else svc.accountSummaries().list(pageSize=200).execute()
+                for acc in resp.get("accountSummaries", []):
+                    for ps in acc.get("propertySummaries", []):
+                        out.append({"property_id": str(ps.get("property", "")).replace("properties/", ""),
+                                    "display_name": ps.get("displayName"), "account": acc.get("displayName")})
+                token = resp.get("nextPageToken")
+                if not token:
+                    break
+        except Exception as e:  # noqa: BLE001
+            msg = str(e)
+            st = "not_authorized" if "403" in msg or "PERMISSION_DENIED" in msg else "error"
+            return {"status": st, "properties": [], "message": f"خطا در فراخوانی Analytics Admin API: {e.__class__.__name__}: {msg[:200]}"}
+        return {"status": "ok", "properties": out}
+
+    @staticmethod
+    def _build_ga4_admin():
+        from googleapiclient.discovery import build  # lazy
+        from ..gsc.client import get_credentials
+        return build("analyticsadmin", "v1beta", credentials=get_credentials(interactive=False), cache_discovery=False)
+
     def test_ga4(self, site_id: str, property_id: str | None) -> ConnectionResult:
         res = self._test_ga4(site_id, property_id)
         tok = _token_info()

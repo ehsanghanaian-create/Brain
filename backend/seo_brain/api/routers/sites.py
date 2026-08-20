@@ -348,6 +348,12 @@ def ga4_sync_status(site_id: str, site: Site = Depends(require_site), eng: Engin
 gsc_router = APIRouter(prefix="/connections", tags=["sites"])
 
 
+@gsc_router.get("/ga4/properties")
+def ga4_properties(svc: ConnectionsService = Depends(connections_service)) -> dict:
+    """GA4 properties visible to the connected Google account (Admin API) — for the selector in the GA4 card."""
+    return svc.list_ga4_properties()
+
+
 @gsc_router.get("/gsc/properties")
 def gsc_properties(svc: ConnectionsService = Depends(connections_service)) -> dict:
     """Properties visible to the connected Google account (for the wizard's dropdown)."""

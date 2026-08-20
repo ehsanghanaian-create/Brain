@@ -102,7 +102,9 @@ def create_app() -> FastAPI:
 
     deps = [Depends(require_token)]
     app.include_router(health.router, prefix=API_PREFIX)
-    for r in (sites.router, sites.gsc_router, graph.router, memory.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router):
+    from .routers import google as google_router_mod
+    app.include_router(google_router_mod.callback_router, prefix=API_PREFIX)     # Google's browser redirect cannot send X-API-Token; guarded by the state nonce
+    for r in (sites.router, sites.gsc_router, google_router_mod.router, graph.router, memory.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router):
         app.include_router(r, prefix=API_PREFIX, dependencies=deps)
 
     # legacy dashboard (v0.1) mounted read-only until UI parity

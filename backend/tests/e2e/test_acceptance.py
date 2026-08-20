@@ -139,6 +139,8 @@ def test_10_no_wordpress_write_paths():
     files = [p for p in (ROOT / "backend" / "seo_brain").rglob("*.py") if not (excluded & set(p.parts))]
     assert len(files) > 20
     src = "\n".join(p.read_text(encoding="utf-8") for p in files) + (ROOT / "backend" / "mcp_server" / "server.py").read_text(encoding="utf-8")
+    # sole allowed outbound POST: revoking OUR OWN Google token at oauth2.googleapis.com (disconnect) — never a site write
+    src = "\n".join(l for l in src.splitlines() if "oauth2.googleapis.com/revoke" not in l)
     # HTTP-client write calls only (repositories/SecretStore legitimately have local `.delete(`/`.update(` methods)
     import re
     patterns = [r"\bhttpx\.(post|put|patch|delete)\(", r"\brequests\.(post|put|patch|delete)\(", r"\b(client|session|http|cli|svc|self\.client|self\.session)\.(post|put|patch|delete)\(",

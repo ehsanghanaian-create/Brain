@@ -14,6 +14,7 @@ import { BUSINESS_CATEGORIES, MODE_FA } from '../constants';
 import { StatusBadge } from './connection-tester';
 import { SiteBrainForm } from './site-brain-form';
 import { Ga4IntegrationCard } from './ga4-integration-card';
+import { GoogleAccountCard } from './google-account-card';
 import { GscIntegrationCard } from './gsc-sync-card';
 import { WordPressIntegrationCard } from './wordpress-sync-card';
 
@@ -37,7 +38,8 @@ export function SiteDetail({
   const [busy, setBusy] = useState(false);
   const [init, setInit] = useState<InitializeResult | null>(null);
   const [wpRefresh] = useState(0);          // cards own their refresh after connection tests; key kept for external triggers
-  const [gscRefresh] = useState(0);
+  const [gscRefresh, setGscRefresh] = useState(0);
+  const [ga4Refresh, setGa4Refresh] = useState(0);
 
   async function changeMode(next: 'manual' | 'assisted' | 'autopilot') {
     setBusy(true);
@@ -116,9 +118,10 @@ export function SiteDetail({
           <span>GSC <StatusBadge status={connections.status.gsc?.status} /></span>
           <span>GA4 <StatusBadge status={connections.status.ga4?.status} /></span>
         </div>
+        <GoogleAccountCard onChange={() => { setGscRefresh((n) => n + 1); setGa4Refresh((n) => n + 1); }} />
         <WordPressIntegrationCard siteId={site.site_id} initialValue={site.wp_url} initialResult={connections.status.wordpress} initialAuth={connections.wordpress_auth ?? null} refreshKey={wpRefresh} />
         <GscIntegrationCard siteId={site.site_id} initialValue={site.gsc_property} initialResult={connections.status.gsc} refreshKey={gscRefresh} />
-        <Ga4IntegrationCard siteId={site.site_id} initialValue={site.ga4_property} initialResult={connections.status.ga4} />
+        <Ga4IntegrationCard siteId={site.site_id} initialValue={site.ga4_property} initialResult={connections.status.ga4} refreshKey={ga4Refresh} />
       </TabsContent>
 
       <TabsContent value='brain'>

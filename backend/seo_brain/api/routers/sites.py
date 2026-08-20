@@ -155,6 +155,55 @@ def test_connection(site_id: str, kind: str, body: ConnectionTestRequest | None 
     return res.to_dict()
 
 
+@router.get("/{site_id}/integrations")
+def integrations(site_id: str, site: Site = Depends(require_site), eng: Engine = Depends(engine)) -> dict:
+    """Integration Center aggregation — one standard block per integration, read ONLY from the existing tables
+    (site_connections · sync_runs · sites) plus the live counters the pipelines already expose. No new state."""
+    import json as _json
+    from ...gsc.pipeline import GscPipeline
+    from ...wordpress.orchestrator import WordPressSyncOrchestrator
+
+    with eng.connect() as cx:
+        conn_rows = {r[0]: {"status": r[1], "tested_at": r[2], "detail": r[3]} for r in
+                     cx.execute(text("SELECT kind, status, tested_at, detail FROM site_connections WHERE site_id=:s"), {"s": site_id}).all()}
+
+    def connection(kind: str) -> dict:
+        r = conn_rows.get(kind)
+        if not r:
+            return {"status": "never", "tested_at": None, "detail": {}}
+        try:
+            detail = _json.loads(r["detail"]) if r["detail"] else {}
+        except ValueError:
+            detail = {}
+        return {"status": r["status"], "tested_at": r["tested_at"], "detail": detail}
+
+    def sync_block(st: dict | None, coverage: dict) -> dict:
+        st = st or {}
+        return {"status": st.get("status", "never"), "last_run": st.get("finished_at") or st.get("started_at"),
+                "progress": st.get("progress", 0), "step": st.get("step"), "step_fa": st.get("step_fa"),
+                "run_id": st.get("run_id"), "coverage": coverage, "error": (st.get("errors") or [None])[-1] if st.get("errors") else None}
+
+    wp = WordPressSyncOrchestrator(eng)
+    gsc = GscPipeline(eng)
+    from ...connections.service import _google_client_configured, _token_info
+    gsc_authorized = bool(_google_client_configured() and _token_info().get("present"))
+    out = [
+        {"kind": "wordpress", "label": "وردپرس", "connection": connection("wordpress"),
+         "sync": sync_block(wp.latest(site_id), wp.counts(site_id)),
+         "configured": bool(site.wp_url), "property": site.wp_url,
+         "actions": ["test"] + (["sync", "rebuild"] if site.wp_url else [])},
+        {"kind": "gsc", "label": "Google Search Console", "connection": connection("gsc"),
+         "sync": sync_block(gsc.latest(site_id), gsc.coverage(site_id)),
+         "configured": bool(site.gsc_property), "property": site.gsc_property, "authorized": gsc_authorized,
+         "actions": ["test"] + (["sync"] if site.gsc_property and gsc_authorized else [])},
+        {"kind": "ga4", "label": "Google Analytics 4", "connection": connection("ga4"),
+         "sync": {"status": "not_available", "last_run": None, "progress": 0, "step": None, "step_fa": None, "run_id": None, "coverage": {}, "error": None},
+         "configured": bool(site.ga4_property), "property": site.ga4_property,
+         "actions": ["test"]},
+    ]
+    return {"site_id": site_id, "integrations": out}
+
+
 @router.post("/{site_id}/initialize")
 def initialize_site(site_id: str, site: Site = Depends(require_site), eng: Engine = Depends(engine),
                     repo: SitesRepository = Depends(sites_repo)) -> dict:

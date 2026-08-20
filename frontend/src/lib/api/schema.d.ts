@@ -102,6 +102,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/integrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Integrations
+         * @description Integration Center aggregation — one standard block per integration, read ONLY from the existing tables
+         *     (site_connections · sync_runs · sites) plus the live counters the pipelines already expose. No new state.
+         */
+        get: operations["integrations_api_v1_sites__site_id__integrations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites/{site_id}/initialize": {
         parameters: {
             query?: never;
@@ -4308,6 +4329,41 @@ export interface operations {
                 "application/json": components["schemas"]["ConnectionTestRequest"] | null;
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    integrations_api_v1_sites__site_id__integrations_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

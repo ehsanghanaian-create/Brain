@@ -103,6 +103,13 @@ export type GscSyncStatus = {
   steps: WpSyncStep[]; run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null;
   coverage: GscSyncCoverage; steps_fa: Record<string, string>;
 };
+export type IntegrationBlock = {
+  kind: 'wordpress' | 'gsc' | 'ga4' | string; label: string;
+  connection: { status: string; tested_at: string | null; detail: Record<string, unknown> };
+  sync: { status: string; last_run: string | null; progress: number; step: string | null; step_fa: string | null; run_id: string | null; coverage: Record<string, unknown>; error: string | null };
+  configured: boolean; property?: string | null; authorized?: boolean; actions: string[];
+};
+export type IntegrationsSummary = { site_id: string; integrations: IntegrationBlock[] };
 export type ConnectionsStatus = {
   site_id: string;
   configured: { gsc: string | null; ga4: string | null; wordpress: string | null };
@@ -223,6 +230,7 @@ export const endpoints = {
     api<ConnectionResult>(`/sites/${encodeURIComponent(id)}/connections/${kind}/test`, { method: 'POST', json: { property: property || null, ...(extra ?? {}) } }),
   gscProperties: () => api<GscProperties>('/connections/gsc/properties'),
   initializeSite: (id: string) => api<InitializeResult>(`/sites/${encodeURIComponent(id)}/initialize`, { method: 'POST' }),
+  integrations: (id: string) => api<IntegrationsSummary>(`/sites/${encodeURIComponent(id)}/integrations`),
   // WordPress → sync → graph pipeline (job-based; never inline)
   wpSyncStart: (id: string, body: { crawl?: boolean; max_urls?: number | null } = {}) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/wordpress/sync`, { method: 'POST', json: body }),
   wpSyncStatus: (id: string) => api<WpSyncStatus>(`/sites/${encodeURIComponent(id)}/wordpress/sync/status`),

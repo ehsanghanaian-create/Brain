@@ -192,6 +192,10 @@ def main() -> int:
     check("gsc sync status (never)", "GET", api + f"/sites/{tmp}/gsc/sync/status", 200, lambda r: r.json()["status"] == "never" and {"coverage", "steps_fa", "authorized"} <= set(r.json()) and {"rows", "queries", "pages", "date_from"} <= set(r.json()["coverage"]), headers=H)
     check("gsc sync start without property → 409", "POST", api + f"/sites/{tmp}/gsc/sync", 409, lambda r: r.json()["error"]["code"] == "gsc_not_configured", headers=H, json={})
     check("gsc sync status (real site)", "GET", api + f"/sites/{sid}/gsc/sync/status", 200, lambda r: r.json()["site_id"] == sid and isinstance(r.json()["coverage"]["queries"], int), headers=H)
+    check("integration center aggregation", "GET", api + f"/sites/{sid}/integrations", 200,
+          lambda r: [i["kind"] for i in r.json()["integrations"]] == ["wordpress", "gsc", "ga4"]
+          and all({"connection", "sync", "configured", "actions"} <= set(i) for i in r.json()["integrations"])
+          and r.json()["integrations"][2]["sync"]["status"] == "not_available", headers=H)
     check("initialize", "POST", api + f"/sites/{tmp}/initialize", 200, lambda r: r.json()["graph"]["site_node"] == f"site:{tmp}" and r.json()["memory"]["existed"] is True, headers=H)
     check("initialize idempotent", "POST", api + f"/sites/{tmp}/initialize", 200, lambda r: r.json()["graph"]["existed"] is True, headers=H)
     check("site brain put (audience/cta/forbidden)", "PUT", api + f"/sites/{tmp}/memory", 200, lambda r: r.json()["forbidden_claims"] == ["ارزان‌ترین"] and r.json()["audience"]["segments"] == ["مالکان MVM"], headers=H,

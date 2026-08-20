@@ -109,7 +109,8 @@ def test_jobs_endpoints(client):
         if st["status"] in ("succeeded", "failed"):
             break
         time.sleep(0.02)
-    assert st["status"] == "succeeded" and st["result"] == {"echo": {"site_id": "demo", "x": 1}}
+    assert st["status"] == "succeeded" and st["result"]["echo"]["site_id"] == "demo" and st["result"]["echo"]["x"] == 1
+    assert st["result"]["echo"]["job_id"] == run_id       # the queue exposes the job's own run id to every handler payload
     assert client.post("/api/v1/jobs", json={"type": "unknown"}).status_code == 422
     assert client.get("/api/v1/jobs/none").status_code == 404
 

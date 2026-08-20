@@ -164,7 +164,7 @@ def main() -> int:
         if st.get("status") in ("succeeded", "failed"):
             break
         time.sleep(0.05)
-    check("job run finished", "GET", api + f"/jobs/{run_id}", 200, lambda r: r.json()["status"] == "succeeded" and r.json()["result"] == {"echo": {"site_id": tmp, "k": 1}}, headers=H)
+    check("job run finished", "GET", api + f"/jobs/{run_id}", 200, lambda r: r.json()["status"] == "succeeded" and r.json()["result"]["echo"]["site_id"] == tmp and r.json()["result"]["echo"]["k"] == 1 and r.json()["result"]["echo"]["job_id"].startswith("job-"), headers=H)
     check("jobs list", "GET", api + "/jobs", 200, lambda r: any(j["run_id"] == run_id for j in r.json()), headers=H)
     check("job unknown type → 422", "POST", api + "/jobs", 422, headers=H, json={"type": "does-not-exist"})
     check("job unknown run → 404", "GET", api + "/jobs/none", 404, headers=H)
@@ -188,6 +188,10 @@ def main() -> int:
         time.sleep(0.5)
     check("graph rebuild finished via job", "GET", api + f"/sites/{tmp}/wordpress/sync/status", 200, lambda r: r.json()["status"] == "succeeded" and r.json()["stage"] == "graph_only" and r.json()["progress"] == 1.0 and r.json()["job"]["status"] == "succeeded" and r.json()["counts"]["graph_nodes"] >= 1, headers=H)
     check("wp sync status (real site)", "GET", api + f"/sites/{sid}/wordpress/sync/status", 200, lambda r: r.json()["site_id"] == sid and {"categories", "pages", "posts", "graph_nodes"} <= set(r.json()["counts"]), headers=H)
+    # ---- GSC → sync → graph pipeline (job-based; no live Google call from the validator)
+    check("gsc sync status (never)", "GET", api + f"/sites/{tmp}/gsc/sync/status", 200, lambda r: r.json()["status"] == "never" and {"coverage", "steps_fa", "authorized"} <= set(r.json()) and {"rows", "queries", "pages", "date_from"} <= set(r.json()["coverage"]), headers=H)
+    check("gsc sync start without property → 409", "POST", api + f"/sites/{tmp}/gsc/sync", 409, lambda r: r.json()["error"]["code"] == "gsc_not_configured", headers=H, json={})
+    check("gsc sync status (real site)", "GET", api + f"/sites/{sid}/gsc/sync/status", 200, lambda r: r.json()["site_id"] == sid and isinstance(r.json()["coverage"]["queries"], int), headers=H)
     check("initialize", "POST", api + f"/sites/{tmp}/initialize", 200, lambda r: r.json()["graph"]["site_node"] == f"site:{tmp}" and r.json()["memory"]["existed"] is True, headers=H)
     check("initialize idempotent", "POST", api + f"/sites/{tmp}/initialize", 200, lambda r: r.json()["graph"]["existed"] is True, headers=H)
     check("site brain put (audience/cta/forbidden)", "PUT", api + f"/sites/{tmp}/memory", 200, lambda r: r.json()["forbidden_claims"] == ["ارزان‌ترین"] and r.json()["audience"]["segments"] == ["مالکان MVM"], headers=H,
@@ -407,6 +411,7 @@ def main() -> int:
               "* health / openapi / docs / request-id · error envelope (404, 409, 422) · sites CRUD (create, get, list, patch, delete-refuse, delete-force, 404 after) ·",
               "  phase 3: connections status/tests (gsc/ga4/wordpress + 404 kind), gsc properties listing, initialize (idempotent), site brain fields + AI context ·",
               "  wordpress pipeline: sync status (never), start without wp_url → 409, graph rebuild 202 → job succeeded, real-site status counters ·",
+              "  gsc pipeline: sync status (never/real-site coverage), start without property → 409 ·",
               "  phase 6: content create/transition guard/brief/board/calendar/graph sync/delete · ai provider config (masked key)/task routes ·",
               "  phase 7: drafts v1/v2, score, review, intelligence history, scoring/analytics settings, snapshot/learn/overview/insights ·",
               "  phase 8: links meta/analyze/summary/suggestions/pages/patterns/settings/export ·",

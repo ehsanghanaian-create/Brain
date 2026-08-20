@@ -31,6 +31,15 @@ class GscAuthError(Exception):
 def _client_config() -> dict:
     cid, csec = env("GOOGLE_CLIENT_ID"), env("GOOGLE_CLIENT_SECRET")
     if not cid or not csec:
+        # same SecretStore (DPAPI) the WordPress/AI credentials use — .env stays primary so existing setups keep working
+        try:
+            from ..core.secrets import get_secret_store
+            store = get_secret_store()
+            cid = cid or store.get("google-client-id")
+            csec = csec or store.get("google-client-secret")
+        except Exception:  # noqa: BLE001 — store unavailable ⇒ same "missing" error below
+            pass
+    if not cid or not csec:
         raise GscAuthError("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET missing in .env (create an OAuth 'Desktop app' client in Google Cloud and enable the Search Console API)")
     return {"installed": {
         "client_id": cid, "client_secret": csec, "auth_uri": "https://accounts.google.com/o/oauth2/auth",

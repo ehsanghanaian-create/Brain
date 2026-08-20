@@ -63,17 +63,19 @@ def node(site_id: str, node_id: str, store: GraphStore = Depends(graph_store)) -
 @router.get("/neighbors/{node_id:path}")
 def neighbors(site_id: str, node_id: str, relation_types: str | None = None, direction: str = Query("both", pattern="^(in|out|both)$"),
               store: GraphStore = Depends(graph_store)) -> dict:
-    if not store.get_node(site_id, node_id):
+    n = store.get_node(site_id, node_id)
+    if not n:
         raise HTTPException(404, f"node not found: {node_id}")
-    return store.neighbors(site_id, node_id, _types(relation_types), direction).to_dict()
+    return store.neighbors(site_id, n.id, _types(relation_types), direction).to_dict()
 
 
 @router.get("/subgraph")
 def subgraph(site_id: str, center: str = Query(...), hops: int = Query(1, ge=0, le=4), relation_types: str | None = None,
              max_nodes: int = Query(300, le=2000), store: GraphStore = Depends(graph_store)) -> dict:
-    if not store.get_node(site_id, center):
+    n = store.get_node(site_id, center)
+    if not n:
         raise HTTPException(404, f"node not found: {center}")
-    return store.subgraph(site_id, center, hops, _types(relation_types), max_nodes).to_dict()
+    return store.subgraph(site_id, n.id, hops, _types(relation_types), max_nodes).to_dict()
 
 
 @router.get("/path")

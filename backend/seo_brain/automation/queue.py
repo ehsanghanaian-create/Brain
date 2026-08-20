@@ -68,6 +68,8 @@ class InProcessJobQueue:
         if job.type not in self._handlers:
             raise KeyError(f"no handler registered for job type '{job.type}'")
         run = JobRun(run_id=f"job-{uuid.uuid4().hex[:12]}", job=job)
+        if isinstance(job.payload, dict):
+            job.payload.setdefault("job_id", run.run_id)     # known before the worker thread starts — no attach race
         with self._lock:
             self._runs[run.run_id] = run
         if self._sync:

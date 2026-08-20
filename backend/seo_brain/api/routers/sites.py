@@ -122,6 +122,12 @@ def test_connection(site_id: str, kind: str, body: ConnectionTestRequest | None 
         res = svc.test_gsc(site_id, body.property or site.gsc_property)
         if res.ok and body.property and body.property != site.gsc_property:
             repo.set_fields(site_id, gsc_property=res.detail.get("property") or body.property)
+        # production workflow: a verified GSC connection queues the sync → opportunities → snapshot → graph pipeline (never inline)
+        if res.ok and body.auto_sync:
+            try:
+                res.detail["sync_job"] = _queue_gsc_sync(site_id, eng, q, days=None, reason="connection_test")
+            except Exception as e:  # noqa: BLE001 — the connection result itself must still be returned
+                res.detail["sync_job"] = {"status": "not_queued", "error": f"{e.__class__.__name__}: {str(e)[:120]}"}
     elif kind == "ga4":
         res = svc.test_ga4(site_id, body.property or site.ga4_property)
         if res.ok and body.property and body.property != site.ga4_property:
@@ -198,6 +204,45 @@ def wordpress_sync_status(site_id: str, site: Site = Depends(require_site), eng:
 def graph_rebuild(site_id: str, site: Site = Depends(require_site), eng: Engine = Depends(engine), q: JobQueue = Depends(job_queue)) -> dict:
     """Manual graph rebuild from the data already synced (WordPress pages/posts = source of truth; crawl/keywords/content/planner layers re-applied)."""
     return _queue_wordpress_sync(site_id, eng, q, stage="graph_only", crawl=False, max_urls=None, reason="graph_rebuild")
+
+
+# --------------------------------------------------------------------------- GSC → sync → graph pipeline (wiring of existing components)
+def _queue_gsc_sync(site_id: str, eng: Engine, q: JobQueue, days: int | None, reason: str) -> dict:
+    from ...gsc.pipeline import GscPipeline
+    pipe = GscPipeline(eng)
+    if pipe.is_running(site_id):
+        cur = pipe.latest(site_id) or {}
+        return {"status": "already_running", "run_id": cur.get("run_id"), "job_id": cur.get("job_id"), "step": cur.get("step")}
+    st = pipe.create(site_id)
+    run = q.enqueue(Job(type="gsc_sync", payload={"site_id": site_id, "run_id": st.run_id, "days": days, "reason": reason}, site_id=site_id))
+    pipe.attach_job(st.run_id, run.run_id)
+    return {"status": "queued", "job_id": run.run_id, "run_id": st.run_id}
+
+
+class GscSyncStart(BaseModel):
+    days: int | None = Field(default=None, ge=1, le=480)
+
+
+@router.post("/{site_id}/gsc/sync", status_code=202)
+def gsc_sync_start(site_id: str, body: GscSyncStart | None = None, site: Site = Depends(require_site), eng: Engine = Depends(engine), q: JobQueue = Depends(job_queue)) -> dict:
+    """Queue the GSC pipeline: Search Console data → keyword opportunities → content snapshot → graph. Never inline; no browser OAuth in the worker."""
+    body = body or GscSyncStart()
+    if not site.gsc_property:
+        raise ApiError(409, "برای این سایت property سرچ‌کنسول تنظیم نشده است — ابتدا اتصال GSC را تست کنید", code="gsc_not_configured")
+    from ...connections.service import _google_client_configured, _token_info
+    if not _google_client_configured() or not _token_info().get("present"):
+        raise ApiError(409, "توکن Google موجود نیست؛ یک‌بار «sync-gsc.py --auth-only» را اجرا کنید", code="gsc_not_authorized")
+    return _queue_gsc_sync(site_id, eng, q, days=body.days, reason="manual")
+
+
+@router.get("/{site_id}/gsc/sync/status")
+def gsc_sync_status(site_id: str, site: Site = Depends(require_site), eng: Engine = Depends(engine), q: JobQueue = Depends(job_queue)) -> dict:
+    """Latest pipeline run (from the existing sync_runs table) + live coverage: date range, rows, queries, pages, snapshots."""
+    from ...connections.service import _google_client_configured, _token_info
+    from ...gsc.pipeline import GscPipeline
+    return {"site_id": site_id, "property": site.gsc_property or None,
+            "authorized": bool(_google_client_configured() and _token_info().get("present")),
+            **GscPipeline(eng).status(site_id, q)}
 
 
 gsc_router = APIRouter(prefix="/connections", tags=["sites"])

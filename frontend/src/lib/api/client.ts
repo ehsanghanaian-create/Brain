@@ -94,6 +94,15 @@ export type WpSyncStatus = {
   run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null; counts: WpSyncCounts; steps_fa: Record<string, string>;
 };
 export type WpSyncQueued = { status: 'queued' | 'already_running' | 'not_queued' | string; job_id?: string | null; run_id?: string | null; stage?: string; step?: string | null; error?: string | null };
+export type GscSyncCoverage = { date_from: string | null; date_to: string | null; rows: number; queries: number; important_queries: number; pages: number; content_snapshots: number; keyword_opportunities?: number; last_gsc_sync?: string | null };
+export type GscSyncStatus = {
+  site_id: string; property: string | null; authorized: boolean;
+  status: 'never' | 'queued' | 'running' | 'succeeded' | 'completed_with_errors' | 'failed' | 'not_authorized' | string;
+  step: string | null; step_fa: string | null; progress: number;
+  started_at: string | null; finished_at: string | null; items: Record<string, unknown>; errors: string[];
+  steps: WpSyncStep[]; run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null;
+  coverage: GscSyncCoverage; steps_fa: Record<string, string>;
+};
 export type ConnectionsStatus = {
   site_id: string;
   configured: { gsc: string | null; ga4: string | null; wordpress: string | null };
@@ -218,6 +227,9 @@ export const endpoints = {
   wpSyncStart: (id: string, body: { crawl?: boolean; max_urls?: number | null } = {}) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/wordpress/sync`, { method: 'POST', json: body }),
   wpSyncStatus: (id: string) => api<WpSyncStatus>(`/sites/${encodeURIComponent(id)}/wordpress/sync/status`),
   graphRebuild: (id: string) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/graph/rebuild`, { method: 'POST' }),
+  // GSC → sync → graph pipeline (job-based; never inline)
+  gscSyncStart: (id: string, body: { days?: number | null } = {}) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/gsc/sync`, { method: 'POST', json: body }),
+  gscSyncStatus: (id: string) => api<GscSyncStatus>(`/sites/${encodeURIComponent(id)}/gsc/sync/status`),
   // phase 4 — graph command center
   graphModes: (id: string) => api<GraphMode[]>(`/sites/${encodeURIComponent(id)}/graph/modes`),
   graphView: (id: string, params: { mode: string; types?: string[]; relation_types?: string[]; limit?: number; include_isolated?: boolean }) => {

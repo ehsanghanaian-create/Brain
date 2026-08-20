@@ -17,7 +17,12 @@ export default async function SitesPage() {
     <PageContainer
       pageTitle='سایت‌ها'
       pageDescription='هر سایت یک فضای کاری مستقل دارد (داده، گراف، حافظه، اتصال‌ها، حالت انتشار).'
-      pageHeaderAction={<Button nativeButton={false} render={<Link href='/dashboard/sites/new' />}>افزودن سایت</Button>}
+      pageHeaderAction={
+        <div className='flex gap-2'>
+          <Button variant='secondary' nativeButton={false} render={<Link href='/dashboard/onboarding' />}>✨ راه‌اندازی سریع</Button>
+          <Button nativeButton={false} render={<Link href='/dashboard/sites/new' />}>افزودن سایت</Button>
+        </div>
+      }
     >
       {sites.error ? (
         <BackendError error={sites.error} />

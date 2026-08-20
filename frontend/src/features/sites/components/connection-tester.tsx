@@ -29,6 +29,7 @@ export function ConnectionTester({
   initialValue,
   initialResult,
   initialAuth,
+  mode = 'full',
   onResult
 }: {
   siteId: string;
@@ -38,6 +39,7 @@ export function ConnectionTester({
   initialValue?: string | null;
   initialResult?: ConnectionResult;
   initialAuth?: WpAuthStatus | null;
+  mode?: 'full' | 'simple';        // simple: friendly labels, WP auth behind «اتصال پیشرفته», no manual GA4 id input
   onResult?: (r: ConnectionResult) => void;
 }) {
   const [value, setValue] = useState(initialValue ?? '');
@@ -48,6 +50,7 @@ export function ConnectionTester({
   const [result, setResult] = useState<ConnectionResult | undefined>(initialResult);
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<unknown>(null);
+  const [advOpen, setAdvOpen] = useState(false);
   const [gscProps, setGscProps] = useState<GscProperties | null>(null);
   const [ga4Props, setGa4Props] = useState<Ga4Properties | null>(null);
 
@@ -118,6 +121,10 @@ export function ConnectionTester({
               </NativeSelectOption>
             ))}
           </NativeSelect>
+        ) : kind === 'ga4' && mode === 'simple' ? (
+          <p className='text-muted-foreground flex-1 self-center text-xs'>
+            {ga4Props === null ? 'در حال دریافت فهرست سایت‌های آنالیتیکس…' : 'سایتی در آنالیتیکس شما یافت نشد — از تنظیمات پیشرفتهٔ صفحهٔ سایت می‌توانید دستی وارد کنید'}
+          </p>
         ) : (
           <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder={hint} dir='ltr' className='md:flex-1' />
         )}
@@ -125,7 +132,12 @@ export function ConnectionTester({
           {busy ? 'در حال تست…' : 'تست دسترسی'}
         </Button>
       </div>
-      {kind === 'wordpress' && (
+      {kind === 'wordpress' && mode === 'simple' && !advOpen && (
+        <Button type='button' variant='ghost' size='sm' className='mt-2 w-fit text-xs' onClick={() => setAdvOpen(true)} data-testid='wp-advanced-toggle'>
+          اتصال پیشرفته (ورود با رمز برنامه) ▾
+        </Button>
+      )}
+      {kind === 'wordpress' && (mode === 'full' || advOpen) && (
         <div className='mt-2 rounded-md border border-dashed p-2'>
           <div className='mb-1 flex flex-wrap items-center justify-between gap-2 text-xs'>
             <span className='font-medium'>احراز هویت با Application Password (اختیاری — فقط‌خواندنی)</span>

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ..common.config import env, resolve_path
-from ..gsc.client import SCOPES, GscAuthError, _client_config
+from ..gsc.client import SCOPES, GscAuthError, _client_config, delete_token, read_token_json, write_token_json
 
 log = logging.getLogger("google.oauth")
 
@@ -91,11 +91,19 @@ def finish(code: str, state: str | None, redirect_uri: str | None = None) -> dic
         raise GscAuthError("state نامعتبر یا منقضی است — دوباره «اتصال حساب گوگل» را بزنید")
     _save_states()
     flow = _flow(redirect_uri or default_redirect_uri())
+    old_refresh = None
+    try:                                                       # reconnect: remember the previous grant to revoke it
+        old = json.loads(read_token_json() or "null")
+        old_refresh = (old or {}).get("refresh_token")
+    except ValueError:
+        pass
     flow.fetch_token(code=code)
     creds = flow.credentials
+    if old_refresh and old_refresh != creds.refresh_token:
+        _revoke(old_refresh)                                   # best-effort: no orphaned grants left on the Google account
+    write_token_json(creds.to_json())                          # same format get_credentials() reads (SecretStore, encrypted)
     tp = token_path()
     tp.parent.mkdir(parents=True, exist_ok=True)
-    tp.write_text(creds.to_json(), encoding="utf-8")           # same format get_credentials() reads
     email = _email_from_id_token(getattr(creds, "id_token", None))
     account_path().write_text(json.dumps({"email": email, "scopes": list(creds.scopes or []),
                                           "connected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, ensure_ascii=False), encoding="utf-8")
@@ -169,23 +177,28 @@ def _has_store_client() -> bool:
         return False
 
 
+def _revoke(refresh_token: str | None) -> bool:
+    if not refresh_token:
+        return False
+    try:
+        import httpx
+        r = httpx.post("https://oauth2.googleapis.com/revoke", params={"token": refresh_token}, timeout=10)
+        return r.status_code == 200
+    except Exception:  # noqa: BLE001 — revoke is best-effort
+        return False
+
+
 def disconnect() -> dict[str, Any]:
-    """Best-effort revoke at Google, then remove the local token + account files."""
-    tp, ap = token_path(), account_path()
+    """Best-effort revoke at Google, then remove the stored token (SecretStore + legacy file) and account info."""
     revoked = False
     try:
-        if tp.exists():
-            tok = json.loads(tp.read_text(encoding="utf-8"))
-            refresh = tok.get("refresh_token")
-            if refresh:
-                import httpx
-                r = httpx.post("https://oauth2.googleapis.com/revoke", params={"token": refresh}, timeout=10)
-                revoked = r.status_code == 200
-    except Exception:  # noqa: BLE001 — revoke is best-effort; local removal is what matters
+        tok = json.loads(read_token_json() or "null")
+        revoked = _revoke((tok or {}).get("refresh_token"))
+    except ValueError:
         pass
-    removed = False
-    for p in (tp, ap):
-        if p.exists():
-            p.unlink()
-            removed = True
+    removed = delete_token()
+    ap = account_path()
+    if ap.exists():
+        ap.unlink()
+        removed = True
     return {"disconnected": removed, "revoked": revoked}

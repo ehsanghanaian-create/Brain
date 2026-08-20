@@ -117,6 +117,37 @@ def test_tick_enqueues_existing_jobs_with_cap_and_no_duplicates(env):
         cx.execute(text("UPDATE sync_runs SET status='failed' WHERE run_id=:r"), {"r": st.run_id})
 
 
+def test_retry_only_transient_failures(env):
+    c, eng = env["client"], env["eng"]
+    _mk_site(c, "r1", gsc_property="sc-domain:r1.example")
+    _seed_success(eng, "r1", "gsc_pipeline", hours_ago=2)         # success 2h ago → normally not due for 22h
+    def seed_run(status, minutes_ago, n):
+        ts = _iso(datetime.now(timezone.utc) - timedelta(minutes=minutes_ago))
+        with eng.begin() as cx:
+            cx.execute(text("INSERT INTO sync_runs(run_id, site_id, source, started_at, finished_at, status, notes) "
+                            "VALUES(:r,'r1','gsc_pipeline',:t,:t,:st,'{}')"), {"r": f"f{n}", "t": ts, "st": status})
+    # newest run failed 90min ago → retry due (60-min retry window passed)
+    seed_run("failed", 90, 1)
+    assert plan_for_site(eng, "r1")["sources"]["gsc"]["due"] is True
+    # failed only 10min ago → wait
+    seed_run("failed", 10, 2)
+    assert plan_for_site(eng, "r1")["sources"]["gsc"]["due"] is False
+    # 3 consecutive failures → back off to the normal interval (no more retries)
+    with eng.begin() as cx:
+        cx.execute(text("UPDATE sync_runs SET started_at=:t, finished_at=:t WHERE run_id IN ('f1','f2')"),
+                   {"t": _iso(datetime.now(timezone.utc) - timedelta(minutes=200))})
+    seed_run("failed", 190, 3)
+    assert plan_for_site(eng, "r1")["sources"]["gsc"]["due"] is False
+    # not_authorized is never retried
+    _mk_site(c, "r2", gsc_property="sc-domain:r2.example")
+    _seed_success(eng, "r2", "gsc_pipeline", hours_ago=2)
+    ts = _iso(datetime.now(timezone.utc) - timedelta(minutes=90))
+    with eng.begin() as cx:
+        cx.execute(text("INSERT INTO sync_runs(run_id, site_id, source, started_at, finished_at, status, notes) "
+                        "VALUES('na1','r2','gsc_pipeline',:t,:t,'not_authorized','{}')"), {"t": ts})
+    assert plan_for_site(eng, "r2")["sources"]["gsc"]["due"] is False
+
+
 def test_auto_sync_api(env):
     c = env["client"]
     _mk_site(c, "api1", gsc_property="sc-domain:api1.example")

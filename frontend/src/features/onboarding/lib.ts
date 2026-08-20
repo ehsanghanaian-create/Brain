@@ -40,10 +40,12 @@ export function mergeDiscovery(gsc: { property: string; permission?: string | nu
   for (const [domain, props] of byDomain) {
     const best = [...props].sort((a, b) => score(b) - score(a))[0];
     const core = norm(domain.split('.')[0]);
-    const match = (ga4 ?? []).find((g) => {
-      const n = norm(g.display_name ?? '');
-      return core.length >= 4 && n.length >= 4 && (n.includes(core) || core.includes(n));
-    }) ?? null;
+    // 1) exact domain from the GA4 web stream URL (Admin API) — 2) name-similarity fallback
+    const match = (ga4 ?? []).find((g) => friendlyDomain(g.website_url) === domain)
+      ?? (ga4 ?? []).find((g) => {
+        const n = norm(g.display_name ?? '');
+        return core.length >= 4 && n.length >= 4 && (n.includes(core) || core.includes(n));
+      }) ?? null;
     out.push({ domain, gsc_property: best.property, gsc_permission: best.permission,
                verified: best.permission !== 'siteUnverifiedUser', ga4: match });
   }

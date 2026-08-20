@@ -62,12 +62,13 @@ def _google_client_configured() -> bool:
 
 
 def _token_info() -> dict[str, Any]:
-    """Read the cached OAuth token (never returned to callers except scopes/expiry)."""
-    p = resolve_path(env("GSC_TOKEN_PATH", "tokens/gsc_token.json"))
-    if not p.exists():
+    """Read the cached OAuth token via the shared storage helper (SecretStore-first, legacy-file fallback)."""
+    from ..gsc.client import read_token_json
+    raw = read_token_json()
+    if not raw:
         return {"present": False, "scopes": []}
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(raw)
     except ValueError:
         return {"present": False, "scopes": []}
     return {"present": bool(data.get("refresh_token")), "scopes": data.get("scopes") or [], "expiry": data.get("expiry")}
@@ -183,10 +184,20 @@ class ConnectionsService:
                 for acc in resp.get("accountSummaries", []):
                     for ps in acc.get("propertySummaries", []):
                         out.append({"property_id": str(ps.get("property", "")).replace("properties/", ""),
-                                    "display_name": ps.get("displayName"), "account": acc.get("displayName")})
+                                    "display_name": ps.get("displayName"), "account": acc.get("displayName"), "website_url": None})
                 token = resp.get("nextPageToken")
                 if not token:
                     break
+            for p_ in out[:30]:                     # web stream URL → exact domain matching in onboarding (quota-capped)
+                try:
+                    streams = svc.properties().dataStreams().list(parent=f"properties/{p_['property_id']}").execute()
+                    for st_ in streams.get("dataStreams", []):
+                        uri = (st_.get("webStreamData") or {}).get("defaultUri")
+                        if uri:
+                            p_["website_url"] = uri
+                            break
+                except Exception:  # noqa: BLE001 — per-property; matching just falls back to the name heuristic
+                    continue
         except Exception as e:  # noqa: BLE001
             msg = str(e)
             st = "not_authorized" if "403" in msg or "PERMISSION_DENIED" in msg else "error"

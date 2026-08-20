@@ -20,8 +20,11 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "test-client-id.apps.googleusercontent.com")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "test-secret")
     monkeypatch.setenv("GSC_TOKEN_PATH", str(tmp_path / "tokens" / "gsc_token.json"))
+    from seo_brain.core.secrets import SecretStore
+    store = SecretStore(tmp_path / "secrets")                     # hermetic: token storage never touches the real store
+    monkeypatch.setattr("seo_brain.core.secrets.get_secret_store", lambda: store)
     app = create_app(); app.dependency_overrides[deps.engine] = lambda: eng
-    return {"client": TestClient(app), "tmp": tmp_path}
+    return {"client": TestClient(app), "tmp": tmp_path, "store": store}
 
 
 def test_authorize_builds_google_url_with_existing_scopes_and_state(env):
@@ -101,8 +104,16 @@ def test_ga4_property_discovery_via_admin_api(env, monkeypatch):
                 {"property": "properties/471988572", "displayName": "سایت نمونه"},
                 {"property": "properties/340307505", "displayName": "سایت دوم"}]}]})
 
+    class _Streams:
+        def list(self, parent=None):
+            return _Req({"dataStreams": [{"webStreamData": {"defaultUri": "https://kermanemdad.com"}}]} if "471988572" in parent else {"dataStreams": []})
+
+    class _Props:
+        def dataStreams(self): return _Streams()  # noqa: N802
+
     class _Admin:
         def accountSummaries(self): return _Summaries()  # noqa: N802
+        def properties(self): return _Props()  # noqa: N802
 
     from seo_brain.api.routers import sites as sites_router
     from seo_brain.connections import ConnectionsService
@@ -110,7 +121,8 @@ def test_ga4_property_discovery_via_admin_api(env, monkeypatch):
     c.app.dependency_overrides[sites_router.connections_service] = lambda: ConnectionsService(eng, ga4_admin_factory=lambda: _Admin())
     out = c.get("/api/v1/connections/ga4/properties").json()
     assert out["status"] == "ok" and len(out["properties"]) == 2
-    assert out["properties"][0] == {"property_id": "471988572", "display_name": "سایت نمونه", "account": "شرکت نمونه"}
+    assert out["properties"][0] == {"property_id": "471988572", "display_name": "سایت نمونه", "account": "شرکت نمونه", "website_url": "https://kermanemdad.com"}
+    assert out["properties"][1]["website_url"] is None
 
 
 def test_client_save_uses_secret_store_and_masks(env, monkeypatch, tmp_path):
@@ -154,6 +166,50 @@ def test_oauth_state_survives_restart(env, monkeypatch):
     monkeypatch.setattr(google_oauth, "_flow", lambda ru: _Flow())
     r = c.get("/api/v1/connections/google/callback", params={"code": "c1", "state": state})
     assert r.status_code == 200 and "اتصال برقرار شد" in r.text     # the state was reloaded from the file
+
+
+def test_token_migrates_from_plaintext_file_to_secret_store(env):
+    from seo_brain.connections.service import _token_info
+    from seo_brain.gsc.client import TOKEN_REF, read_token_json
+    tp = env["tmp"] / "tokens" / "gsc_token.json"
+    tp.parent.mkdir(parents=True, exist_ok=True)
+    tp.write_text(json.dumps({"token": "t", "refresh_token": "r-legacy", "scopes": google_oauth.WEB_SCOPES, "expiry": "2027-01-01T00:00:00Z"}), encoding="utf-8")
+    # first read: migrated into the encrypted store, plaintext file removed, callers unchanged
+    assert json.loads(read_token_json())["refresh_token"] == "r-legacy"
+    assert not tp.exists()
+    assert json.loads(env["store"].get(TOKEN_REF))["refresh_token"] == "r-legacy"
+    assert _token_info()["present"] is True
+    # status endpoint sees it too
+    assert env["client"].get("/api/v1/connections/google/status").json()["connected"] is True
+
+
+def test_reconnect_revokes_previous_grant(env, monkeypatch):
+    c = env["client"]
+    revoked: list[str] = []
+    monkeypatch.setattr(google_oauth, "_revoke", lambda tok: revoked.append(tok) or True)
+
+    def creds(n):
+        class _C:
+            token, refresh_token, scopes, id_token = f"at-{n}", f"rt-{n}", google_oauth.WEB_SCOPES, None
+            def to_json(self):
+                return json.dumps({"token": self.token, "refresh_token": self.refresh_token, "scopes": self.scopes, "expiry": "2027-01-01T00:00:00Z"})
+        return _C()
+
+    for n in (1, 2):
+        state = c.get("/api/v1/connections/google/authorize").json()["url"].split("state=")[1].split("&")[0]
+
+        class _Flow:
+            credentials = creds(n)
+            def fetch_token(self, code=None):
+                pass
+            def authorization_url(self, **kw):          # the patched _flow also serves /authorize in round 2
+                return (f"https://accounts.google.com/o/oauth2/auth?state={kw.get('state')}&x=1", kw.get("state"))
+
+        monkeypatch.setattr(google_oauth, "_flow", lambda ru, f=_Flow: f())
+        assert c.get("/api/v1/connections/google/callback", params={"code": f"c{n}", "state": state}).status_code == 200
+    assert revoked == ["rt-1"]                                    # the old grant was revoked exactly once
+    from seo_brain.gsc.client import read_token_json
+    assert json.loads(read_token_json())["refresh_token"] == "rt-2"
 
 
 def test_no_cli_hints_in_user_facing_messages():

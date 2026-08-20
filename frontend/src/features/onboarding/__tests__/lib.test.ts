@@ -29,6 +29,15 @@ describe('onboarding helpers', () => {
     expect(out[1].verified).toBe(false);                              // unverified sinks to the bottom
   });
 
+  it('mergeDiscovery matches GA4 by website_url first (exact domain beats name similarity)', () => {
+    const gsc = [{ property: 'sc-domain:kermanemdad.com', permission: 'siteOwner' }];
+    const ga4 = [
+      { property_id: '111', display_name: 'kermanemdad-lookalike', account: 'A', website_url: null },
+      { property_id: '222', display_name: 'Totally Different Name', account: 'A', website_url: 'https://www.kermanemdad.com/' }
+    ];
+    expect(mergeDiscovery(gsc, ga4)[0].ga4?.property_id).toBe('222');   // URL match wins over the name heuristic
+  });
+
   it('mergeDiscovery guesses GA4 by name similarity (editable guess, never an ID in the UI)', () => {
     const gsc = [{ property: 'sc-domain:kermanemdad.com', permission: 'siteOwner' }];
     const ga4 = [

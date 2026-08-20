@@ -141,6 +141,8 @@ def test_ga4_scope_gate_and_ok(env, monkeypatch):
     c = env["client"]; _create(c)
     tok = env["root"] / "tok.json"
     monkeypatch.setattr(conn_service, "env", lambda k, d=None: {"GOOGLE_CLIENT_ID": "x", "GOOGLE_CLIENT_SECRET": "y", "GSC_TOKEN_PATH": str(tok)}.get(k, d))
+    # _token_info reads through the shared storage helper now — keep the test hermetic (no real store/network)
+    monkeypatch.setattr("seo_brain.gsc.client.read_token_json", lambda: tok.read_text(encoding="utf-8") if tok.exists() else None)
     tok.write_text(json.dumps({"refresh_token": "r", "scopes": [conn_service.GSC_SCOPE]}), encoding="utf-8")
     r = c.post("/api/v1/sites/demo/connections/ga4/test", json={"property": "123456"}).json()
     assert r["status"] == "not_authorized" and r["detail"]["required_scope"] == conn_service.GA4_SCOPE
@@ -340,6 +342,7 @@ def test_concurrent_connection_tests_do_not_overwrite_each_other(env):
     c = env["client"]; _create(c)
     tok = env["root"] / "tok.json"
     env["monkeypatch"].setattr(conn_service, "env", lambda k, d=None: {"GOOGLE_CLIENT_ID": "x", "GOOGLE_CLIENT_SECRET": "y", "GSC_TOKEN_PATH": str(tok)}.get(k, d))
+    env["monkeypatch"].setattr("seo_brain.gsc.client.read_token_json", lambda: tok.read_text(encoding="utf-8") if tok.exists() else None)
     tok.write_text(json.dumps({"refresh_token": "r", "scopes": [conn_service.GSC_SCOPE, conn_service.GA4_SCOPE]}), encoding="utf-8")
     fake = FakeGsc([{"siteUrl": "sc-domain:demo.example", "permissionLevel": "siteOwner"}])
     def fake_fetch(url):

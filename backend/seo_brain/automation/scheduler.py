@@ -31,6 +31,8 @@ log = logging.getLogger("automation.scheduler")
 PIPELINES = ("wordpress_pipeline", "gsc_pipeline", "ga4_pipeline")
 OK_STATUSES = ("succeeded", "completed_with_errors")
 DEFAULT_SETTINGS = {"enabled": True, "interval_hours": 24}
+RETRY_AFTER_MINUTES = 60          # one gentle retry per hour for transient failures…
+MAX_CONSECUTIVE_FAILURES = 3      # …then back off to the normal interval (not_authorized is never retried)
 
 
 def _utcnow() -> datetime:
@@ -113,6 +115,22 @@ def last_success(engine: Engine, site_id: str, source: str) -> datetime | None:
     return _parse(r[0]) if r else None
 
 
+def _failure_streak(engine: Engine, site_id: str, source: str) -> tuple[int, datetime | None, str | None]:
+    """(consecutive failed runs since the last success, started_at of the newest run, its status)."""
+    with engine.connect() as cx:
+        rows = cx.execute(text("SELECT status, started_at FROM sync_runs WHERE site_id=:s AND source=:src "
+                               "ORDER BY started_at DESC, id DESC LIMIT 10"), {"s": site_id, "src": source}).all()
+    if not rows:
+        return 0, None, None
+    streak = 0
+    for st, _ts in rows:
+        if st == "failed":
+            streak += 1
+        else:
+            break
+    return streak, _parse(rows[0][1]), rows[0][0]
+
+
 def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> dict[str, Any]:
     """Per-integration plan used by both the scheduler and the auto-sync API: last success, next planned, due."""
     now = now or _utcnow()
@@ -134,6 +152,13 @@ def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> 
     for kind, src in (("wordpress", "wordpress_pipeline"), ("gsc", "gsc_pipeline"), ("ga4", "ga4_pipeline")):
         last = last_success(engine, site_id, src)
         nxt = (last + interval) if last else now
+        # transient-failure retry: newest run failed (never not_authorized) → one retry per hour, max 3 in a row
+        streak, latest_started, latest_status = _failure_streak(engine, site_id, src)
+        if (cfg["enabled"] and configured[kind] and latest_status == "failed"
+                and 0 < streak < MAX_CONSECUTIVE_FAILURES and latest_started):
+            retry_at = latest_started + timedelta(minutes=RETRY_AFTER_MINUTES)
+            if retry_at < nxt:
+                nxt = retry_at
         sources[kind] = {"configured": configured[kind], "last_success": _iso(last) if last else None,
                          "next_at": _iso(nxt) if (cfg["enabled"] and configured[kind]) else None,
                          "due": bool(cfg["enabled"] and configured[kind] and nxt <= now)}

@@ -115,6 +115,8 @@ export type Ga4SyncStatus = {
   steps: WpSyncStep[]; run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null;
   coverage: Ga4SyncCoverage; steps_fa: Record<string, string>;
 };
+export type AutoSyncSource = { configured: boolean; last_success: string | null; next_at: string | null; due: boolean };
+export type AutoSyncPlan = { site_id: string; enabled: boolean; interval_hours: number; sources: Record<'wordpress' | 'gsc' | 'ga4', AutoSyncSource> };
 export type IntegrationBlock = {
   kind: 'wordpress' | 'gsc' | 'ga4' | string; label: string;
   connection: { status: string; tested_at: string | null; detail: Record<string, unknown> };
@@ -242,6 +244,8 @@ export const endpoints = {
     api<ConnectionResult>(`/sites/${encodeURIComponent(id)}/connections/${kind}/test`, { method: 'POST', json: { property: property || null, ...(extra ?? {}) } }),
   gscProperties: () => api<GscProperties>('/connections/gsc/properties'),
   initializeSite: (id: string) => api<InitializeResult>(`/sites/${encodeURIComponent(id)}/initialize`, { method: 'POST' }),
+  autoSyncGet: (id: string) => api<AutoSyncPlan>(`/sites/${encodeURIComponent(id)}/auto-sync`),
+  autoSyncPut: (id: string, body: { enabled?: boolean; interval_hours?: number }) => api<AutoSyncPlan>(`/sites/${encodeURIComponent(id)}/auto-sync`, { method: 'PUT', json: body }),
   integrations: (id: string) => api<IntegrationsSummary>(`/sites/${encodeURIComponent(id)}/integrations`),
   // WordPress → sync → graph pipeline (job-based; never inline)
   wpSyncStart: (id: string, body: { crawl?: boolean; max_urls?: number | null } = {}) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/wordpress/sync`, { method: 'POST', json: body }),

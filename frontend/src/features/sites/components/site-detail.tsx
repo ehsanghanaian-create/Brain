@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { BUSINESS_CATEGORIES, MODE_FA } from '../constants';
 import { StatusBadge } from './connection-tester';
 import { SiteBrainForm } from './site-brain-form';
+import { AutoSyncLine } from './auto-sync-line';
 import { Ga4IntegrationCard } from './ga4-integration-card';
 import { GoogleAccountCard } from './google-account-card';
 import { GscIntegrationCard } from './gsc-sync-card';
@@ -117,6 +118,7 @@ export function SiteDetail({
           <span>WordPress <StatusBadge status={connections.status.wordpress?.status} /></span>
           <span>GSC <StatusBadge status={connections.status.gsc?.status} /></span>
           <span>GA4 <StatusBadge status={connections.status.ga4?.status} /></span>
+          <AutoSyncLine siteId={site.site_id} />
         </div>
         <GoogleAccountCard onChange={() => { setGscRefresh((n) => n + 1); setGa4Refresh((n) => n + 1); }} />
         <WordPressIntegrationCard siteId={site.site_id} initialValue={site.wp_url} initialResult={connections.status.wordpress} initialAuth={connections.wordpress_auth ?? null} refreshKey={wpRefresh} />

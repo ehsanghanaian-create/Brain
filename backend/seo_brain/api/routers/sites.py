@@ -345,6 +345,26 @@ def ga4_sync_status(site_id: str, site: Site = Depends(require_site), eng: Engin
             **Ga4Pipeline(eng).status(site_id, q)}
 
 
+class AutoSyncUpdate(BaseModel):
+    enabled: bool | None = None
+    interval_hours: int | None = Field(default=None, ge=1, le=168)
+
+
+@router.get("/{site_id}/auto-sync")
+def auto_sync_get(site_id: str, site: Site = Depends(require_site), eng: Engine = Depends(engine)) -> dict:
+    """Automatic-refresh plan for the card UI: enabled · interval · per-integration last/next/configured."""
+    from ...automation.scheduler import plan_for_site
+    return {"site_id": site_id, **plan_for_site(eng, site_id)}
+
+
+@router.put("/{site_id}/auto-sync")
+def auto_sync_put(site_id: str, body: AutoSyncUpdate, site: Site = Depends(require_site), eng: Engine = Depends(engine)) -> dict:
+    """Toggle automatic refresh / change the interval (stored in the existing site_settings table)."""
+    from ...automation.scheduler import plan_for_site, save_auto_sync_settings
+    save_auto_sync_settings(eng, site_id, enabled=body.enabled, interval_hours=body.interval_hours)
+    return {"site_id": site_id, **plan_for_site(eng, site_id)}
+
+
 gsc_router = APIRouter(prefix="/connections", tags=["sites"])
 
 

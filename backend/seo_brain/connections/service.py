@@ -66,12 +66,28 @@ def _token_info() -> dict[str, Any]:
     from ..gsc.client import read_token_json
     raw = read_token_json()
     if not raw:
-        return {"present": False, "scopes": []}
+        return _merge_sa({"present": False, "scopes": [], "expiry": None, "source": None})
     try:
         data = json.loads(raw)
     except ValueError:
         return {"present": False, "scopes": []}
-    return {"present": bool(data.get("refresh_token")), "scopes": data.get("scopes") or [], "expiry": data.get("expiry")}
+    out = {"present": bool(data.get("refresh_token")), "scopes": list(data.get("scopes") or []), "expiry": data.get("expiry"), "source": "oauth"}
+    return _merge_sa(out)
+
+
+def _merge_sa(out: dict[str, Any]) -> dict[str, Any]:
+    """A configured Service Account authorizes GSC even without any OAuth token (GA4 gating stays OAuth-only)."""
+    try:
+        from .service_account import sa_configured, sa_email
+        if sa_configured():
+            out["present"] = True
+            if GSC_SCOPE not in out["scopes"]:
+                out["scopes"] = [GSC_SCOPE, *out["scopes"]]
+            out["sa_email"] = sa_email()
+            out["source"] = "oauth+sa" if out.get("source") == "oauth" else "service_account"
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 def _redact(v: str | None, keep: int = 3) -> str:
@@ -111,8 +127,9 @@ class ConnectionsService:
 
     # -- Google Search Console
     def list_gsc_properties(self) -> dict[str, Any]:
-        if not _google_client_configured():
-            return {"status": "not_configured", "properties": [], "message": "GOOGLE_CLIENT_ID/SECRET در .env تنظیم نشده است"}
+        from .service_account import sa_configured
+        if not _google_client_configured() and not sa_configured():
+            return {"status": "not_configured", "properties": [], "message": "نه Service Account ثبت شده و نه OAuth Client پیکربندی شده است"}
         tok = _token_info()
         if not tok["present"]:
             return {"status": "not_authorized", "properties": [], "message": "توکن Google وجود ندارد؛ برای اتصال حساب گوگل، از بخش «حساب گوگل» در مرکز اتصال‌ها اتصال را انجام دهید"}

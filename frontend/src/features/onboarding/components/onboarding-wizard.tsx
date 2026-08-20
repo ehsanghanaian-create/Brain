@@ -6,7 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { GoogleAccountCard } from '@/features/sites/components/google-account-card';
-import { ApiError, endpoints, type GoogleAccountStatus, type IntegrationBlock } from '@/lib/api/client';
+import { GoogleSearchConsoleConnectionCard } from '@/features/sites/components/gsc-service-account-card';
+import { ApiError, endpoints, type GoogleAccountStatus, type IntegrationBlock, type SaGscStatus } from '@/lib/api/client';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -84,22 +85,42 @@ export function OnboardingWizard() {
   );
 }
 
-// ---------------------------------------------------------------- قدم ۱ — فقط یک دکمه
+// ---------------------------------------------------------------- قدم ۱ — Service Account ‏(پیشنهادی) + ‏OAuth ‏(پیشرفته)
 function StepGoogle({ onReady }: { onReady: (g: GoogleAccountStatus) => void }) {
   const [status, setStatus] = useState<GoogleAccountStatus | null>(null);
-  useEffect(() => { void endpoints.googleStatus().then(setStatus).catch(() => null); }, []);
+  const [sa, setSa] = useState<SaGscStatus | null>(null);
+  const [showOAuth, setShowOAuth] = useState(false);
+  useEffect(() => {
+    void endpoints.googleStatus().then(setStatus).catch(() => null);
+    void endpoints.saGscStatus().then(setSa).catch(() => null);
+  }, []);
+  const saReady = Boolean(sa?.configured && (sa?.accessible_properties?.length ?? 0) > 0);
+  const canContinue = Boolean(status?.connected) || saReady;
+  const continueWith = () => onReady(status ?? ({ connected: false } as GoogleAccountStatus));
   return (
     <div className='grid gap-3'>
       <Card>
         <CardHeader>
           <CardTitle>به SEO Brain خوش آمدید 👋</CardTitle>
-          <CardDescription>با یک ورود به حساب گوگل، آمار جستجو و بازدید سایت‌هایتان فقط «خوانده» می‌شود — هیچ‌چیزی تغییر نمی‌کند.</CardDescription>
+          <CardDescription>آمار جستجوی سایت‌هایتان فقط «خوانده» می‌شود — هیچ‌چیزی تغییر نمی‌کند.</CardDescription>
         </CardHeader>
       </Card>
-      <GoogleAccountCard simple onChange={() => void endpoints.googleStatus().then(setStatus).catch(() => null)} />
+      {/* روش پیشنهادی: افزودن یک ایمیل در Search Console — بدون ورود گوگل و OAuth */}
+      {sa?.configured && (
+        <GoogleSearchConsoleConnectionCard onSelect={() => continueWith()}
+          onChecked={() => void endpoints.saGscStatus().then(setSa).catch(() => null)} />
+      )}
+      {/* روش پیشرفته: ‏OAuth — وقتی Service Account موجود است، پیش‌فرض پنهان */}
+      {!sa?.configured || showOAuth ? (
+        <GoogleAccountCard simple onChange={() => void endpoints.googleStatus().then(setStatus).catch(() => null)} />
+      ) : (
+        <Button type='button' variant='ghost' size='sm' className='w-fit text-xs' onClick={() => setShowOAuth(true)} data-testid='show-oauth'>
+          روش پیشرفته: ورود با حساب گوگل (OAuth) ▾
+        </Button>
+      )}
       <div className='flex justify-end'>
-        <Button disabled={!status?.connected} onClick={() => status && onReady(status)} data-testid='onboarding-next-1'>
-          {status?.connected ? 'ادامه' : 'ابتدا حساب گوگل را متصل کنید'}
+        <Button disabled={!canContinue} onClick={continueWith} data-testid='onboarding-next-1'>
+          {canContinue ? 'ادامه' : 'ابتدا Search Console را متصل کنید'}
         </Button>
       </div>
     </div>

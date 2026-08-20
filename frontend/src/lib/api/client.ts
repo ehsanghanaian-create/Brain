@@ -115,6 +115,9 @@ export type Ga4SyncStatus = {
   steps: WpSyncStep[]; run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null;
   coverage: Ga4SyncCoverage; steps_fa: Record<string, string>;
 };
+export type SaGscProperty = { property: string; permission: string | null };
+export type SaGscStatus = { configured: boolean; service_account_email: string | null; accessible_properties: SaGscProperty[]; last_check: string | null };
+export type SaGscCheck = { status: 'ok' | 'not_configured' | 'error' | string; service_account_email: string | null; properties: SaGscProperty[]; message?: string; checked_at?: string };
 export type AutoSyncSource = { configured: boolean; last_success: string | null; next_at: string | null; due: boolean };
 export type AutoSyncPlan = { site_id: string; enabled: boolean; interval_hours: number; sources: Record<'wordpress' | 'gsc' | 'ga4', AutoSyncSource> };
 export type IntegrationBlock = {
@@ -244,6 +247,8 @@ export const endpoints = {
     api<ConnectionResult>(`/sites/${encodeURIComponent(id)}/connections/${kind}/test`, { method: 'POST', json: { property: property || null, ...(extra ?? {}) } }),
   gscProperties: () => api<GscProperties>('/connections/gsc/properties'),
   initializeSite: (id: string) => api<InitializeResult>(`/sites/${encodeURIComponent(id)}/initialize`, { method: 'POST' }),
+  saGscStatus: () => api<SaGscStatus>('/connections/gsc/service-account/status'),
+  saGscCheck: () => api<SaGscCheck>('/connections/gsc/service-account/check', { method: 'POST' }),
   autoSyncGet: (id: string) => api<AutoSyncPlan>(`/sites/${encodeURIComponent(id)}/auto-sync`),
   autoSyncPut: (id: string, body: { enabled?: boolean; interval_hours?: number }) => api<AutoSyncPlan>(`/sites/${encodeURIComponent(id)}/auto-sync`, { method: 'PUT', json: body }),
   integrations: (id: string) => api<IntegrationsSummary>(`/sites/${encodeURIComponent(id)}/integrations`),

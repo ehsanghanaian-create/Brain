@@ -66,9 +66,9 @@ export function ConnectionTester({
       const r = await endpoints.testConnection(siteId, kind, value || null, extra);
       setResult(r);
       onResult?.(r);
-      if (kind === 'gsc') {
+      if (kind === 'gsc' || kind === 'ga4') {
         const sj = r.detail?.sync_job as { status?: string; job_id?: string | null; error?: string | null } | undefined;
-        if (sj) { const m = queueMessage(sj); (m.ok ? toast.success : toast.error)(`همگام‌سازی Search Console: ${m.text}`); }
+        if (sj) { const m = queueMessage(sj); (m.ok ? toast.success : toast.error)(`${kind === 'gsc' ? 'همگام‌سازی Search Console' : 'همگام‌سازی GA4'}: ${m.text}`); }
       }
       if (kind === 'wordpress') {
         const a = r.detail?.auth as { configured?: boolean; status?: string; username?: string; key_hint?: string; source?: WpAuthStatus['source'] } | undefined;

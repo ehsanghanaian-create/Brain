@@ -132,6 +132,12 @@ def test_connection(site_id: str, kind: str, body: ConnectionTestRequest | None 
         res = svc.test_ga4(site_id, body.property or site.ga4_property)
         if res.ok and body.property and body.property != site.ga4_property:
             repo.set_fields(site_id, ga4_property=res.detail.get("property") or body.property)
+        # production workflow: a verified GA4 connection queues the sync → snapshot → graph pipeline (never inline)
+        if res.ok and body.auto_sync:
+            try:
+                res.detail["sync_job"] = _queue_ga4_sync(site_id, eng, q, days=None, reason="connection_test")
+            except Exception as e:  # noqa: BLE001 — the connection result itself must still be returned
+                res.detail["sync_job"] = {"status": "not_queued", "error": f"{e.__class__.__name__}: {str(e)[:120]}"}
     elif kind == "wordpress":
         from ...wordpress.auth import clear_site_auth, save_site_auth
         if body.clear_wp_credentials:
@@ -185,8 +191,12 @@ def integrations(site_id: str, site: Site = Depends(require_site), eng: Engine =
 
     wp = WordPressSyncOrchestrator(eng)
     gsc = GscPipeline(eng)
-    from ...connections.service import _google_client_configured, _token_info
-    gsc_authorized = bool(_google_client_configured() and _token_info().get("present"))
+    from ...connections.service import GA4_SCOPE, _google_client_configured, _token_info
+    from ...ga4.pipeline import Ga4Pipeline as _Ga4Pipeline
+    _tok = _token_info()
+    gsc_authorized = bool(_google_client_configured() and _tok.get("present"))
+    ga4_authorized = bool(gsc_authorized and GA4_SCOPE in (_tok.get("scopes") or []))
+    _ga4_pipe = _Ga4Pipeline(eng)
     out = [
         {"kind": "wordpress", "label": "وردپرس", "connection": connection("wordpress"),
          "sync": sync_block(wp.latest(site_id), wp.counts(site_id)),
@@ -197,9 +207,9 @@ def integrations(site_id: str, site: Site = Depends(require_site), eng: Engine =
          "configured": bool(site.gsc_property), "property": site.gsc_property, "authorized": gsc_authorized,
          "actions": ["test"] + (["sync"] if site.gsc_property and gsc_authorized else [])},
         {"kind": "ga4", "label": "Google Analytics 4", "connection": connection("ga4"),
-         "sync": {"status": "not_available", "last_run": None, "progress": 0, "step": None, "step_fa": None, "run_id": None, "coverage": {}, "error": None},
-         "configured": bool(site.ga4_property), "property": site.ga4_property,
-         "actions": ["test"]},
+         "sync": sync_block(_ga4_pipe.latest(site_id), _ga4_pipe.coverage(site_id)),
+         "configured": bool(site.ga4_property), "property": site.ga4_property, "authorized": ga4_authorized,
+         "actions": ["test"] + (["sync"] if site.ga4_property and ga4_authorized else [])},
     ]
     return {"site_id": site_id, "integrations": out}
 
@@ -292,6 +302,47 @@ def gsc_sync_status(site_id: str, site: Site = Depends(require_site), eng: Engin
     return {"site_id": site_id, "property": site.gsc_property or None,
             "authorized": bool(_google_client_configured() and _token_info().get("present")),
             **GscPipeline(eng).status(site_id, q)}
+
+
+# --------------------------------------------------------------------------- GA4 → sync → graph pipeline (wiring of existing components)
+def _queue_ga4_sync(site_id: str, eng: Engine, q: JobQueue, days: int | None, reason: str) -> dict:
+    from ...ga4.pipeline import Ga4Pipeline
+    pipe = Ga4Pipeline(eng)
+    if pipe.is_running(site_id):
+        cur = pipe.latest(site_id) or {}
+        return {"status": "already_running", "run_id": cur.get("run_id"), "job_id": cur.get("job_id"), "step": cur.get("step")}
+    st = pipe.create(site_id)
+    run = q.enqueue(Job(type="ga4_sync", payload={"site_id": site_id, "run_id": st.run_id, "days": days, "reason": reason}, site_id=site_id))
+    pipe.attach_job(st.run_id, run.run_id)
+    return {"status": "queued", "job_id": run.run_id, "run_id": st.run_id}
+
+
+class Ga4SyncStart(BaseModel):
+    days: int | None = Field(default=None, ge=1, le=480)
+
+
+@router.post("/{site_id}/ga4/sync", status_code=202)
+def ga4_sync_start(site_id: str, body: Ga4SyncStart | None = None, site: Site = Depends(require_site), eng: Engine = Depends(engine), q: JobQueue = Depends(job_queue)) -> dict:
+    """Queue the GA4 pipeline: Analytics data → content snapshot → graph/opportunities. Never inline; no OAuth in the worker."""
+    body = body or Ga4SyncStart()
+    if not site.ga4_property:
+        raise ApiError(409, "برای این سایت property گوگل‌آنالیتیکس تنظیم نشده است — ابتدا اتصال GA4 را تست کنید", code="ga4_not_configured")
+    from ...connections.service import GA4_SCOPE, _google_client_configured, _token_info
+    tok = _token_info()
+    if not _google_client_configured() or not tok.get("present") or GA4_SCOPE not in (tok.get("scopes") or []):
+        raise ApiError(409, "توکن Google با اسکوپ analytics.readonly موجود نیست؛ اتصال GA4 را دوباره تست کنید", code="ga4_not_authorized")
+    return _queue_ga4_sync(site_id, eng, q, days=body.days, reason="manual")
+
+
+@router.get("/{site_id}/ga4/sync/status")
+def ga4_sync_status(site_id: str, site: Site = Depends(require_site), eng: Engine = Depends(engine), q: JobQueue = Depends(job_queue)) -> dict:
+    """Latest pipeline run (from the existing sync_runs table) + live coverage: date range, rows, sessions, users, conversions, top pages."""
+    from ...connections.service import GA4_SCOPE, _google_client_configured, _token_info
+    from ...ga4.pipeline import Ga4Pipeline
+    tok = _token_info()
+    return {"site_id": site_id, "property": site.ga4_property or None,
+            "authorized": bool(_google_client_configured() and tok.get("present") and GA4_SCOPE in (tok.get("scopes") or [])),
+            **Ga4Pipeline(eng).status(site_id, q)}
 
 
 gsc_router = APIRouter(prefix="/connections", tags=["sites"])

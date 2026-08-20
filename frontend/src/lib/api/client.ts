@@ -103,6 +103,15 @@ export type GscSyncStatus = {
   steps: WpSyncStep[]; run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null;
   coverage: GscSyncCoverage; steps_fa: Record<string, string>;
 };
+export type Ga4SyncCoverage = { date_from: string | null; date_to: string | null; rows: number; pages: number; sessions: number; users: number; conversions: number; content_snapshots: number; last_ga4_sync?: string | null; top_pages: { path: string; sessions: number; conversions: number }[] };
+export type Ga4SyncStatus = {
+  site_id: string; property: string | null; authorized: boolean;
+  status: 'never' | 'queued' | 'running' | 'succeeded' | 'completed_with_errors' | 'failed' | 'not_authorized' | string;
+  step: string | null; step_fa: string | null; progress: number;
+  started_at: string | null; finished_at: string | null; items: Record<string, unknown>; errors: string[];
+  steps: WpSyncStep[]; run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null;
+  coverage: Ga4SyncCoverage; steps_fa: Record<string, string>;
+};
 export type IntegrationBlock = {
   kind: 'wordpress' | 'gsc' | 'ga4' | string; label: string;
   connection: { status: string; tested_at: string | null; detail: Record<string, unknown> };
@@ -238,6 +247,8 @@ export const endpoints = {
   // GSC → sync → graph pipeline (job-based; never inline)
   gscSyncStart: (id: string, body: { days?: number | null } = {}) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/gsc/sync`, { method: 'POST', json: body }),
   gscSyncStatus: (id: string) => api<GscSyncStatus>(`/sites/${encodeURIComponent(id)}/gsc/sync/status`),
+  ga4SyncStart: (id: string, body: { days?: number | null } = {}) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/ga4/sync`, { method: 'POST', json: body }),
+  ga4SyncStatus: (id: string) => api<Ga4SyncStatus>(`/sites/${encodeURIComponent(id)}/ga4/sync/status`),
   // phase 4 — graph command center
   graphModes: (id: string) => api<GraphMode[]>(`/sites/${encodeURIComponent(id)}/graph/modes`),
   graphView: (id: string, params: { mode: string; types?: string[]; relation_types?: string[]; limit?: number; include_isolated?: boolean }) => {

@@ -57,9 +57,9 @@ def test_integrations_aggregates_existing_tables_only(env):
     assert g["sync"]["run_id"] == gst.run_id and g["authorized"] is True and g["actions"] == ["test", "sync"]
     assert {"rows", "queries", "pages"} <= set(g["sync"]["coverage"])
 
-    ga4 = by["ga4"]                    # placeholder: no pipeline yet, test-only actions
-    assert ga4["connection"]["status"] == "never" and ga4["sync"]["status"] == "not_available"
-    assert ga4["configured"] is False and ga4["actions"] == ["test"]
+    ga4 = by["ga4"]                    # real pipeline now; no analytics scope in this fixture → test-only actions
+    assert ga4["connection"]["status"] == "never" and ga4["sync"]["status"] == "never"
+    assert ga4["configured"] is False and ga4["actions"] == ["test"] and ga4["authorized"] is False
 
 
 def test_integrations_never_state_and_no_new_tables(env):

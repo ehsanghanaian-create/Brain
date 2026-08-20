@@ -52,21 +52,30 @@ class ContentAnalytics:
                 days = int(win.rstrip("d"))
                 start = (today - timedelta(days=days)).isoformat()
                 m = self._metrics_for(site_id, url_n, start, today.isoformat(), bool(has_daily))
-                if m is None:
+                ga = self._ga4_for(site_id, it["url"], start, today.isoformat())
+                if m is None and ga is None:
                     continue
+                m = m or {"clicks": 0, "impressions": 0, "ctr": 0.0, "position": None, "top_queries": []}
                 prev = self._prev(site_id, it["id"], win, today.isoformat())
                 delta = {}
                 if prev:
                     delta = {"clicks": m["clicks"] - prev["clicks"], "impressions": m["impressions"] - prev["impressions"], "ctr": round(m["ctr"] - prev["ctr"], 4),
                              "position": round((m["position"] or 0) - (prev["position"] or 0), 2) if m["position"] is not None and prev["position"] is not None else None, "prev_date": prev["date"]}
                 with self.engine.begin() as cx:
-                    cx.execute(text("INSERT INTO content_metrics(site_id,content_id,url,window,date,clicks,impressions,ctr,position,top_queries,delta,created_at) "
-                                    "VALUES(:s,:c,:u,:w,:d,:cl,:im,:ct,:po,:tq,:de,:ca) ON CONFLICT(site_id,content_id,window,date) DO UPDATE SET clicks=excluded.clicks, impressions=excluded.impressions, "
-                                    "ctr=excluded.ctr, position=excluded.position, top_queries=excluded.top_queries, delta=excluded.delta"),
+                    cx.execute(text("INSERT INTO content_metrics(site_id,content_id,url,window,date,clicks,impressions,ctr,position,top_queries,delta,created_at,"
+                                    "ga4_sessions,ga4_users,ga4_views,ga4_conversions,ga4_engagement_rate) "
+                                    "VALUES(:s,:c,:u,:w,:d,:cl,:im,:ct,:po,:tq,:de,:ca,:gs,:gu,:gv,:gc,:ge) ON CONFLICT(site_id,content_id,window,date) DO UPDATE SET clicks=excluded.clicks, impressions=excluded.impressions, "
+                                    "ctr=excluded.ctr, position=excluded.position, top_queries=excluded.top_queries, delta=excluded.delta, "
+                                    "ga4_sessions=excluded.ga4_sessions, ga4_users=excluded.ga4_users, ga4_views=excluded.ga4_views, ga4_conversions=excluded.ga4_conversions, ga4_engagement_rate=excluded.ga4_engagement_rate"),
                                {"s": site_id, "c": it["id"], "u": it["url"], "w": win, "d": today.isoformat(), "cl": m["clicks"], "im": m["impressions"], "ct": m["ctr"], "po": m["position"],
-                                "tq": dumps(m["top_queries"]), "de": dumps(delta), "ca": utcnow()})
+                                "tq": dumps(m["top_queries"]), "de": dumps(delta), "ca": utcnow(),
+                                "gs": ga and ga["sessions"], "gu": ga and ga["users"], "gv": ga and ga["views"],
+                                "gc": ga and ga["conversions"], "ge": ga and ga["engagement_rate"]})
                 written += 1
-        return {"date": today.isoformat(), "items": len(items), "snapshots": written, "source": "gsc_daily" if has_daily else "gsc_query_page"}
+        with self.engine.connect() as cx:
+            has_ga4 = cx.execute(text("SELECT count(*) FROM ga4_daily WHERE site_id=:s"), {"s": site_id}).scalar() or 0
+        return {"date": today.isoformat(), "items": len(items), "snapshots": written,
+                "source": ("gsc_daily" if has_daily else "gsc_query_page") + ("+ga4_daily" if has_ga4 else "")}
 
     def _metrics_for(self, site_id: str, url_n: str, start: str, end: str, daily: bool) -> dict[str, Any] | None:
         with self.engine.connect() as cx:
@@ -83,6 +92,24 @@ class ContentAnalytics:
             return None
         top = sorted(q.items(), key=lambda x: -x[1])[:10]
         return {"clicks": cl, "impressions": im, "ctr": round(cl / im, 4) if im else 0.0, "position": round(posw / im, 2) if im else None, "top_queries": [{"query": k, "impressions": v} for k, v in top]}
+
+    def _ga4_for(self, site_id: str, url: str, start: str, end: str) -> dict | None:
+        """GA4 window aggregate for one content URL (path match on existing ga4_daily; engagement weighted by sessions)."""
+        from urllib.parse import urlsplit
+        path = unquote(urlsplit(url).path or "/").rstrip("/") or "/"
+        try:
+            with self.engine.connect() as cx:
+                r = cx.execute(text("SELECT SUM(sessions), SUM(total_users), SUM(screen_page_views), SUM(conversions), "
+                                    "CASE WHEN SUM(sessions)>0 THEN SUM(engagement_rate*sessions)/SUM(sessions) END "
+                                    "FROM ga4_daily WHERE site_id=:s AND source='page' AND date>=:a AND date<=:b "
+                                    "AND (RTRIM(page_path,'/')=:p OR page_path=:p2)"),
+                               {"s": site_id, "a": start, "b": end, "p": path, "p2": path + "/" if path != "/" else "/"}).first()
+        except Exception:  # noqa: BLE001 — pre-0010 DB in old fixtures
+            return None
+        if not r or not r[0]:
+            return None
+        return {"sessions": int(r[0] or 0), "users": int(r[1] or 0), "views": int(r[2] or 0),
+                "conversions": round(float(r[3] or 0), 1), "engagement_rate": round(float(r[4]), 3) if r[4] is not None else None}
 
     def _prev(self, site_id: str, cid: int, win: str, before: str) -> dict | None:
         with self.engine.connect() as cx:

@@ -318,6 +318,11 @@ content_metrics = Table(
     Column("top_queries", Text, nullable=False, server_default="[]"),
     Column("delta", Text, nullable=False, server_default="{}"),
     Column("created_at", String, nullable=False),
+    Column("ga4_sessions", Integer),           # 0010: GA4 joins the same snapshot rows — no parallel analytics table
+    Column("ga4_users", Integer),
+    Column("ga4_views", Integer),
+    Column("ga4_conversions", Float),
+    Column("ga4_engagement_rate", Float),
 )
 
 content_insights = Table(

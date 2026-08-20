@@ -79,8 +79,14 @@ def _register_builtin_jobs() -> None:
         from ..gsc.pipeline import GscPipeline
         return GscPipeline(_engine()).run(payload["site_id"], run_id=payload.get("run_id"), days=payload.get("days"), job_id=payload.get("job_id"))
 
+    def _run_ga4_sync(payload: dict):
+        """GA4 → snapshot → graph/opportunities, one job; state persisted in sync_runs (see ga4/pipeline.py)."""
+        from .deps import engine as _engine
+        from ..ga4.pipeline import Ga4Pipeline
+        return Ga4Pipeline(_engine()).run(payload["site_id"], run_id=payload.get("run_id"), days=payload.get("days"), job_id=payload.get("job_id"))
+
     for name, fn in (("sync_wordpress", _run_sync_wordpress), ("build_graph", _run_build_graph), ("noop", _noop), ("links_analyze", _run_links_analyze), ("generation_run", _run_generation), ("planner_analyze", _run_planner_analyze),
-                     ("wordpress_sync", _run_wordpress_pipeline), ("gsc_sync", _run_gsc_sync)):
+                     ("wordpress_sync", _run_wordpress_pipeline), ("gsc_sync", _run_gsc_sync), ("ga4_sync", _run_ga4_sync)):
         try:
             q.register(name, fn)
         except Exception:  # noqa: BLE001

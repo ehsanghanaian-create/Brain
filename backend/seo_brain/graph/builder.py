@@ -98,6 +98,15 @@ class GraphBuild:
         inbound = Counter()
         for l in rows(c, "SELECT DISTINCT source_url, target_url FROM links WHERE site_id=? AND is_internal=1 AND source_url!=target_url", (sid,)):
             inbound[l["target_url"]] += 1
+        # GA4 per-path aggregate (existing ga4_daily; engagement weighted by sessions) — merged as props, never as nodes
+        self._ga4_by_path = {}
+        try:
+            for r in rows(c, "SELECT page_path, SUM(sessions) sessions, SUM(total_users) users, SUM(conversions) conversions, "
+                             "CASE WHEN SUM(sessions)>0 THEN SUM(engagement_rate*sessions)/SUM(sessions) END engagement, "
+                             "MAX(date) last FROM ga4_daily WHERE site_id=? AND source='page' GROUP BY page_path", (sid,)):
+                self._ga4_by_path[unquote(r["page_path"] or "/").rstrip("/") or "/"] = r
+        except sqlite3.OperationalError:      # pre-0010 DB in old fixtures
+            pass
 
         # taxonomy nodes
         for ct in cats:
@@ -137,6 +146,7 @@ class GraphBuild:
                 ntype = "POST" if post["type"] == "post" else "PAGE"
                 nid = f"{'post' if ntype == 'POST' else 'page'}:{u}"
                 self.node(nid, ntype, post["title"] or unquote(u), u, wp_id=post["wp_id"], crawled=False, word_count=post["word_count"])
+                self._apply_ga4(nid, u)
                 url_to_node[u] = nid
                 self.edge(site_node, nid, "HAS_POST" if ntype == "POST" else "HAS_PAGE")
 
@@ -254,9 +264,26 @@ class GraphBuild:
             "gsc_position": round(g["position"], 1) if g and g["position"] is not None else None,
             "last_gsc_sync": g["last"] if g else None,
         })
+        self._apply_ga4(nid, p["url"])
         if post:
             n["props"].update({"wp_id": post["wp_id"], "wp_type": post["type"], "date_gmt": post["date_gmt"], "modified_gmt": post["modified_gmt"],
                                "excerpt": (post["excerpt"] or "")[:300], "yoast_title": post["yoast_title"], "yoast_description": post["yoast_description"]})
+
+    def _apply_ga4(self, nid: str, url: str | None) -> None:
+        """GA4 behaviour props on existing PAGE/POST nodes (crawled or not) — properties only, never nodes."""
+        ga = self._ga4_for_url(url)
+        if ga:
+            self.nodes[nid]["props"].update({"ga4_sessions": int(ga["sessions"] or 0), "ga4_users": int(ga["users"] or 0),
+                                             "ga4_conversions": round(float(ga["conversions"] or 0), 1),
+                                             "ga4_engagement_rate": round(float(ga["engagement"]), 3) if ga["engagement"] is not None else None,
+                                             "last_ga4_sync": ga["last"]})
+
+    def _ga4_for_url(self, url: str | None):
+        if not url or not getattr(self, "_ga4_by_path", None):
+            return None
+        from urllib.parse import urlsplit
+        path = unquote(urlsplit(url).path or "/").rstrip("/") or "/"
+        return self._ga4_by_path.get(path)
 
     def _metrics(self):
         G = nx.DiGraph()

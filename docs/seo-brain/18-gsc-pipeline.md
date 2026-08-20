@@ -54,5 +54,5 @@ upfront with 409 `gsc_not_authorized` when the token file is absent.
   not_authorized skips downstream, re-run produces no duplicate graph nodes/rows, **no duplicate GSC tables**.
 - `frontend/src/features/sites/__tests__/gsc-sync.test.ts` (6) — card states, button gating, counters, errors.
 - pytest 151 · vitest 23 · tsc clean · validate-api **212/212** (new: gsc status never / 409 / real-site coverage).
-- Live run (2026-08-20, `emdadmodiran`): 726 rows → 68 queries (46 important) → 9 keyword opportunities →
+- Live run (2026-08-20, `example-site`): 726 rows → 68 queries (46 important) → 9 keyword opportunities →
   snapshot skipped (`no_content_with_url`) → graph 120 nodes / 444 edges. Card renders all of it.

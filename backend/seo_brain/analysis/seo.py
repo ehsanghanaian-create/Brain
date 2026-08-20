@@ -232,6 +232,49 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
                  {"source": su, "target": tu, "potential_anchor": anchor, "shared_entities": breakdown["shared_entities"]},
                  related_url=tu, run_id=run_id); counts["opportunities"] += 1
 
+    # --- GA4 behaviour opportunities (existing ga4_daily; skipped silently when GA4 was never synced) ---------------
+    try:
+        ga4 = rows(conn, "SELECT page_path, SUM(sessions) s, SUM(conversions) c, "
+                         "CASE WHEN SUM(sessions)>0 THEN SUM(engagement_rate*sessions)/SUM(sessions) END e "
+                         "FROM ga4_daily WHERE site_id=? AND source='page' GROUP BY page_path", (sid,))
+    except sqlite3.OperationalError:
+        ga4 = []
+    if ga4:
+        from urllib.parse import unquote as _uq, urlsplit as _us
+        by_path = {}
+        for p_ in pages:
+            by_path[_uq(_us(p_["url"]).path or "/").rstrip("/") or "/"] = p_["url"]
+        for r_ in rows(conn, "SELECT url FROM posts WHERE site_id=?", (sid,)):     # uncrawled WP content too
+            by_path.setdefault(_uq(_us(r_["url"]).path or "/").rstrip("/") or "/", r_["url"])
+        mid = conn.execute("SELECT date(MAX(date), '-14 day') FROM ga4_daily WHERE site_id=? AND source='page'", (sid,)).fetchone()[0]
+        recent = {r["page_path"]: r for r in rows(conn, "SELECT page_path, SUM(sessions) s FROM ga4_daily WHERE site_id=? AND source='page' AND date>? GROUP BY page_path", (sid, mid or ""))}
+        prior = {r["page_path"]: r for r in rows(conn, "SELECT page_path, SUM(sessions) s FROM ga4_daily WHERE site_id=? AND source='page' AND date<=? GROUP BY page_path", (sid, mid or ""))}
+        for g in ga4:
+            path = _uq(g["page_path"] or "/").rstrip("/") or "/"
+            url = by_path.get(path)
+            if not url or path == "/":
+                continue
+            sess, conv, eng = int(g["s"] or 0), float(g["c"] or 0), g["e"]
+            # 1) high traffic, no/low conversion
+            if sess >= 100 and conv <= max(1.0, sess * 0.002):
+                score = min(1.0, 0.4 + sess / 2000)
+                _opp(conn, sid, "ga4_traffic_no_conversion", url, score, {"sessions": sess, "conversions": conv},
+                     f"این صفحه ورودی زیادی دارد ({sess} session) ولی تبدیل پایین است ({conv:.0f}) — CTA و مسیر تبدیل را بازبینی کنید",
+                     0.7, {"sessions": sess, "conversions": conv, "engagement_rate": eng}, run_id=run_id); counts["opportunities"] += 1
+            # 2) meaningful traffic, weak engagement
+            if sess >= 50 and eng is not None and eng < 0.35:
+                score = min(1.0, 0.35 + (0.35 - eng) + sess / 4000)
+                _opp(conn, sid, "ga4_low_engagement", url, score, {"sessions": sess, "engagement_rate": round(eng, 3)},
+                     f"نرخ تعامل فقط {eng*100:.0f}٪ با {sess} session — صفحه نیاز به بهبود عنوان، محتوا یا UX دارد",
+                     0.65, {"sessions": sess, "engagement_rate": round(eng, 3)}, run_id=run_id); counts["opportunities"] += 1
+            # 3) traffic drop: last 14 days vs the 14 days before
+            pr, rc = int((prior.get(g["page_path"]) or {"s": 0})["s"] or 0), int((recent.get(g["page_path"]) or {"s": 0})["s"] or 0)
+            if pr >= 50 and rc < pr * 0.6:
+                drop = 1 - rc / pr
+                _opp(conn, sid, "ga4_traffic_drop", url, min(1.0, 0.4 + drop / 2), {"prev_sessions": pr, "recent_sessions": rc, "drop": round(drop, 2)},
+                     f"کاهش ترافیک GA4 نسبت به دوره قبل: {pr} → {rc} session ({drop*100:.0f}٪ افت) — محتوا و رتبه‌ها را بررسی کنید",
+                     0.7, {"prev_sessions": pr, "recent_sessions": rc}, run_id=run_id); counts["opportunities"] += 1
+
     conn.execute("UPDATE sync_runs SET finished_at=?, status='completed', rows_written=?, notes=? WHERE run_id=?",
                  (utcnow(), counts["problems"] + counts["opportunities"], j(counts), run_id))
     conn.commit()

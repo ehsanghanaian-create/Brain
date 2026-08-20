@@ -243,6 +243,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/ga4/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ga4 Sync Start
+         * @description Queue the GA4 pipeline: Analytics data → content snapshot → graph/opportunities. Never inline; no OAuth in the worker.
+         */
+        post: operations["ga4_sync_start_api_v1_sites__site_id__ga4_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/ga4/sync/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ga4 Sync Status
+         * @description Latest pipeline run (from the existing sync_runs table) + live coverage: date range, rows, sessions, users, conversions, top pages.
+         */
+        get: operations["ga4_sync_status_api_v1_sites__site_id__ga4_sync_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/connections/gsc/properties": {
         parameters: {
             query?: never;
@@ -3413,6 +3453,11 @@ export interface components {
             /** Notes */
             notes?: string | null;
         };
+        /** Ga4SyncStart */
+        Ga4SyncStart: {
+            /** Days */
+            days?: number | null;
+        };
         /** GenJobBody */
         GenJobBody: {
             /**
@@ -4571,6 +4616,80 @@ export interface operations {
         };
     };
     gsc_sync_status_api_v1_sites__site_id__gsc_sync_status_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ga4_sync_start_api_v1_sites__site_id__ga4_sync_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["Ga4SyncStart"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ga4_sync_status_api_v1_sites__site_id__ga4_sync_status_get: {
         parameters: {
             query?: never;
             header?: {

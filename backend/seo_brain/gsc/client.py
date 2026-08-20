@@ -19,7 +19,8 @@ from ..common.config import env, raw_data_dir, resolve_path
 
 log = logging.getLogger("gsc")
 
-SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly"]
+# one shared Google token for GSC + GA4 — both read-only; adding a scope requires a one-time re-consent (--auth-only)
+SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly", "https://www.googleapis.com/auth/analytics.readonly"]
 MAX_ROWS_PER_REQUEST = 25000
 RETRYABLE = {429, 500, 502, 503, 504}
 

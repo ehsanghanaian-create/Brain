@@ -303,6 +303,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/auto-sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Auto Sync Get
+         * @description Automatic-refresh plan for the card UI: enabled · interval · per-integration last/next/configured.
+         */
+        get: operations["auto_sync_get_api_v1_sites__site_id__auto_sync_get"];
+        /**
+         * Auto Sync Put
+         * @description Toggle automatic refresh / change the interval (stored in the existing site_settings table).
+         */
+        put: operations["auto_sync_put_api_v1_sites__site_id__auto_sync_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/connections/ga4/properties": {
         parameters: {
             query?: never;
@@ -376,6 +400,27 @@ export interface paths {
          */
         get: operations["google_authorize_api_v1_connections_google_authorize_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connections/google/client": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Google Client Save
+         * @description Self-service setup: store the Google OAuth client (Desktop type) in the SecretStore — no .env editing.
+         *     The secret is never returned; only `configured` + a masked client id hint.
+         */
+        put: operations["google_client_save_api_v1_connections_google_client_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -3268,6 +3313,13 @@ export interface components {
              */
             overwrite: boolean;
         };
+        /** AutoSyncUpdate */
+        AutoSyncUpdate: {
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Interval Hours */
+            interval_hours?: number | null;
+        };
         /** Body_import_keywords_api_v1_sites__site_id__keywords_import_post */
         Body_import_keywords_api_v1_sites__site_id__keywords_import_post: {
             /** File */
@@ -3586,6 +3638,13 @@ export interface components {
             } | null;
             /** Created By */
             created_by?: string | null;
+        };
+        /** GoogleClientBody */
+        GoogleClientBody: {
+            /** Client Id */
+            client_id: string;
+            /** Client Secret */
+            client_secret: string;
         };
         /** GscSyncStart */
         GscSyncStart: {
@@ -4857,6 +4916,80 @@ export interface operations {
             };
         };
     };
+    auto_sync_get_api_v1_sites__site_id__auto_sync_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    auto_sync_put_api_v1_sites__site_id__auto_sync_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutoSyncUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     ga4_properties_api_v1_connections_ga4_properties_get: {
         parameters: {
             query?: never;
@@ -4966,6 +5099,43 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    google_client_save_api_v1_connections_google_client_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GoogleClientBody"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

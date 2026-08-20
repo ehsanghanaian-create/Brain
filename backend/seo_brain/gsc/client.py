@@ -48,19 +48,75 @@ def _client_config() -> dict:
     }}
 
 
+TOKEN_REF = "google-oauth-token"
+
+
+def _store():
+    from ..core.secrets import get_secret_store
+    return get_secret_store()
+
+
+def read_token_json() -> str | None:
+    """Google token, SecretStore-first (encrypted). A legacy plaintext file is migrated in on first read."""
+    token_path = resolve_path(env("GSC_TOKEN_PATH", "tokens/gsc_token.json"))
+    try:
+        data = _store().get(TOKEN_REF)
+        if data:
+            return data
+    except Exception:  # noqa: BLE001 — store unavailable ⇒ legacy file below
+        pass
+    if token_path.exists():
+        data = token_path.read_text(encoding="utf-8")
+        try:                                   # one-time migration: encrypt into the store, drop the plaintext file
+            _store().set(TOKEN_REF, data)
+            token_path.unlink()
+            log.info("Google token migrated from plaintext file into the SecretStore (encrypted)")
+        except Exception:  # noqa: BLE001 — keep using the file when no encryption backend exists
+            pass
+        return data
+    return None
+
+
+def write_token_json(data: str) -> None:
+    """Store the token encrypted; fall back to the legacy file only when the SecretStore is unavailable."""
+    token_path = resolve_path(env("GSC_TOKEN_PATH", "tokens/gsc_token.json"))
+    try:
+        _store().set(TOKEN_REF, data)
+        if token_path.exists():
+            token_path.unlink()
+        return
+    except Exception:  # noqa: BLE001
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_text(data, encoding="utf-8")
+
+
+def delete_token() -> bool:
+    removed = False
+    try:
+        removed = _store().delete(TOKEN_REF) or removed
+    except Exception:  # noqa: BLE001
+        pass
+    token_path = resolve_path(env("GSC_TOKEN_PATH", "tokens/gsc_token.json"))
+    if token_path.exists():
+        token_path.unlink()
+        removed = True
+    return removed
+
+
 def get_credentials(interactive: bool = True):
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
-    token_path = resolve_path(env("GSC_TOKEN_PATH", "tokens/gsc_token.json"))
     creds = None
-    if token_path.exists():
-        creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+    raw = read_token_json()
+    if raw:
+        import json as _json
+        creds = Credentials.from_authorized_user_info(_json.loads(raw), SCOPES)
     if creds and creds.valid:
         return creds
     if creds and creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
-            token_path.write_text(creds.to_json(), encoding="utf-8")
+            write_token_json(creds.to_json())
             return creds
         except Exception as e:  # noqa: BLE001
             log.warning(f"token refresh failed ({e.__class__.__name__}); re-authorization required")
@@ -71,9 +127,8 @@ def get_credentials(interactive: bool = True):
     flow = InstalledAppFlow.from_client_config(_client_config(), SCOPES)
     # bind to loopback only; opens the browser once
     creds = flow.run_local_server(host="127.0.0.1", port=0, open_browser=True, prompt="consent")
-    token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(creds.to_json(), encoding="utf-8")
-    log.info(f"GSC token stored at {token_path} (git-ignored)")
+    write_token_json(creds.to_json())
+    log.info("GSC token stored (SecretStore, encrypted)")
     return creds
 
 

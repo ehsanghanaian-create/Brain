@@ -62,12 +62,13 @@ def _google_client_configured() -> bool:
 
 
 def _token_info() -> dict[str, Any]:
-    """Read the cached OAuth token (never returned to callers except scopes/expiry)."""
-    p = resolve_path(env("GSC_TOKEN_PATH", "tokens/gsc_token.json"))
-    if not p.exists():
+    """Read the cached OAuth token via the shared storage helper (SecretStore-first, legacy-file fallback)."""
+    from ..gsc.client import read_token_json
+    raw = read_token_json()
+    if not raw:
         return {"present": False, "scopes": []}
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = json.loads(raw)
     except ValueError:
         return {"present": False, "scopes": []}
     return {"present": bool(data.get("refresh_token")), "scopes": data.get("scopes") or [], "expiry": data.get("expiry")}
@@ -114,7 +115,7 @@ class ConnectionsService:
             return {"status": "not_configured", "properties": [], "message": "GOOGLE_CLIENT_ID/SECRET در .env تنظیم نشده است"}
         tok = _token_info()
         if not tok["present"]:
-            return {"status": "not_authorized", "properties": [], "message": "توکن Google وجود ندارد؛ یک‌بار `sync-gsc.py --auth-only` را اجرا کنید"}
+            return {"status": "not_authorized", "properties": [], "message": "توکن Google وجود ندارد؛ برای اتصال حساب گوگل، از بخش «حساب گوگل» در مرکز اتصال‌ها اتصال را انجام دهید"}
         try:
             client = self._gsc_client("_")
             entries = client.list_sites()
@@ -140,7 +141,7 @@ class ConnectionsService:
         tok = _token_info()
         _step(trace, f"OAuth token file {resolve_path(env('GSC_TOKEN_PATH', 'tokens/gsc_token.json')).name}: present={tok['present']} scopes={len(tok['scopes'])} expiry={tok.get('expiry') or '?'}")
         if not tok["present"]:
-            return ConnectionResult("gsc", "not_authorized", "توکن Google وجود ندارد؛ `sync-gsc.py --auth-only` را اجرا کنید", {"property": wanted})
+            return ConnectionResult("gsc", "not_authorized", "توکن Google وجود ندارد؛ برای اتصال حساب گوگل، از بخش «حساب گوگل» در مرکز اتصال‌ها اتصال را انجام دهید", {"property": wanted})
         if GSC_SCOPE not in tok["scopes"]:
             _step(trace, f"missing scope {GSC_SCOPE}")
             return ConnectionResult("gsc", "not_authorized", "توکن فعلی اسکوپ Search Console را ندارد", {"property": wanted, "scopes": tok["scopes"]})
@@ -183,10 +184,20 @@ class ConnectionsService:
                 for acc in resp.get("accountSummaries", []):
                     for ps in acc.get("propertySummaries", []):
                         out.append({"property_id": str(ps.get("property", "")).replace("properties/", ""),
-                                    "display_name": ps.get("displayName"), "account": acc.get("displayName")})
+                                    "display_name": ps.get("displayName"), "account": acc.get("displayName"), "website_url": None})
                 token = resp.get("nextPageToken")
                 if not token:
                     break
+            for p_ in out[:30]:                     # web stream URL → exact domain matching in onboarding (quota-capped)
+                try:
+                    streams = svc.properties().dataStreams().list(parent=f"properties/{p_['property_id']}").execute()
+                    for st_ in streams.get("dataStreams", []):
+                        uri = (st_.get("webStreamData") or {}).get("defaultUri")
+                        if uri:
+                            p_["website_url"] = uri
+                            break
+                except Exception:  # noqa: BLE001 — per-property; matching just falls back to the name heuristic
+                    continue
         except Exception as e:  # noqa: BLE001
             msg = str(e)
             st = "not_authorized" if "403" in msg or "PERMISSION_DENIED" in msg else "error"
@@ -220,7 +231,7 @@ class ConnectionsService:
             return ConnectionResult("ga4", "not_authorized", "توکن Google وجود ندارد", {"property": pid})
         if GA4_SCOPE not in tok["scopes"]:
             return ConnectionResult("ga4", "not_authorized",
-                                    "توکن فعلی فقط اسکوپ Search Console دارد؛ برای GA4 باید یک‌بار با اسکوپ analytics.readonly مجوز بدهید (فاز بعدی: `sync-ga4.py --auth-only`)",
+                                    "توکن فعلی اسکوپ GA4 را ندارد؛ در بخش «حساب گوگل» دکمهٔ «اتصال دوباره» را بزنید و هر دو دسترسی را تأیید کنید",
                                     {"property": pid, "scopes": tok["scopes"], "required_scope": GA4_SCOPE})
         try:
             report = self._ga4_report(pid) if self._ga4_report else self._run_ga4_probe(pid)

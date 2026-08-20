@@ -103,8 +103,8 @@ export type GscSyncStatus = {
   steps: WpSyncStep[]; run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null;
   coverage: GscSyncCoverage; steps_fa: Record<string, string>;
 };
-export type GoogleAccountStatus = { connected: boolean; email: string | null; scopes: string[]; expiry: string | null; gsc_scope: boolean; ga4_scope: boolean; client_configured: boolean; connected_at?: string | null };
-export type Ga4Property = { property_id: string; display_name: string | null; account: string | null };
+export type GoogleAccountStatus = { connected: boolean; email: string | null; scopes: string[]; expiry: string | null; gsc_scope: boolean; ga4_scope: boolean; client_configured: boolean; client_id_hint?: string | null; connected_at?: string | null };
+export type Ga4Property = { property_id: string; display_name: string | null; account: string | null; website_url?: string | null };
 export type Ga4Properties = { status: 'ok' | 'not_configured' | 'not_authorized' | 'error' | string; properties: Ga4Property[]; message?: string };
 export type Ga4SyncCoverage = { date_from: string | null; date_to: string | null; rows: number; pages: number; sessions: number; users: number; conversions: number; content_snapshots: number; last_ga4_sync?: string | null; top_pages: { path: string; sessions: number; conversions: number }[] };
 export type Ga4SyncStatus = {
@@ -115,6 +115,8 @@ export type Ga4SyncStatus = {
   steps: WpSyncStep[]; run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null;
   coverage: Ga4SyncCoverage; steps_fa: Record<string, string>;
 };
+export type AutoSyncSource = { configured: boolean; last_success: string | null; next_at: string | null; due: boolean };
+export type AutoSyncPlan = { site_id: string; enabled: boolean; interval_hours: number; sources: Record<'wordpress' | 'gsc' | 'ga4', AutoSyncSource> };
 export type IntegrationBlock = {
   kind: 'wordpress' | 'gsc' | 'ga4' | string; label: string;
   connection: { status: string; tested_at: string | null; detail: Record<string, unknown> };
@@ -242,6 +244,8 @@ export const endpoints = {
     api<ConnectionResult>(`/sites/${encodeURIComponent(id)}/connections/${kind}/test`, { method: 'POST', json: { property: property || null, ...(extra ?? {}) } }),
   gscProperties: () => api<GscProperties>('/connections/gsc/properties'),
   initializeSite: (id: string) => api<InitializeResult>(`/sites/${encodeURIComponent(id)}/initialize`, { method: 'POST' }),
+  autoSyncGet: (id: string) => api<AutoSyncPlan>(`/sites/${encodeURIComponent(id)}/auto-sync`),
+  autoSyncPut: (id: string, body: { enabled?: boolean; interval_hours?: number }) => api<AutoSyncPlan>(`/sites/${encodeURIComponent(id)}/auto-sync`, { method: 'PUT', json: body }),
   integrations: (id: string) => api<IntegrationsSummary>(`/sites/${encodeURIComponent(id)}/integrations`),
   // WordPress → sync → graph pipeline (job-based; never inline)
   wpSyncStart: (id: string, body: { crawl?: boolean; max_urls?: number | null } = {}) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/wordpress/sync`, { method: 'POST', json: body }),
@@ -252,6 +256,7 @@ export const endpoints = {
   gscSyncStatus: (id: string) => api<GscSyncStatus>(`/sites/${encodeURIComponent(id)}/gsc/sync/status`),
   googleStatus: () => api<GoogleAccountStatus>('/connections/google/status'),
   googleAuthorize: () => api<{ url: string; redirect_uri: string }>('/connections/google/authorize'),
+  googleClientSave: (client_id: string, client_secret: string) => api<{ configured: boolean; client_id_hint: string | null }>('/connections/google/client', { method: 'PUT', json: { client_id, client_secret } }),
   googleDisconnect: () => api<{ disconnected: boolean; revoked: boolean }>('/connections/google', { method: 'DELETE' }),
   ga4Properties: () => api<Ga4Properties>('/connections/ga4/properties'),
   ga4SyncStart: (id: string, body: { days?: number | null } = {}) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/ga4/sync`, { method: 'POST', json: body }),

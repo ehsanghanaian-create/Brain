@@ -94,8 +94,23 @@ def _register_builtin_jobs() -> None:
 
 
 def create_app() -> FastAPI:
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _lifespan(app_: FastAPI):
+        sched = None
+        from ..automation.scheduler import SyncScheduler
+        if SyncScheduler.enabled():
+            from ..automation.queue import get_job_queue
+            from .deps import engine as _engine
+            sched = SyncScheduler(_engine(), get_job_queue())
+            sched.start()
+        yield
+        if sched:
+            sched.stop()
+
     app = FastAPI(title="SEO Brain API", version="0.2.0", docs_url="/api/docs", redoc_url=None,
-                  openapi_url="/api/openapi.json")
+                  openapi_url="/api/openapi.json", lifespan=_lifespan)
     origins = [o.strip() for o in (env("FRONTEND_ORIGIN", "http://localhost:3000,http://127.0.0.1:3000") or "").split(",") if o.strip()]
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"], expose_headers=["X-Request-ID"])
     install_error_handlers(app)

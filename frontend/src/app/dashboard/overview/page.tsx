@@ -5,6 +5,8 @@ import { BackendError } from '@/components/seo-brain/backend-error';
 import { KpiCard } from '@/components/seo-brain/kpi-card';
 import { endpoints, settle } from '@/lib/api/client';
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
+import { Button } from '@/components/ui/button';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'داشبورد' };
@@ -33,6 +35,8 @@ const MODE_FA = { manual: 'دستی', assisted: 'نیمه‌خودکار', autop
 export default async function OverviewPage() {
   const [health, sites] = await Promise.all([settle(endpoints.health()), settle(endpoints.sites())]);
   const siteList = sites.data ?? [];
+  // fresh installation (backend up, zero sites) → guided four-step onboarding instead of an empty dashboard
+  if (!sites.error && siteList.length === 0) redirect('/dashboard/onboarding');
   const summaries = await Promise.all(siteList.map((s) => settle(endpoints.graphSummary(s.site_id))));
   const totals = { nodes: 0, edges: 0, byType: {} as Record<string, number> };
   for (const r of summaries) {
@@ -64,7 +68,13 @@ export default async function OverviewPage() {
               <CardDescription>حالت انتشار هر سایت — پیش‌فرض «دستی» (هیچ چیزی به وردپرس نوشته نمی‌شود)</CardDescription>
             </CardHeader>
             <CardContent className='space-y-2'>
-              {siteList.length === 0 && <p className='text-muted-foreground text-sm'>هنوز سایتی ثبت نشده است.</p>}
+              {siteList.length === 0 && (
+                <div className='grid gap-2 rounded-md border border-dashed p-4 text-sm'>
+                  <p className='font-medium'>هنوز سایتی ثبت نشده است.</p>
+                  <p className='text-muted-foreground'>اتصال گوگل ← انتخاب سایت‌ها ← شروع تحلیل سئو — همه‌چیز در چهار قدم، بدون هیچ تنظیم فنی.</p>
+                  <Button className='w-fit' nativeButton={false} render={<Link href='/dashboard/onboarding' />}>✨ شروع راه‌اندازی</Button>
+                </div>
+              )}
               {siteList.map((s, i) => (
                 <div key={s.site_id} className='flex items-center justify-between rounded-md border p-2 text-sm'>
                   <div>

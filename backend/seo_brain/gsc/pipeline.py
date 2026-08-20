@@ -9,7 +9,7 @@
 No new tables: state lives in the existing `sync_runs` table (source `gsc_pipeline`, notes = JSON), while
 sync_gsc keeps writing its own historical `source='gsc'` rows exactly as the CLI always did.
 No OAuth flow inside the worker: `interactive=False` — a missing/expired token surfaces as status `not_authorized`
-with the same «sync-gsc.py --auth-only» hint the connections tester shows.
+with the same «connect your Google account» guidance the connections tester shows.
 """
 from __future__ import annotations
 
@@ -241,7 +241,7 @@ class GscPipeline:
         except GscAuthError as e:
             log.warning(f"GSC not authorized for {site_id}: {e.__class__.__name__}")
             return {"_step_status": "failed", "_not_authorized": True,
-                    "error": "توکن Google معتبر نیست؛ یک‌بار «sync-gsc.py --auth-only» را اجرا کنید"}
+                    "error": "توکن Google معتبر نیست؛ برای اتصال حساب گوگل، از بخش «حساب گوگل» در مرکز اتصال‌ها اتصال را انجام دهید"}
 
     def _opportunities(self, site_id: str) -> dict:
         if self._opportunities_fn:

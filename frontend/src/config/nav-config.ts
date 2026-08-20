@@ -11,6 +11,8 @@ export const navGroups: NavGroup[] = [
     items: [
       { title: 'داشبورد', url: '/dashboard/overview', icon: 'dashboard', shortcut: ['d', 'd'], items: [],
         description: 'وضعیت کلی سایت‌ها، گراف دانش و سلامت سیستم' },
+      { title: 'شروع راه‌اندازی', url: '/dashboard/onboarding', icon: 'sparkles', items: [],
+        description: 'اتصال گوگل ← انتخاب سایت‌ها ← شروع تحلیل سئو (چهار قدم، بدون تنظیم فنی)' },
       { title: 'سایت‌ها', url: '/dashboard/sites', icon: 'sites', shortcut: ['s', 's'], items: [],
         description: 'مدیریت سایت‌ها، اتصال Search Console و GA4، حالت انتشار' }
     ]

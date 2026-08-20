@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Query
+from pydantic import BaseModel, Field
 from fastapi.responses import HTMLResponse
 
 from ...connections import google_oauth
@@ -36,6 +37,23 @@ def google_authorize() -> dict:
     except GscAuthError as e:
         raise ApiError(409, str(e), code="google_client_not_configured")
     return {"url": out["url"], "redirect_uri": out["redirect_uri"]}
+
+
+class GoogleClientBody(BaseModel):
+    client_id: str = Field(min_length=10, max_length=200)
+    client_secret: str = Field(min_length=10, max_length=200)
+
+
+@router.put("/client")
+def google_client_save(body: GoogleClientBody) -> dict:
+    """Self-service setup: store the Google OAuth client (Desktop type) in the SecretStore — no .env editing.
+    The secret is never returned; only `configured` + a masked client id hint."""
+    try:
+        return google_oauth.save_client(body.client_id, body.client_secret)
+    except GscAuthError as e:
+        raise ApiError(422, str(e), code="google_client_invalid")
+    except Exception as e:  # noqa: BLE001 — e.g. SecretStore has no encryption backend
+        raise ApiError(409, f"ذخیرهٔ امن ممکن نشد: {e.__class__.__name__}", code="secret_store_unavailable")
 
 
 @router.delete("")

@@ -66,7 +66,27 @@ def _register_builtin_jobs() -> None:
         gw = _gateway()
         return GenerationPipeline(gw.engine, gw, get_event_bus()).execute(payload["run_id"])
 
-    for name, fn in (("sync_wordpress", _run_sync_wordpress), ("build_graph", _run_build_graph), ("noop", _noop), ("links_analyze", _run_links_analyze), ("generation_run", _run_generation), ("planner_analyze", _run_planner_analyze)):
+    def _run_wordpress_pipeline(payload: dict):
+        """WordPress → sync → (crawl) → graph, one job; progress persisted in sync_runs (see wordpress/orchestrator.py)."""
+        from .deps import engine as _engine
+        from ..wordpress.orchestrator import WordPressSyncOrchestrator
+        return WordPressSyncOrchestrator(_engine()).run(payload["site_id"], run_id=payload.get("run_id"), stage=payload.get("stage", "full"),
+                                                          crawl=payload.get("crawl", True), max_urls=payload.get("max_urls"), job_id=payload.get("job_id"))
+
+    def _run_gsc_sync(payload: dict):
+        """GSC → keyword opportunities → analytics snapshot → graph, one job; state persisted in sync_runs (see gsc/pipeline.py)."""
+        from .deps import engine as _engine
+        from ..gsc.pipeline import GscPipeline
+        return GscPipeline(_engine()).run(payload["site_id"], run_id=payload.get("run_id"), days=payload.get("days"), job_id=payload.get("job_id"))
+
+    def _run_ga4_sync(payload: dict):
+        """GA4 → snapshot → graph/opportunities, one job; state persisted in sync_runs (see ga4/pipeline.py)."""
+        from .deps import engine as _engine
+        from ..ga4.pipeline import Ga4Pipeline
+        return Ga4Pipeline(_engine()).run(payload["site_id"], run_id=payload.get("run_id"), days=payload.get("days"), job_id=payload.get("job_id"))
+
+    for name, fn in (("sync_wordpress", _run_sync_wordpress), ("build_graph", _run_build_graph), ("noop", _noop), ("links_analyze", _run_links_analyze), ("generation_run", _run_generation), ("planner_analyze", _run_planner_analyze),
+                     ("wordpress_sync", _run_wordpress_pipeline), ("gsc_sync", _run_gsc_sync), ("ga4_sync", _run_ga4_sync)):
         try:
             q.register(name, fn)
         except Exception:  # noqa: BLE001
@@ -82,7 +102,9 @@ def create_app() -> FastAPI:
 
     deps = [Depends(require_token)]
     app.include_router(health.router, prefix=API_PREFIX)
-    for r in (sites.router, sites.gsc_router, graph.router, memory.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router):
+    from .routers import google as google_router_mod
+    app.include_router(google_router_mod.callback_router, prefix=API_PREFIX)     # Google's browser redirect cannot send X-API-Token; guarded by the state nonce
+    for r in (sites.router, sites.gsc_router, google_router_mod.router, graph.router, memory.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router):
         app.include_router(r, prefix=API_PREFIX, dependencies=deps)
 
     # legacy dashboard (v0.1) mounted read-only until UI parity

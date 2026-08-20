@@ -5,7 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
-import { ApiError, endpoints, type ConnectionKind, type ConnectionResult, type GscProperties, type WpAuthStatus } from '@/lib/api/client';
+import { ApiError, endpoints, type ConnectionKind, type ConnectionResult, type Ga4Properties, type GscProperties, type WpAuthStatus } from '@/lib/api/client';
+import { toast } from 'sonner';
+import { queueMessage } from '../wp-sync';
 import { useEffect, useState } from 'react';
 import { CONNECTION_STATUS_FA } from '../constants';
 
@@ -47,13 +49,21 @@ export function ConnectionTester({
   const [error, setError] = useState<string | null>(null);
   const [errorDetail, setErrorDetail] = useState<unknown>(null);
   const [gscProps, setGscProps] = useState<GscProperties | null>(null);
+  const [ga4Props, setGa4Props] = useState<Ga4Properties | null>(null);
 
   useEffect(() => {
-    if (kind !== 'gsc') return;
-    endpoints
-      .gscProperties()
-      .then(setGscProps)
-      .catch((e: ApiError) => setGscProps({ status: 'error', message: e.message, properties: [] }));
+    if (kind === 'gsc') {
+      endpoints
+        .gscProperties()
+        .then(setGscProps)
+        .catch((e: ApiError) => setGscProps({ status: 'error', message: e.message, properties: [] }));
+    }
+    if (kind === 'ga4') {
+      endpoints
+        .ga4Properties()
+        .then(setGa4Props)
+        .catch((e: ApiError) => setGa4Props({ status: 'error', message: e.message, properties: [] }));
+    }
   }, [kind]);
 
   async function run() {
@@ -64,10 +74,16 @@ export function ConnectionTester({
       const r = await endpoints.testConnection(siteId, kind, value || null, extra);
       setResult(r);
       onResult?.(r);
+      if (kind === 'gsc' || kind === 'ga4') {
+        const sj = r.detail?.sync_job as { status?: string; job_id?: string | null; error?: string | null } | undefined;
+        if (sj) { const m = queueMessage(sj); (m.ok ? toast.success : toast.error)(`${kind === 'gsc' ? 'همگام‌سازی Search Console' : 'همگام‌سازی GA4'}: ${m.text}`); }
+      }
       if (kind === 'wordpress') {
         const a = r.detail?.auth as { configured?: boolean; status?: string; username?: string; key_hint?: string; source?: WpAuthStatus['source'] } | undefined;
         if (a?.configured) setAuthInfo({ configured: true, username: a.username ?? wpUser, key_hint: a.key_hint ?? null, source: a.source ?? 'site' });
         setWpPass(''); // never keep the password in component state after the request
+        const sj = r.detail?.sync_job as { status?: string; job_id?: string | null; error?: string | null } | undefined;
+        if (sj) { const m = queueMessage(sj); (m.ok ? toast.success : toast.error)(`همگام‌سازی وردپرس → گراف: ${m.text}`); }
       }
     } catch (e) {
       setError(e instanceof ApiError ? `${e.message} (${e.code})` : String(e));
@@ -93,6 +109,15 @@ export function ConnectionTester({
               </NativeSelectOption>
             ))}
           </NativeSelect>
+        ) : kind === 'ga4' && ga4Props?.status === 'ok' && ga4Props.properties.length > 0 ? (
+          <NativeSelect value={value} onChange={(e) => setValue(e.target.value)} className='md:flex-1' dir='ltr' data-testid='ga4-property-select'>
+            <NativeSelectOption value=''>— انتخاب property —</NativeSelectOption>
+            {ga4Props.properties.map((p) => (
+              <NativeSelectOption key={p.property_id} value={p.property_id}>
+                {p.display_name ?? p.property_id} — {p.property_id}{p.account ? ` (${p.account})` : ''}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
         ) : (
           <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder={hint} dir='ltr' className='md:flex-1' />
         )}
@@ -115,6 +140,9 @@ export function ConnectionTester({
           </div>
           <p className='text-muted-foreground mt-1 text-[11px]'>وردپرس → کاربران → پروفایل → Application Passwords → یک رمز بسازید و اینجا وارد کنید. فقط برای «تست دسترسی» ارسال می‌شود؛ با SecretStore رمزنگاری شده ذخیره می‌شود، هرگز در لاگ/پاسخ ظاهر نمی‌شود و SEO Brain هیچ‌گاه در وردپرس چیزی نمی‌نویسد.</p>
         </div>
+      )}
+      {kind === 'ga4' && ga4Props && ga4Props.status !== 'ok' && (
+        <p className='text-muted-foreground mt-1 text-xs'>{ga4Props.message ?? 'فهرست propertyهای GA4 در دسترس نیست — می‌توانید Property ID را دستی وارد کنید'}</p>
       )}
       {kind === 'gsc' && gscProps && gscProps.status !== 'ok' && (
         <p className='text-muted-foreground mt-1 text-xs'>{gscProps.message ?? 'فهرست property های Google در دسترس نیست'} — می‌توانید property را دستی وارد کنید.</p>

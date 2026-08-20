@@ -11,8 +11,12 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { BUSINESS_CATEGORIES, MODE_FA } from '../constants';
-import { ConnectionTester, StatusBadge } from './connection-tester';
+import { StatusBadge } from './connection-tester';
 import { SiteBrainForm } from './site-brain-form';
+import { Ga4IntegrationCard } from './ga4-integration-card';
+import { GoogleAccountCard } from './google-account-card';
+import { GscIntegrationCard } from './gsc-sync-card';
+import { WordPressIntegrationCard } from './wordpress-sync-card';
 
 const fa = new Intl.NumberFormat('fa-IR');
 
@@ -33,6 +37,9 @@ export function SiteDetail({
   const [mode, setMode] = useState(site.mode);
   const [busy, setBusy] = useState(false);
   const [init, setInit] = useState<InitializeResult | null>(null);
+  const [wpRefresh] = useState(0);          // cards own their refresh after connection tests; key kept for external triggers
+  const [gscRefresh, setGscRefresh] = useState(0);
+  const [ga4Refresh, setGa4Refresh] = useState(0);
 
   async function changeMode(next: 'manual' | 'assisted' | 'autopilot') {
     setBusy(true);
@@ -104,22 +111,17 @@ export function SiteDetail({
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>اتصال‌ها</CardTitle>
-            <CardDescription>آخرین وضعیت تست‌شده؛ می‌توانید دوباره تست کنید (فقط‌خواندنی).</CardDescription>
-          </CardHeader>
-          <CardContent className='grid gap-3'>
-            <div className='flex flex-wrap gap-2 text-xs'>
-              <span>GSC <StatusBadge status={connections.status.gsc?.status} /></span>
-              <span>GA4 <StatusBadge status={connections.status.ga4?.status} /></span>
-              <span>WordPress <StatusBadge status={connections.status.wordpress?.status} /></span>
-            </div>
-            <ConnectionTester siteId={site.site_id} kind='gsc' label='Google Search Console' hint='sc-domain:example.com' initialValue={site.gsc_property} initialResult={connections.status.gsc} />
-            <ConnectionTester siteId={site.site_id} kind='ga4' label='GA4 Property ID' hint='123456789' initialValue={site.ga4_property} initialResult={connections.status.ga4} />
-            <ConnectionTester siteId={site.site_id} kind='wordpress' label='WordPress REST' hint='https://example.com' initialValue={site.wp_url} initialResult={connections.status.wordpress} initialAuth={connections.wordpress_auth ?? null} />
-          </CardContent>
-        </Card>
+        {/* Integration Center — یک کارت کامل per integration: اتصال + همگام‌سازی + شمارنده‌ها */}
+        <div className='flex flex-wrap items-center gap-2 text-xs'>
+          <span className='font-medium'>مرکز اتصال‌ها:</span>
+          <span>WordPress <StatusBadge status={connections.status.wordpress?.status} /></span>
+          <span>GSC <StatusBadge status={connections.status.gsc?.status} /></span>
+          <span>GA4 <StatusBadge status={connections.status.ga4?.status} /></span>
+        </div>
+        <GoogleAccountCard onChange={() => { setGscRefresh((n) => n + 1); setGa4Refresh((n) => n + 1); }} />
+        <WordPressIntegrationCard siteId={site.site_id} initialValue={site.wp_url} initialResult={connections.status.wordpress} initialAuth={connections.wordpress_auth ?? null} refreshKey={wpRefresh} />
+        <GscIntegrationCard siteId={site.site_id} initialValue={site.gsc_property} initialResult={connections.status.gsc} refreshKey={gscRefresh} />
+        <Ga4IntegrationCard siteId={site.site_id} initialValue={site.ga4_property} initialResult={connections.status.ga4} refreshKey={ga4Refresh} />
       </TabsContent>
 
       <TabsContent value='brain'>

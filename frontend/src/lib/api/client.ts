@@ -84,6 +84,44 @@ export type ConnectionResult = {
   tested_at: string;
 };
 export type WpAuthStatus = { configured: boolean; username: string | null; key_hint: string | null; source: 'explicit' | 'site' | 'env' | null };
+export type WpSyncStep = { key: string; fa?: string; status: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | string; started_at?: string | null; finished_at?: string | null; items?: Record<string, unknown>; error?: string | null; note?: string | null };
+export type WpSyncCounts = { categories: number; pages: number; posts: number; content_items?: number; taxonomies?: number; crawled: number; graph_nodes: number; graph_edges: number; graph_by_type?: Record<string, number> };
+export type WpSyncStatus = {
+  site_id: string; wp_url: string | null;
+  status: 'never' | 'queued' | 'running' | 'succeeded' | 'completed_with_errors' | 'failed' | string;
+  step: string | null; step_fa: string | null; progress: number; stage: 'full' | 'graph_only' | null;
+  started_at: string | null; finished_at: string | null; items: Record<string, unknown>; errors: string[]; steps: WpSyncStep[];
+  run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null; counts: WpSyncCounts; steps_fa: Record<string, string>;
+};
+export type WpSyncQueued = { status: 'queued' | 'already_running' | 'not_queued' | string; job_id?: string | null; run_id?: string | null; stage?: string; step?: string | null; error?: string | null };
+export type GscSyncCoverage = { date_from: string | null; date_to: string | null; rows: number; queries: number; important_queries: number; pages: number; content_snapshots: number; keyword_opportunities?: number; last_gsc_sync?: string | null };
+export type GscSyncStatus = {
+  site_id: string; property: string | null; authorized: boolean;
+  status: 'never' | 'queued' | 'running' | 'succeeded' | 'completed_with_errors' | 'failed' | 'not_authorized' | string;
+  step: string | null; step_fa: string | null; progress: number;
+  started_at: string | null; finished_at: string | null; items: Record<string, unknown>; errors: string[];
+  steps: WpSyncStep[]; run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null;
+  coverage: GscSyncCoverage; steps_fa: Record<string, string>;
+};
+export type GoogleAccountStatus = { connected: boolean; email: string | null; scopes: string[]; expiry: string | null; gsc_scope: boolean; ga4_scope: boolean; client_configured: boolean; connected_at?: string | null };
+export type Ga4Property = { property_id: string; display_name: string | null; account: string | null };
+export type Ga4Properties = { status: 'ok' | 'not_configured' | 'not_authorized' | 'error' | string; properties: Ga4Property[]; message?: string };
+export type Ga4SyncCoverage = { date_from: string | null; date_to: string | null; rows: number; pages: number; sessions: number; users: number; conversions: number; content_snapshots: number; last_ga4_sync?: string | null; top_pages: { path: string; sessions: number; conversions: number }[] };
+export type Ga4SyncStatus = {
+  site_id: string; property: string | null; authorized: boolean;
+  status: 'never' | 'queued' | 'running' | 'succeeded' | 'completed_with_errors' | 'failed' | 'not_authorized' | string;
+  step: string | null; step_fa: string | null; progress: number;
+  started_at: string | null; finished_at: string | null; items: Record<string, unknown>; errors: string[];
+  steps: WpSyncStep[]; run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null;
+  coverage: Ga4SyncCoverage; steps_fa: Record<string, string>;
+};
+export type IntegrationBlock = {
+  kind: 'wordpress' | 'gsc' | 'ga4' | string; label: string;
+  connection: { status: string; tested_at: string | null; detail: Record<string, unknown> };
+  sync: { status: string; last_run: string | null; progress: number; step: string | null; step_fa: string | null; run_id: string | null; coverage: Record<string, unknown>; error: string | null };
+  configured: boolean; property?: string | null; authorized?: boolean; actions: string[];
+};
+export type IntegrationsSummary = { site_id: string; integrations: IntegrationBlock[] };
 export type ConnectionsStatus = {
   site_id: string;
   configured: { gsc: string | null; ga4: string | null; wordpress: string | null };
@@ -204,6 +242,20 @@ export const endpoints = {
     api<ConnectionResult>(`/sites/${encodeURIComponent(id)}/connections/${kind}/test`, { method: 'POST', json: { property: property || null, ...(extra ?? {}) } }),
   gscProperties: () => api<GscProperties>('/connections/gsc/properties'),
   initializeSite: (id: string) => api<InitializeResult>(`/sites/${encodeURIComponent(id)}/initialize`, { method: 'POST' }),
+  integrations: (id: string) => api<IntegrationsSummary>(`/sites/${encodeURIComponent(id)}/integrations`),
+  // WordPress → sync → graph pipeline (job-based; never inline)
+  wpSyncStart: (id: string, body: { crawl?: boolean; max_urls?: number | null } = {}) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/wordpress/sync`, { method: 'POST', json: body }),
+  wpSyncStatus: (id: string) => api<WpSyncStatus>(`/sites/${encodeURIComponent(id)}/wordpress/sync/status`),
+  graphRebuild: (id: string) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/graph/rebuild`, { method: 'POST' }),
+  // GSC → sync → graph pipeline (job-based; never inline)
+  gscSyncStart: (id: string, body: { days?: number | null } = {}) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/gsc/sync`, { method: 'POST', json: body }),
+  gscSyncStatus: (id: string) => api<GscSyncStatus>(`/sites/${encodeURIComponent(id)}/gsc/sync/status`),
+  googleStatus: () => api<GoogleAccountStatus>('/connections/google/status'),
+  googleAuthorize: () => api<{ url: string; redirect_uri: string }>('/connections/google/authorize'),
+  googleDisconnect: () => api<{ disconnected: boolean; revoked: boolean }>('/connections/google', { method: 'DELETE' }),
+  ga4Properties: () => api<Ga4Properties>('/connections/ga4/properties'),
+  ga4SyncStart: (id: string, body: { days?: number | null } = {}) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/ga4/sync`, { method: 'POST', json: body }),
+  ga4SyncStatus: (id: string) => api<Ga4SyncStatus>(`/sites/${encodeURIComponent(id)}/ga4/sync/status`),
   // phase 4 — graph command center
   graphModes: (id: string) => api<GraphMode[]>(`/sites/${encodeURIComponent(id)}/graph/modes`),
   graphView: (id: string, params: { mode: string; types?: string[]; relation_types?: string[]; limit?: number; include_isolated?: boolean }) => {

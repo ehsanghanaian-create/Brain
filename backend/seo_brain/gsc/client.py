@@ -19,7 +19,8 @@ from ..common.config import env, raw_data_dir, resolve_path
 
 log = logging.getLogger("gsc")
 
-SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly"]
+# one shared Google token for GSC + GA4 — both read-only; adding a scope requires a one-time re-consent (--auth-only)
+SCOPES = ["https://www.googleapis.com/auth/webmasters.readonly", "https://www.googleapis.com/auth/analytics.readonly"]
 MAX_ROWS_PER_REQUEST = 25000
 RETRYABLE = {429, 500, 502, 503, 504}
 
@@ -30,6 +31,15 @@ class GscAuthError(Exception):
 
 def _client_config() -> dict:
     cid, csec = env("GOOGLE_CLIENT_ID"), env("GOOGLE_CLIENT_SECRET")
+    if not cid or not csec:
+        # same SecretStore (DPAPI) the WordPress/AI credentials use — .env stays primary so existing setups keep working
+        try:
+            from ..core.secrets import get_secret_store
+            store = get_secret_store()
+            cid = cid or store.get("google-client-id")
+            csec = csec or store.get("google-client-secret")
+        except Exception:  # noqa: BLE001 — store unavailable ⇒ same "missing" error below
+            pass
     if not cid or not csec:
         raise GscAuthError("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET missing in .env (create an OAuth 'Desktop app' client in Google Cloud and enable the Search Console API)")
     return {"installed": {

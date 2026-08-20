@@ -37,7 +37,7 @@ class SqlGraphStore:
         return self.repo.counts(site_id)
 
     def get_node(self, site_id: str, node_id: str) -> GraphNode | None:
-        return self.repo.get_node(site_id, node_id)
+        return self.repo.get_node(site_id, node_id)      # repo lookup is encoding-tolerant (WP encoded vs crawler decoded URLs)
 
     def list_nodes(self, site_id: str, types: Iterable[str] | None = None, limit: int = 500, offset: int = 0) -> list[GraphNode]:
         return self.repo.list_nodes(site_id, types, limit, offset)

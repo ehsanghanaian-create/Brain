@@ -164,7 +164,7 @@ def main() -> int:
         if st.get("status") in ("succeeded", "failed"):
             break
         time.sleep(0.05)
-    check("job run finished", "GET", api + f"/jobs/{run_id}", 200, lambda r: r.json()["status"] == "succeeded" and r.json()["result"] == {"echo": {"site_id": tmp, "k": 1}}, headers=H)
+    check("job run finished", "GET", api + f"/jobs/{run_id}", 200, lambda r: r.json()["status"] == "succeeded" and r.json()["result"]["echo"]["site_id"] == tmp and r.json()["result"]["echo"]["k"] == 1 and r.json()["result"]["echo"]["job_id"].startswith("job-"), headers=H)
     check("jobs list", "GET", api + "/jobs", 200, lambda r: any(j["run_id"] == run_id for j in r.json()), headers=H)
     check("job unknown type → 422", "POST", api + "/jobs", 422, headers=H, json={"type": "does-not-exist"})
     check("job unknown run → 404", "GET", api + "/jobs/none", 404, headers=H)
@@ -173,10 +173,37 @@ def main() -> int:
     check("connections status (empty)", "GET", api + f"/sites/{tmp}/connections", 200, lambda r: r.json()["status"] == {} and "configured" in r.json(), headers=H)
     check("gsc test without property → not_configured", "POST", api + f"/sites/{tmp}/connections/gsc/test", 200, lambda r: r.json()["status"] == "not_configured" and r.json()["ok"] is False, headers=H, json={})
     check("ga4 test bad id → not_configured", "POST", api + f"/sites/{tmp}/connections/ga4/test", 200, lambda r: r.json()["status"] == "not_configured", headers=H, json={"property": "abc"})
-    check("wordpress test (real site, read-only)", "POST", api + f"/sites/{tmp}/connections/wordpress/test", 200, lambda r: r.json()["status"] in ("ok", "error", "not_found"), headers=H, json={"property": "https://example.com"})
+    check("wordpress test (real site, read-only)", "POST", api + f"/sites/{tmp}/connections/wordpress/test", 200, lambda r: r.json()["status"] in ("ok", "error", "not_found"), headers=H, json={"property": "https://example.com", "auto_sync": False})
     check("connections status (3 kinds)", "GET", api + f"/sites/{tmp}/connections", 200, lambda r: set(r.json()["status"]) == {"gsc", "ga4", "wordpress"}, headers=H)
     check("gsc properties listing", "GET", api + "/connections/gsc/properties", 200, lambda r: r.json()["status"] in ("ok", "not_configured", "not_authorized", "error"), headers=H)
     check("unknown connection kind → 404", "POST", api + f"/sites/{tmp}/connections/nope/test", 404, headers=H, json={})
+    # ---- WordPress → sync → graph pipeline (job-based; never inline)
+    check("wp sync status (never)", "GET", api + f"/sites/{tmp}/wordpress/sync/status", 200, lambda r: r.json()["status"] == "never" and "counts" in r.json() and set(r.json()["steps_fa"]) >= {"categories", "pages", "posts", "build_graph"}, headers=H)
+    check("wp sync start without wp_url → 409", "POST", api + f"/sites/{tmp}/wordpress/sync", 409, lambda r: r.json()["error"]["code"] == "wordpress_not_configured", headers=H, json={})
+    check("graph rebuild queued (202)", "POST", api + f"/sites/{tmp}/graph/rebuild", 202, lambda r: r.json()["status"] == "queued" and r.json()["job_id"].startswith("job-") and r.json()["stage"] == "graph_only", headers=H)
+    for _ in range(30):
+        _st = httpx.get(api + f"/sites/{tmp}/wordpress/sync/status", headers=H, timeout=30).json()
+        if _st.get("status") not in ("queued", "running"):
+            break
+        time.sleep(0.5)
+    check("graph rebuild finished via job", "GET", api + f"/sites/{tmp}/wordpress/sync/status", 200, lambda r: r.json()["status"] == "succeeded" and r.json()["stage"] == "graph_only" and r.json()["progress"] == 1.0 and r.json()["job"]["status"] == "succeeded" and r.json()["counts"]["graph_nodes"] >= 1, headers=H)
+    check("wp sync status (real site)", "GET", api + f"/sites/{sid}/wordpress/sync/status", 200, lambda r: r.json()["site_id"] == sid and {"categories", "pages", "posts", "graph_nodes"} <= set(r.json()["counts"]), headers=H)
+    # ---- GSC → sync → graph pipeline (job-based; no live Google call from the validator)
+    check("gsc sync status (never)", "GET", api + f"/sites/{tmp}/gsc/sync/status", 200, lambda r: r.json()["status"] == "never" and {"coverage", "steps_fa", "authorized"} <= set(r.json()) and {"rows", "queries", "pages", "date_from"} <= set(r.json()["coverage"]), headers=H)
+    check("gsc sync start without property → 409", "POST", api + f"/sites/{tmp}/gsc/sync", 409, lambda r: r.json()["error"]["code"] == "gsc_not_configured", headers=H, json={})
+    check("gsc sync status (real site)", "GET", api + f"/sites/{sid}/gsc/sync/status", 200, lambda r: r.json()["site_id"] == sid and isinstance(r.json()["coverage"]["queries"], int), headers=H)
+    # ---- Google web OAuth + GA4 discovery (no live consent from the validator)
+    check("google account status", "GET", api + "/connections/google/status", 200, lambda r: {"connected", "client_configured", "gsc_scope", "ga4_scope", "scopes"} <= set(r.json()), headers=H)
+    check("google authorize url", "GET", api + "/connections/google/authorize", 200, lambda r: r.json()["url"].startswith("https://accounts.google.com/") and "state=" in r.json()["url"] and "callback" in r.json()["redirect_uri"], headers=H)
+    check("google callback denied → 400 (public route)", "GET", api + "/connections/google/callback?error=access_denied", 400, lambda r: "اتصال انجام نشد" in r.text)
+    check("ga4 properties listing", "GET", api + "/connections/ga4/properties", 200, lambda r: r.json()["status"] in ("ok", "not_configured", "not_authorized", "error"), headers=H)
+    # ---- GA4 pipeline (job-based; no live Google call from the validator)
+    check("ga4 sync status (never)", "GET", api + f"/sites/{tmp}/ga4/sync/status", 200, lambda r: r.json()["status"] == "never" and {"coverage", "steps_fa", "authorized"} <= set(r.json()) and {"sessions", "users", "conversions", "top_pages"} <= set(r.json()["coverage"]), headers=H)
+    check("ga4 sync start without property → 409", "POST", api + f"/sites/{tmp}/ga4/sync", 409, lambda r: r.json()["error"]["code"] == "ga4_not_configured", headers=H, json={})
+    check("integration center aggregation", "GET", api + f"/sites/{sid}/integrations", 200,
+          lambda r: [i["kind"] for i in r.json()["integrations"]] == ["wordpress", "gsc", "ga4"]
+          and all({"connection", "sync", "configured", "actions"} <= set(i) for i in r.json()["integrations"])
+          and "coverage" in r.json()["integrations"][2]["sync"], headers=H)
     check("initialize", "POST", api + f"/sites/{tmp}/initialize", 200, lambda r: r.json()["graph"]["site_node"] == f"site:{tmp}" and r.json()["memory"]["existed"] is True, headers=H)
     check("initialize idempotent", "POST", api + f"/sites/{tmp}/initialize", 200, lambda r: r.json()["graph"]["existed"] is True, headers=H)
     check("site brain put (audience/cta/forbidden)", "PUT", api + f"/sites/{tmp}/memory", 200, lambda r: r.json()["forbidden_claims"] == ["ارزان‌ترین"] and r.json()["audience"]["segments"] == ["مالکان MVM"], headers=H,
@@ -395,6 +422,8 @@ def main() -> int:
     lines += ["", "## Coverage", "",
               "* health / openapi / docs / request-id · error envelope (404, 409, 422) · sites CRUD (create, get, list, patch, delete-refuse, delete-force, 404 after) ·",
               "  phase 3: connections status/tests (gsc/ga4/wordpress + 404 kind), gsc properties listing, initialize (idempotent), site brain fields + AI context ·",
+              "  wordpress pipeline: sync status (never), start without wp_url → 409, graph rebuild 202 → job succeeded, real-site status counters ·",
+              "  gsc pipeline: sync status (never/real-site coverage), start without property → 409 ·",
               "  phase 6: content create/transition guard/brief/board/calendar/graph sync/delete · ai provider config (masked key)/task routes ·",
               "  phase 7: drafts v1/v2, score, review, intelligence history, scoring/analytics settings, snapshot/learn/overview/insights ·",
               "  phase 8: links meta/analyze/summary/suggestions/pages/patterns/settings/export ·",

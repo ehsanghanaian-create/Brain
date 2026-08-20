@@ -42,9 +42,18 @@ class GraphRepository(Repository):
                 "by_node_type": {t: n for t, n in nodes}, "by_relation_type": {t: n for t, n in edges}}
 
     def get_node(self, site_id: str, node_id: str) -> GraphNode | None:
+        # WordPress REST returns Persian URLs percent-encoded while the crawler stores them decoded — accept either form.
+        from urllib.parse import quote, unquote
+        candidates = [node_id]
+        for v in (unquote(node_id), quote(node_id, safe=":/?#[]@!$&'()*+,;=~-._")):
+            if v not in candidates:
+                candidates.append(v)
         with self.engine.connect() as cx:
-            r = cx.execute(select(graph_nodes).where(and_(graph_nodes.c.site_id == site_id, graph_nodes.c.node_id == node_id))).first()
-        return _node_from_row(r._mapping) if r else None
+            for cand in candidates:
+                r = cx.execute(select(graph_nodes).where(and_(graph_nodes.c.site_id == site_id, graph_nodes.c.node_id == cand))).first()
+                if r:
+                    return _node_from_row(r._mapping)
+        return None
 
     def list_nodes(self, site_id: str, types: Iterable[str] | None = None, limit: int = 500, offset: int = 0) -> list[GraphNode]:
         q = select(graph_nodes).where(graph_nodes.c.site_id == site_id)

@@ -4,6 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { BackendError } from '@/components/seo-brain/backend-error';
 import { Button } from '@/components/ui/button';
 import { endpoints, settle } from '@/lib/api/client';
+import { DeleteSiteButton } from '@/features/sites/components/delete-site-button';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
@@ -37,6 +38,7 @@ export default async function SitesPage() {
                 <TableHead>Search Console</TableHead>
                 <TableHead>حالت انتشار</TableHead>
                 <TableHead>فضای کاری</TableHead>
+                <TableHead className='w-24'>عملیات</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -61,11 +63,14 @@ export default async function SitesPage() {
                   <TableCell dir='ltr' className='text-muted-foreground text-xs'>
                     {s.workspace_path ?? '—'}
                   </TableCell>
+                  <TableCell>
+                    <DeleteSiteButton siteId={s.site_id} siteName={s.name} />
+                  </TableCell>
                 </TableRow>
               ))}
               {sites.data!.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className='text-muted-foreground text-center'>
+                  <TableCell colSpan={7} className='text-muted-foreground text-center'>
                     سایتی ثبت نشده است.
                   </TableCell>
                 </TableRow>

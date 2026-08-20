@@ -14,6 +14,7 @@ import { BUSINESS_CATEGORIES, MODE_FA } from '../constants';
 import { StatusBadge } from './connection-tester';
 import { SiteBrainForm } from './site-brain-form';
 import { AutoSyncLine } from './auto-sync-line';
+import { DeleteSiteButton } from './delete-site-button';
 import { Ga4IntegrationCard } from './ga4-integration-card';
 import { GoogleAccountCard } from './google-account-card';
 import { GscIntegrationCard } from './gsc-sync-card';
@@ -103,6 +104,7 @@ export function SiteDetail({
             </div>
             <div className='mt-2 flex items-center gap-2'>
               <Button variant='secondary' size='sm' onClick={reinit} disabled={busy}>بررسی / ایجاد فضای کاری</Button>
+              <DeleteSiteButton siteId={site.site_id} siteName={site.name} redirectAfter />
               {init && (
                 <span className='text-muted-foreground text-xs' dir='ltr'>
                   {init.workspace.path} · memory {init.memory.existed ? 'exists' : 'created'} · {init.graph.site_node}

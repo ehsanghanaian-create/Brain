@@ -201,6 +201,8 @@ def main() -> int:
     check("google authorize url", "GET", api + "/connections/google/authorize", 200, lambda r: r.json()["url"].startswith("https://accounts.google.com/") and "state=" in r.json()["url"] and "callback" in r.json()["redirect_uri"], headers=H)
     check("google callback denied → 400 (public route)", "GET", api + "/connections/google/callback?error=access_denied", 400, lambda r: "اتصال انجام نشد" in r.text)
     check("ga4 properties listing", "GET", api + "/connections/ga4/properties", 200, lambda r: r.json()["status"] in ("ok", "not_configured", "not_authorized", "error"), headers=H)
+    check("gsc service-account status", "GET", api + "/connections/gsc/service-account/status", 200,
+          lambda r: {"configured", "service_account_email", "accessible_properties", "last_check"} <= set(r.json()) and "private_key" not in r.text and "PRIVATE KEY" not in r.text, headers=H)
     # ---- GA4 pipeline (job-based; no live Google call from the validator)
     check("ga4 sync status (never)", "GET", api + f"/sites/{tmp}/ga4/sync/status", 200, lambda r: r.json()["status"] == "never" and {"coverage", "steps_fa", "authorized"} <= set(r.json()) and {"sessions", "users", "conversions", "top_pages"} <= set(r.json()["coverage"]), headers=H)
     check("ga4 sync start without property → 409", "POST", api + f"/sites/{tmp}/ga4/sync", 409, lambda r: r.json()["error"]["code"] == "ga4_not_configured", headers=H, json={})

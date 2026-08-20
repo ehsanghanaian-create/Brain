@@ -103,6 +103,16 @@ def delete_token() -> bool:
     return removed
 
 
+def get_gsc_credentials(interactive: bool = True):
+    """Credential provider for SEARCH CONSOLE: Service Account first (SecretStore ref google-service-account),
+    else the existing OAuth flow. GA4 keeps calling get_credentials (OAuth) — the SA covers GSC only."""
+    from ..connections.service_account import sa_credentials
+    sa = sa_credentials()
+    if sa is not None:
+        return sa
+    return get_credentials(interactive=interactive)
+
+
 def get_credentials(interactive: bool = True):
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
@@ -136,7 +146,7 @@ class GscClient:
     def __init__(self, site_id: str, interactive: bool = True, save_raw: bool = True):
         from googleapiclient.discovery import build
         self.site_id = site_id
-        self.creds = get_credentials(interactive=interactive)
+        self.creds = get_gsc_credentials(interactive=interactive)
         self.svc = build("searchconsole", "v1", credentials=self.creds, cache_discovery=False)
         self.save_raw = save_raw
         self.raw_dir: Path = raw_data_dir() / "gsc" / site_id

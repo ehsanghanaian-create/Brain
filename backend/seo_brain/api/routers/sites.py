@@ -368,6 +368,20 @@ def auto_sync_put(site_id: str, body: AutoSyncUpdate, site: Site = Depends(requi
 gsc_router = APIRouter(prefix="/connections", tags=["sites"])
 
 
+@gsc_router.get("/gsc/service-account/status")
+def gsc_sa_status() -> dict:
+    """Service-account connection state for the card: configured · e-mail · cached properties · last check. No secrets."""
+    from ...connections.service_account import status as sa_status
+    return sa_status()
+
+
+@gsc_router.post("/gsc/service-account/check")
+def gsc_sa_check() -> dict:
+    """Live access check: sites().list() with the service account → the properties the user has granted it."""
+    from ...connections.service_account import check_access
+    return check_access()
+
+
 @gsc_router.get("/ga4/properties")
 def ga4_properties(svc: ConnectionsService = Depends(connections_service)) -> dict:
     """GA4 properties visible to the connected Google account (Admin API) — for the selector in the GA4 card."""

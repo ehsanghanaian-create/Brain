@@ -111,3 +111,59 @@ def test_ga4_property_discovery_via_admin_api(env, monkeypatch):
     out = c.get("/api/v1/connections/ga4/properties").json()
     assert out["status"] == "ok" and len(out["properties"]) == 2
     assert out["properties"][0] == {"property_id": "471988572", "display_name": "سایت نمونه", "account": "شرکت نمونه"}
+
+
+def test_client_save_uses_secret_store_and_masks(env, monkeypatch, tmp_path):
+    from seo_brain.core.secrets import SecretStore
+    store = SecretStore(tmp_path / "secrets")
+    monkeypatch.setattr("seo_brain.core.secrets.get_secret_store", lambda: store)
+    monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
+    c = env["client"]
+    # invalid id → 422 with a clear Persian error
+    r = c.put("/api/v1/connections/google/client", json={"client_id": "not-a-google-id-at-all", "client_secret": "GOCSPX-abcdefgh"})
+    assert r.status_code == 422 and "apps.googleusercontent.com" in r.json()["error"]["message"]
+    # valid → stored encrypted in the EXISTING SecretStore refs; the secret is never returned
+    cid = "918100000000-abcdefghijklmnop.apps.googleusercontent.com"
+    r = c.put("/api/v1/connections/google/client", json={"client_id": cid, "client_secret": "GOCSPX-supersecret123"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["configured"] is True and "supersecret" not in json.dumps(body)
+    assert body["client_id_hint"].startswith("91810000") and "…" in body["client_id_hint"] and len(body["client_id_hint"]) < len(cid)
+    assert store.get("google-client-id") == cid and store.get("google-client-secret") == "GOCSPX-supersecret123"
+    # status reports the client as configured purely from the store (no .env)
+    st = c.get("/api/v1/connections/google/status").json()
+    assert st["client_configured"] is True and st["client_id_hint"] == body["client_id_hint"]
+
+
+def test_oauth_state_survives_restart(env, monkeypatch):
+    c = env["client"]
+    state = c.get("/api/v1/connections/google/authorize").json()["url"].split("state=")[1].split("&")[0]
+    google_oauth._states.clear()                      # simulate an API restart between /authorize and /callback
+
+    class _Creds:
+        token, refresh_token, scopes, id_token = "at", "rt", google_oauth.WEB_SCOPES, None
+        def to_json(self):
+            return json.dumps({"token": "at", "refresh_token": "rt", "scopes": self.scopes, "expiry": "2027-01-01T00:00:00Z"})
+
+    class _Flow:
+        credentials = _Creds()
+        def fetch_token(self, code=None):
+            pass
+
+    monkeypatch.setattr(google_oauth, "_flow", lambda ru: _Flow())
+    r = c.get("/api/v1/connections/google/callback", params={"code": "c1", "state": state})
+    assert r.status_code == 200 and "اتصال برقرار شد" in r.text     # the state was reloaded from the file
+
+
+def test_no_cli_hints_in_user_facing_messages():
+    """Every not-authorized message must point at the Google Account card, never at a terminal command."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[2] / "seo_brain"
+    offenders = []
+    for p in root.rglob("*.py"):
+        for line in p.read_text(encoding="utf-8").splitlines():
+            ls = line.strip()
+            if "auth-only" in ls and ("«" in ls or "؛" in ls) and not ls.startswith("#"):
+                offenders.append((p.name, ls[:90]))
+    assert not offenders, offenders

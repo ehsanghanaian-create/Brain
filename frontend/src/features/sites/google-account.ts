@@ -26,7 +26,7 @@ export function googleAccountView(s: Partial<GoogleAccountStatus> | null | undef
       { key: 'ga4', fa: 'Google Analytics (فقط‌خواندنی)', granted: Boolean(s?.ga4_scope) }
     ],
     hint: state === 'no_client'
-      ? 'GOOGLE_CLIENT_ID/SECRET تنظیم نشده است (در .env یا SecretStore) — یک OAuth Client از نوع Desktop در Google Cloud بسازید'
+      ? 'در Google Cloud Console یک OAuth Client از نوع «Desktop app» بسازید و شناسه‌ها را در فرم زیر ذخیره کنید — نیازی به ویرایش .env نیست'
       : state === 'connected' && !s?.ga4_scope
         ? 'توکن فعلی اسکوپ GA4 ندارد؛ برای فعال‌شدن GA4 یک‌بار «اتصال دوباره» بزنید'
         : null

@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { BUSINESS_CATEGORIES, COUNTRIES, LANGUAGES, normalizeUrl, slugifyDomain } from '../constants';
 import { ConnectionTester } from './connection-tester';
+import { GoogleAccountCard } from './google-account-card';
 
 type Step = 1 | 2 | 3;
 const STEPS: { n: Step; title: string; desc: string }[] = [
@@ -200,6 +201,7 @@ export function SiteWizard() {
             </CardDescription>
           </CardHeader>
           <CardContent className='grid gap-3'>
+            <GoogleAccountCard />
             <ConnectionTester siteId={site.site_id} kind='gsc' label='Google Search Console' hint='sc-domain:example.com یا https://example.com/'
               initialValue={site.gsc_property} onResult={(r) => setResults((s) => ({ ...s, gsc: r }))} />
             <ConnectionTester siteId={site.site_id} kind='ga4' label='Google Analytics 4 (Property ID)' hint='123456789'

@@ -103,7 +103,7 @@ export type GscSyncStatus = {
   steps: WpSyncStep[]; run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null;
   coverage: GscSyncCoverage; steps_fa: Record<string, string>;
 };
-export type GoogleAccountStatus = { connected: boolean; email: string | null; scopes: string[]; expiry: string | null; gsc_scope: boolean; ga4_scope: boolean; client_configured: boolean; connected_at?: string | null };
+export type GoogleAccountStatus = { connected: boolean; email: string | null; scopes: string[]; expiry: string | null; gsc_scope: boolean; ga4_scope: boolean; client_configured: boolean; client_id_hint?: string | null; connected_at?: string | null };
 export type Ga4Property = { property_id: string; display_name: string | null; account: string | null };
 export type Ga4Properties = { status: 'ok' | 'not_configured' | 'not_authorized' | 'error' | string; properties: Ga4Property[]; message?: string };
 export type Ga4SyncCoverage = { date_from: string | null; date_to: string | null; rows: number; pages: number; sessions: number; users: number; conversions: number; content_snapshots: number; last_ga4_sync?: string | null; top_pages: { path: string; sessions: number; conversions: number }[] };
@@ -252,6 +252,7 @@ export const endpoints = {
   gscSyncStatus: (id: string) => api<GscSyncStatus>(`/sites/${encodeURIComponent(id)}/gsc/sync/status`),
   googleStatus: () => api<GoogleAccountStatus>('/connections/google/status'),
   googleAuthorize: () => api<{ url: string; redirect_uri: string }>('/connections/google/authorize'),
+  googleClientSave: (client_id: string, client_secret: string) => api<{ configured: boolean; client_id_hint: string | null }>('/connections/google/client', { method: 'PUT', json: { client_id, client_secret } }),
   googleDisconnect: () => api<{ disconnected: boolean; revoked: boolean }>('/connections/google', { method: 'DELETE' }),
   ga4Properties: () => api<Ga4Properties>('/connections/ga4/properties'),
   ga4SyncStart: (id: string, body: { days?: number | null } = {}) => api<WpSyncQueued>(`/sites/${encodeURIComponent(id)}/ga4/sync`, { method: 'POST', json: body }),

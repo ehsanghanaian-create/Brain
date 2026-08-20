@@ -290,7 +290,7 @@ def gsc_sync_start(site_id: str, body: GscSyncStart | None = None, site: Site = 
         raise ApiError(409, "برای این سایت property سرچ‌کنسول تنظیم نشده است — ابتدا اتصال GSC را تست کنید", code="gsc_not_configured")
     from ...connections.service import _google_client_configured, _token_info
     if not _google_client_configured() or not _token_info().get("present"):
-        raise ApiError(409, "توکن Google موجود نیست؛ یک‌بار «sync-gsc.py --auth-only» را اجرا کنید", code="gsc_not_authorized")
+        raise ApiError(409, "توکن Google موجود نیست؛ برای اتصال حساب گوگل، از بخش «حساب گوگل» در مرکز اتصال‌ها اتصال را انجام دهید", code="gsc_not_authorized")
     return _queue_gsc_sync(site_id, eng, q, days=body.days, reason="manual")
 
 

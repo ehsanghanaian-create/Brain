@@ -114,7 +114,7 @@ class ConnectionsService:
             return {"status": "not_configured", "properties": [], "message": "GOOGLE_CLIENT_ID/SECRET در .env تنظیم نشده است"}
         tok = _token_info()
         if not tok["present"]:
-            return {"status": "not_authorized", "properties": [], "message": "توکن Google وجود ندارد؛ یک‌بار `sync-gsc.py --auth-only` را اجرا کنید"}
+            return {"status": "not_authorized", "properties": [], "message": "توکن Google وجود ندارد؛ برای اتصال حساب گوگل، از بخش «حساب گوگل» در مرکز اتصال‌ها اتصال را انجام دهید"}
         try:
             client = self._gsc_client("_")
             entries = client.list_sites()
@@ -140,7 +140,7 @@ class ConnectionsService:
         tok = _token_info()
         _step(trace, f"OAuth token file {resolve_path(env('GSC_TOKEN_PATH', 'tokens/gsc_token.json')).name}: present={tok['present']} scopes={len(tok['scopes'])} expiry={tok.get('expiry') or '?'}")
         if not tok["present"]:
-            return ConnectionResult("gsc", "not_authorized", "توکن Google وجود ندارد؛ `sync-gsc.py --auth-only` را اجرا کنید", {"property": wanted})
+            return ConnectionResult("gsc", "not_authorized", "توکن Google وجود ندارد؛ برای اتصال حساب گوگل، از بخش «حساب گوگل» در مرکز اتصال‌ها اتصال را انجام دهید", {"property": wanted})
         if GSC_SCOPE not in tok["scopes"]:
             _step(trace, f"missing scope {GSC_SCOPE}")
             return ConnectionResult("gsc", "not_authorized", "توکن فعلی اسکوپ Search Console را ندارد", {"property": wanted, "scopes": tok["scopes"]})
@@ -220,7 +220,7 @@ class ConnectionsService:
             return ConnectionResult("ga4", "not_authorized", "توکن Google وجود ندارد", {"property": pid})
         if GA4_SCOPE not in tok["scopes"]:
             return ConnectionResult("ga4", "not_authorized",
-                                    "توکن فعلی فقط اسکوپ Search Console دارد؛ برای GA4 باید یک‌بار با اسکوپ analytics.readonly مجوز بدهید (فاز بعدی: `sync-ga4.py --auth-only`)",
+                                    "توکن فعلی اسکوپ GA4 را ندارد؛ در بخش «حساب گوگل» دکمهٔ «اتصال دوباره» را بزنید و هر دو دسترسی را تأیید کنید",
                                     {"property": pid, "scopes": tok["scopes"], "required_scope": GA4_SCOPE})
         try:
             report = self._ga4_report(pid) if self._ga4_report else self._run_ga4_probe(pid)

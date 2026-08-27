@@ -85,8 +85,31 @@ def _register_builtin_jobs() -> None:
         from ..ga4.pipeline import Ga4Pipeline
         return Ga4Pipeline(_engine()).run(payload["site_id"], run_id=payload.get("run_id"), days=payload.get("days"), job_id=payload.get("job_id"))
 
+    def _run_plan_generate(payload: dict):
+        """Planner title+keywords (+پرامپت دستی) → workspace AI draft; optionally publish right after."""
+        from .deps import engine as _engine
+        from ..brain.planner.generation import generate_for_plan
+        return generate_for_plan(_engine(), payload["site_id"], payload["plan_id"],
+                                 then_publish=payload.get("then_publish", False), actor=payload.get("actor", "human"))
+
+    def _run_plan_publish(payload: dict):
+        """Publish a plan's latest draft to the site's WordPress (mode-gated writer; generates first if asked)."""
+        from .deps import engine as _engine
+        from ..brain.planner.generation import generate_for_plan
+        from ..integrations.wordpress import WordPressWriter
+        eng2 = _engine()
+        if payload.get("generate_if_missing"):
+            from sqlalchemy import text as _text
+            with eng2.connect() as cx:
+                cid = cx.execute(_text("SELECT content_item_id FROM content_plans WHERE site_id=:s AND id=:p"),
+                                 {"s": payload["site_id"], "p": payload["plan_id"]}).scalar()
+            if not cid:
+                return generate_for_plan(eng2, payload["site_id"], payload["plan_id"], then_publish=True, actor=payload.get("actor", "scheduler"))
+        return WordPressWriter(eng2).publish_plan(payload["site_id"], payload["plan_id"], actor=payload.get("actor", "human"))
+
     for name, fn in (("sync_wordpress", _run_sync_wordpress), ("build_graph", _run_build_graph), ("noop", _noop), ("links_analyze", _run_links_analyze), ("generation_run", _run_generation), ("planner_analyze", _run_planner_analyze),
-                     ("wordpress_sync", _run_wordpress_pipeline), ("gsc_sync", _run_gsc_sync), ("ga4_sync", _run_ga4_sync)):
+                     ("wordpress_sync", _run_wordpress_pipeline), ("gsc_sync", _run_gsc_sync), ("ga4_sync", _run_ga4_sync),
+                     ("plan_generate", _run_plan_generate), ("plan_publish", _run_plan_publish)):
         try:
             q.register(name, fn)
         except Exception:  # noqa: BLE001

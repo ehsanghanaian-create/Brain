@@ -168,6 +168,19 @@ def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> 
 def run_tick(engine: Engine, queue, max_sites: int = 2, stale_after_minutes: int = 120) -> dict[str, Any]:
     """One scheduler pass: recover stale runs, then enqueue the existing jobs for due integrations (staggered)."""
     recovered = recover_stale_runs(engine, stale_after_minutes)
+    # calendar auto-publish: plans whose date/time arrived, on autopilot sites → the mode-gated writer job
+    published: list[dict] = []
+    try:
+        from ..brain.planner.generation import due_autopilot_plans
+    except Exception:  # noqa: BLE001
+        due_autopilot_plans = None
+    if due_autopilot_plans:
+        from ..automation.queue import Job as _Job
+        for d in due_autopilot_plans(engine, limit=3):
+            queue.enqueue(_Job(type="plan_publish", payload={**d, "actor": "scheduler", "generate_if_missing": True}, site_id=d["site_id"]))
+            published.append(d)
+        if published:
+            log.info(f"scheduler: queued calendar publish for {published}")
     with engine.connect() as cx:
         site_ids = [r[0] for r in cx.execute(text("SELECT site_id FROM sites ORDER BY site_id")).all()]
     queued: list[dict[str, str]] = []

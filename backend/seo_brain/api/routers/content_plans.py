@@ -588,3 +588,22 @@ def publishing(site_id: str, pid: int, body: PublishingBody, s: PlannerService =
     if not d:
         raise HTTPException(404, "plan not found")
     return d
+
+
+# --------------------------------------------------------------------------- AI generation + WordPress publish (jobs only)
+from ..deps import job_queue as _job_queue  # noqa: E402
+from ...automation.queue import Job as _Job, JobQueue as _JobQueue  # noqa: E402
+
+
+@router.post("/{plan_id}/generate", status_code=202)
+def plan_generate(site_id: str, plan_id: int, then_publish: bool = False, eng: Engine = Depends(engine), q: _JobQueue = Depends(_job_queue)) -> dict:
+    """تولید پیش‌نویس با هوش مصنوعی از روی همین برنامه (تایتل + کلمات کلیدی + پرامپت دستی metadata.ai) — همیشه job."""
+    run = q.enqueue(_Job(type="plan_generate", payload={"site_id": site_id, "plan_id": plan_id, "then_publish": then_publish, "actor": "human"}, site_id=site_id))
+    return {"status": "queued", "job_id": run.run_id, "then_publish": then_publish}
+
+
+@router.post("/{plan_id}/publish", status_code=202)
+def plan_publish(site_id: str, plan_id: int, eng: Engine = Depends(engine), q: _JobQueue = Depends(_job_queue)) -> dict:
+    """انتشار آخرین پیش‌نویس این برنامه در وردپرس سایت (کلیک انسانی = تأیید؛ در هر حالت انتشار مجاز است)."""
+    run = q.enqueue(_Job(type="plan_publish", payload={"site_id": site_id, "plan_id": plan_id, "actor": "human", "generate_if_missing": True}, site_id=site_id))
+    return {"status": "queued", "job_id": run.run_id}

@@ -75,7 +75,7 @@ def test_meta_and_categories_sync_readonly(c):
     _seed(c)
     m = c.get(f"/api/v1/sites/{SID}/content-plans/meta").json()
     assert [s["key"] for s in m["statuses"]] == ["planned", "researching", "brief_ready", "writing", "review", "approved", "published"]
-    assert m["publishing"]["enabled"] is False and m["ai_generation"]["enabled"] is False and m["views"] == ["table", "kanban", "graph"] and len(m["columns"]) >= 30
+    assert m["publishing"]["enabled"] is True and m["ai_generation"]["enabled"] is True and m["views"] == ["table", "kanban", "graph"] and len(m["columns"]) >= 30
     r = c.post(f"/api/v1/sites/{SID}/content-plans/categories/sync", params={"min_keywords": 2}).json()
     assert r["wordpress"]["terms"] == 3 and r["wordpress"]["created"] == 3 and r["brain"]["categories"] >= 1 and r["wordpress_error"] is None
     tree = c.get(f"/api/v1/sites/{SID}/content-plans/categories", params={"tree": True, "source": "wordpress"}).json()

@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
-import { ApiError, endpoints, type ContentPlan, type PlanCategory, type PlanMeta } from '@/lib/api/client';
+import { ApiError, endpoints, type ContentPlan, type PlanCategory, type PlanMeta, type WsOptions } from '@/lib/api/client';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -20,9 +20,12 @@ export function PlanSheet({ siteId, pid, meta, categories, onClose, onChanged }:
   const [p, setP] = useState<ContentPlan | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [f, setF] = useState<Record<string, any>>({});
-  const load = useCallback(async () => { if (!pid) return; try { const d = await endpoints.plan(siteId, pid); setP(d); setF({ title: d.title, url: d.url ?? '', seo_title: d.seo_title ?? '', meta_description: d.meta_description ?? '', secondary_keywords: (d.secondary_keywords ?? []).join(', '), heading_structure: (d.heading_structure ?? []).map((h) => `H${h.level}: ${h.text}`).join('\n'), target_audience: d.target_audience ?? '', notes: d.notes ?? '', business_value: d.business_value ?? '' }); } catch (e) { err(e); } }, [siteId, pid]);
+  const [ai, setAi] = useState<Record<string, any>>({});
+  const [opts, setOpts] = useState<WsOptions | null>(null);
+  const load = useCallback(async () => { if (!pid) return; try { const d = await endpoints.plan(siteId, pid); setP(d); setF({ title: d.title, url: d.url ?? '', seo_title: d.seo_title ?? '', meta_description: d.meta_description ?? '', secondary_keywords: (d.secondary_keywords ?? []).join(', '), heading_structure: (d.heading_structure ?? []).map((h) => `H${h.level}: ${h.text}`).join('\n'), target_audience: d.target_audience ?? '', notes: d.notes ?? '', business_value: d.business_value ?? '' }); setAi({ ...((d.metadata as any)?.ai ?? {}) }); } catch (e) { err(e); } }, [siteId, pid]);
   useEffect(() => { load(); }, [load]);
   const open = pid !== null;
+  useEffect(() => { if (open) endpoints.wsOptions(siteId).then(setOpts).catch(() => setOpts(null)); }, [open, siteId]);
   async function run(key: string, fn: () => Promise<unknown>, ok?: string) { setBusy(key); try { await fn(); if (ok) toast.success(ok); await load(); onChanged(); } catch (e) { err(e); } finally { setBusy(null); } }
   const rec = (p?.recommendation ?? {}) as any;
   return (
@@ -86,6 +89,30 @@ export function PlanSheet({ siteId, pid, meta, categories, onClose, onChanged }:
             <div className='flex justify-end'><Button size='sm' disabled={!!busy} onClick={() => run('save', () => endpoints.planPatch(siteId, p.id, { title: f.title, url: f.url || null, seo_title: f.seo_title || null, meta_description: f.meta_description || null, target_audience: f.target_audience || null, notes: f.notes || null,
               business_value: f.business_value === '' ? null : Number(f.business_value), secondary_keywords: parseTags(String(f.secondary_keywords)),
               heading_structure: String(f.heading_structure).split('\n').map((l: string) => l.trim()).filter(Boolean).map((l: string) => { const m = l.match(/^h?([23])[:.\-)\s]+(.*)$/i); return m ? { level: Number(m[1]), text: m[2] } : { level: 2, text: l }; }) }), 'ذخیره شد')}>ذخیره فیلدها</Button></div>
+            {/* AI generation + WordPress publish — same parameters as «آزمایش تولید محتوا», stored per-plan in metadata.ai */}
+            <div className='rounded-md border p-2'>
+              <div className='flex flex-wrap items-center gap-2 text-xs'>
+                <span className='font-medium'>تولید با هوش مصنوعی و انتشار در وردپرس</span>
+                <span className='text-muted-foreground'>فقط تایتل و کلمات کلیدی را وارد کنید — بقیه با همان موتور «آزمایش تولید محتوا» ساخته می‌شود و دقیقاً در تاریخ تقویم با دسته انتخابی منتشر می‌شود.</span>
+              </div>
+              <div className='mt-2 grid gap-2 md:grid-cols-3'>
+                <div className='grid gap-1'><Label>ارائه‌دهنده</Label><NativeSelect value={ai.provider ?? ''} onChange={(e) => setAi((s) => ({ ...s, provider: e.target.value || null, model: null }))}><NativeSelectOption value=''>پیش‌فرض ({opts?.default?.provider ?? 'auto'})</NativeSelectOption>{(opts?.providers ?? []).filter((x) => x.name !== 'echo').map((x) => <NativeSelectOption key={x.name} value={x.name}>{x.name} ({x.kind_label ?? x.kind})</NativeSelectOption>)}</NativeSelect></div>
+                <div className='grid gap-1'><Label>مدل</Label><Input value={ai.model ?? ''} onChange={(e) => setAi((s) => ({ ...s, model: e.target.value || null }))} list='plan-ai-models' dir='ltr' placeholder={(opts?.providers ?? []).find((x) => x.name === ai.provider)?.default_model ?? opts?.default?.model ?? ''} /><datalist id='plan-ai-models'>{((opts?.providers ?? []).find((x) => x.name === ai.provider)?.models ?? []).map((m) => <option key={m.model_id} value={m.model_id}>{m.display}</option>)}</datalist></div>
+                <div className='grid gap-1'><Label>لحن</Label><NativeSelect value={ai.tone ?? ''} onChange={(e) => setAi((s) => ({ ...s, tone: e.target.value || null }))}><NativeSelectOption value=''>رسمی (پیش‌فرض)</NativeSelectOption>{(opts?.tones ?? []).map((t) => <NativeSelectOption key={t.key} value={t.key}>{t.fa}</NativeSelectOption>)}</NativeSelect></div>
+                <div className='grid gap-1'><Label>نوع محتوا</Label><NativeSelect value={ai.content_type ?? ''} onChange={(e) => setAi((s) => ({ ...s, content_type: e.target.value || null }))}><NativeSelectOption value=''>مقاله (پیش‌فرض)</NativeSelectOption>{(opts?.content_types ?? []).map((t) => <NativeSelectOption key={t.key} value={t.key}>{t.fa}</NativeSelectOption>)}</NativeSelect></div>
+                <div className='grid gap-1'><Label>تعداد کلمات</Label><Input type='number' min={150} max={6000} value={ai.word_count ?? ''} onChange={(e) => setAi((s) => ({ ...s, word_count: e.target.value ? Number(e.target.value) : null }))} dir='ltr' placeholder='1200' /></div>
+                <div className='grid gap-1'><Label>مخاطب (اختیاری، جای «مخاطب هدف»)</Label><Input value={ai.audience ?? ''} onChange={(e) => setAi((s) => ({ ...s, audience: e.target.value || null }))} placeholder={p.target_audience ?? ''} /></div>
+                <div className='grid gap-1 md:col-span-3'><Label>پرامپت دستی (دستورالعمل اضافه برای مدل)</Label><Textarea rows={3} value={ai.prompt ?? ''} onChange={(e) => setAi((s) => ({ ...s, prompt: e.target.value || null }))} placeholder='مثلاً: از مثال‌های واقعی تهران استفاده کن؛ شماره تماس را در پاراگراف اول بیاور…' /></div>
+              </div>
+              <div className='mt-2 flex flex-wrap items-center gap-1'>
+                <Button size='sm' variant='outline' disabled={!!busy} onClick={() => run('ai-save', () => endpoints.planPatch(siteId, p.id, { metadata: { ...(p.metadata ?? {}), ai: Object.fromEntries(Object.entries(ai).filter(([, v]) => v !== null && v !== '')) } }), 'تنظیمات AI ذخیره شد')}>{busy === 'ai-save' ? '…' : 'ذخیره تنظیمات AI'}</Button>
+                <Button size='sm' disabled={!!busy} onClick={() => run('gen', async () => { await endpoints.planPatch(siteId, p.id, { metadata: { ...(p.metadata ?? {}), ai: Object.fromEntries(Object.entries(ai).filter(([, v]) => v !== null && v !== '')) } }); const r = await endpoints.planGenerate(siteId, p.id); toast.info(`تولید پیش‌نویس در صف اجرا قرار گرفت (${r.job_id}) — نتیجه در رویدادها و مغز محتوا ظاهر می‌شود`); })}>{busy === 'gen' ? '…' : 'تولید پیش‌نویس'}</Button>
+                <Button size='sm' variant='secondary' disabled={!!busy} onClick={() => { if (confirm(`محتوای این برنامه در وردپرس سایت منتشر شود؟${p.publish_date ? `\nتاریخ انتشار: ${p.publish_date}${p.publish_time ? ` ${p.publish_time}` : ''}` : ''}${p.category?.name ? `\nدسته: ${p.category.name}` : ''}\n(اگر پیش‌نویسی نباشد، اول تولید می‌شود)`)) run('pub-now', async () => { const r = await endpoints.planPublish(siteId, p.id); toast.info(`انتشار در صف اجرا قرار گرفت (${r.job_id})`); }); }}>{busy === 'pub-now' ? '…' : 'انتشار در وردپرس'}</Button>
+                {p.publishing?.wp_post_id && <Badge variant='outline' dir='ltr'><a className='underline' href={p.publishing.link} target='_blank' rel='noreferrer'>منتشرشده · پست #{p.publishing.wp_post_id}</a></Badge>}
+                <Button size='sm' variant='ghost' disabled={!!busy} onClick={() => run('cap', async () => { const r = await endpoints.wpPublishCapability(siteId); (r.can_publish ? toast.success : toast.warning)(r.message); })}>{busy === 'cap' ? '…' : 'بررسی دسترسی وردپرس'}</Button>
+              </div>
+              <p className='text-muted-foreground mt-1 text-xs'>انتشار خودکار در تاریخ تقویم فقط وقتی انجام می‌شود که حالت سایت «خودکار» باشد؛ دکمه «انتشار در وردپرس» همیشه با کلیک شما (تأیید انسانی) کار می‌کند.</p>
+            </div>
             {/* keywords */}
             <div className='rounded-md border p-2 text-xs'>
               <div className='font-medium'>کلمات کلیدی ({p.keywords.length})</div>
@@ -97,9 +124,9 @@ export function PlanSheet({ siteId, pid, meta, categories, onClose, onChanged }:
               <div className='rounded-md border p-2'><div className='font-medium'>اهداف لینک داخلی ({p.link_targets.length})</div><ul className='mt-1 space-y-0.5'>{p.link_targets.slice(0, 10).map((l, i) => <li key={i} className='truncate' dir='auto'>{l.direction === 'from' ? '←' : '→'} {l.title} <span className='text-muted-foreground'>· {l.reason_fa} · {l.score}</span></li>)}</ul></div>
             </div>
             {/* generation jobs + publishing metadata + events */}
-            <details className='rounded-md border p-2 text-xs'><summary className='cursor-pointer'>کارهای تولید AI ({p.generation_jobs?.length ?? 0}) · متادیتای انتشار (غیرفعال) · رویدادها ({p.events?.length ?? 0})</summary>
+            <details className='rounded-md border p-2 text-xs'><summary className='cursor-pointer'>کارهای تولید AI ({p.generation_jobs?.length ?? 0}) · متادیتای انتشار · رویدادها ({p.events?.length ?? 0})</summary>
               <ul className='mt-1 space-y-0.5'>{(p.generation_jobs ?? []).map((j: any) => <li key={j.id}>#{j.id} {j.kind} · {j.status}{j.generation_run_id ? ` · run ${j.generation_run_id}` : ''} · {j.created_at.slice(0, 16)}</li>)}</ul>
-              <div className='mt-2 flex flex-wrap items-end gap-2'><div className='grid gap-1'><Label>وضعیت هدف در وردپرس</Label><NativeSelect value={p.publishing?.wp_status ?? ''} onChange={(e) => run('pub', () => endpoints.planPublishing(siteId, p.id, { target: 'wordpress', wp_status: e.target.value }), 'متادیتای انتشار ذخیره شد (انتشار انجام نمی‌شود)')}><NativeSelectOption value=''>—</NativeSelectOption><NativeSelectOption value='draft'>پیش‌نویس</NativeSelectOption><NativeSelectOption value='pending'>در انتظار بازبینی</NativeSelectOption><NativeSelectOption value='future'>زمان‌بندی‌شده</NativeSelectOption></NativeSelect></div><span className='text-muted-foreground'>انتشار غیرفعال است — این فقط متادیتاست.</span></div>
+              <div className='mt-2 flex flex-wrap items-end gap-2'><div className='grid gap-1'><Label>وضعیت هدف در وردپرس</Label><NativeSelect value={p.publishing?.wp_status ?? ''} onChange={(e) => run('pub', () => endpoints.planPublishing(siteId, p.id, { target: 'wordpress', wp_status: e.target.value }), 'متادیتای انتشار ذخیره شد')}><NativeSelectOption value=''>—</NativeSelectOption><NativeSelectOption value='draft'>پیش‌نویس</NativeSelectOption><NativeSelectOption value='pending'>در انتظار بازبینی</NativeSelectOption><NativeSelectOption value='future'>زمان‌بندی‌شده</NativeSelectOption></NativeSelect></div><span className='text-muted-foreground'>انتشار واقعی با دکمه «انتشار در وردپرس» در بخش هوش مصنوعی انجام می‌شود.</span></div>
               <ul className='text-muted-foreground mt-2 space-y-0.5'>{(p.events ?? []).slice(0, 15).map((e: any) => <li key={e.id}>{e.created_at.slice(0, 16).replace('T', ' ')} · {e.event}{e.to_value ? ` → ${e.to_value}` : ''} · {e.actor}</li>)}</ul>
             </details>
           </div>

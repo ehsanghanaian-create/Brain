@@ -51,8 +51,8 @@ class PlannerService:
                 "content_gaps": [{"key": k, "fa": GAP_FA[k]} for k in CONTENT_GAPS], "keyword_roles": [{"key": k, "fa": ROLE_FA[k]} for k in KEYWORD_ROLES],
                 "category_sources": [{"key": k, "fa": CATEGORY_SOURCE_FA[k]} for k in CATEGORY_SOURCES], "recommendation_kinds": [{"key": k, "fa": RECOMMENDATION_FA[k]} for k in RECOMMENDATION_KINDS],
                 "generation_job_kinds": list(GEN_JOB_KINDS), "columns": COLUMNS, "export_columns": EXPORT_COLUMNS, "views": ["table", "kanban", "graph"],
-                "publishing": {"enabled": False, "note": "انتشار غیرفعال است — فقط متادیتای انتشار آماده می‌شود؛ انتشار واقعی توسط انسان در وردپرس انجام می‌شود"},
-                "ai_generation": {"enabled": False, "note": "لایه تولید AI فقط آماده‌سازی می‌شود: برنامه → کار تولید → آیتم محتوا → پیش‌نویس (اجرا در استودیوی AI با تأیید انسانی)"}}
+                "publishing": {"enabled": True, "note": "انتشار وردپرس از طریق نویسنده فاز ۱۶: دکمه «انتشار» (اقدام انسانی) در هر حالتی مجاز است؛ انتشار زمان‌بندی‌شده تقویم فقط در حالت «خودکار» سایت اجرا می‌شود"},
+                "ai_generation": {"enabled": True, "note": "تولید پیش‌نویس با همان موتور «آزمایش تولید محتوا»: تایتل + کلمات کلیدی + پارامترهای metadata.ai (پرامپت دستی، لحن، طول، provider/model) → پیش‌نویس نسخه‌دار روی آیتم محتوا"}}
 
     # ------------------------------------------------------------------ enrichment
     def enrich(self, plans: list[ContentPlan], ctx: PlannerContext | None = None) -> list[dict[str, Any]]:

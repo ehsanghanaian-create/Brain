@@ -44,6 +44,8 @@ export function ConnectionTester({
 }) {
   const [value, setValue] = useState(initialValue ?? '');
   const [wpUser, setWpUser] = useState(initialAuth?.username ?? '');
+  const [cap, setCap] = useState<{ configured: boolean; can_publish: boolean; roles?: string[]; message: string } | null>(null);
+  const [capBusy, setCapBusy] = useState(false);
   const [wpPass, setWpPass] = useState('');
   const [authInfo, setAuthInfo] = useState<WpAuthStatus | null>(initialAuth ?? null);
   const [busy, setBusy] = useState(false);
@@ -150,7 +152,13 @@ export function ConnectionTester({
               <Button type='button' variant='ghost' size='sm' disabled={busy} onClick={async () => { setBusy(true); try { const r = await endpoints.testConnection(siteId, kind, value || null, { clear_wp_credentials: true }); setResult(r); setAuthInfo({ configured: false, username: null, key_hint: null, source: null }); setWpUser(''); } catch (e) { setError(String(e)); } finally { setBusy(false); } }}>حذف اعتبارنامه</Button>
             )}
           </div>
-          <p className='text-muted-foreground mt-1 text-[11px]'>وردپرس → کاربران → پروفایل → Application Passwords → یک رمز بسازید و اینجا وارد کنید. فقط برای «تست دسترسی» ارسال می‌شود؛ با SecretStore رمزنگاری شده ذخیره می‌شود، هرگز در لاگ/پاسخ ظاهر نمی‌شود و SEO Brain هیچ‌گاه در وردپرس چیزی نمی‌نویسد.</p>
+          <p className='text-muted-foreground mt-1 text-[11px]'>وردپرس → کاربران → پروفایل → Application Passwords → یک رمز بسازید و اینجا وارد کنید. فقط برای «تست دسترسی» ارسال می‌شود؛ با SecretStore رمزنگاری شده ذخیره می‌شود و هرگز در لاگ/پاسخ ظاهر نمی‌شود. انتشار فقط از مسیر نویسندهٔ فاز ۱۶ (دکمه انتشار در تقویم/برنامه یا حالت «خودکار») انجام می‌شود.</p>
+          <div className='mt-2 flex flex-wrap items-center gap-2'>
+            <Button type='button' variant='outline' size='sm' disabled={busy || capBusy} onClick={async () => { setCapBusy(true); setCap(null); try { setCap(await endpoints.wpPublishCapability(siteId)); } catch (e) { setError(String(e)); } finally { setCapBusy(false); } }} data-testid='wp-publish-capability'>
+              {capBusy ? '…' : 'بررسی دسترسی انتشار'}
+            </Button>
+            {cap && <span className={`text-xs ${cap.can_publish ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>{cap.message}{cap.roles?.length ? <span dir='ltr'> · {cap.roles.join(', ')}</span> : null}</span>}
+          </div>
         </div>
       )}
       {kind === 'ga4' && ga4Props && ga4Props.status !== 'ok' && (

@@ -366,6 +366,13 @@ def auto_sync_put(site_id: str, body: AutoSyncUpdate, site: Site = Depends(requi
     return {"site_id": site_id, **plan_for_site(eng, site_id)}
 
 
+@router.get("/{site_id}/wordpress/publish-capability")
+def wordpress_publish_capability(site_id: str, site: Site = Depends(require_site), eng: Engine = Depends(engine)) -> dict:
+    """آیا Application Password ذخیره‌شده اجازه انتشار دارد؟ (users/me?context=edit — بدون هیچ نوشتنی)."""
+    from ...integrations.wordpress import WordPressWriter
+    return {"site_id": site_id, "mode": site.mode, **WordPressWriter(eng).capability(site_id)}
+
+
 gsc_router = APIRouter(prefix="/connections", tags=["sites"])
 
 

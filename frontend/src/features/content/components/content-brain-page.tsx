@@ -11,7 +11,7 @@ import { ApiError, endpoints, type ContentBoard, type ContentItem, type ContentS
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { PRIORITY_FA, STATUS_COLOR, STATUS_FA, STATUS_ORDER, faNum } from '../constants';
+import { PRIORITY_FA, STATUS_COLOR, STATUS_FA, STATUS_ORDER, faNum, jalaliNumeric } from '../constants';
 import { ContentEditor } from './content-editor';
 import { AnalyticsPanel } from './analytics-panel';
 
@@ -94,7 +94,7 @@ export function ContentBrainPage({ sites, initialSiteId, initialContentId = null
                       {it.target_keyword && <div className='text-muted-foreground truncate'>🔑 {it.target_keyword}</div>}
                       <div className='mt-1 flex flex-wrap items-center gap-1'>
                         {it.priority && <Badge variant={it.priority === 'high' ? 'default' : 'outline'} className='text-[10px]'>{PRIORITY_FA[it.priority]}</Badge>}
-                        {it.publish_date && <span className='text-muted-foreground' dir='ltr'>{it.publish_date}</span>}
+                        {it.publish_date && <span className='text-muted-foreground' dir='ltr' title={it.publish_date}>{jalaliNumeric(it.publish_date)}</span>}
                         {it.has_brief && <span title='بریف دارد'>📄</span>}
                         {it.ai_provider && <Badge variant='secondary' className='text-[10px]' title={`پیش‌نویس تولیدشده با AI: ${it.ai_provider}/${it.ai_model ?? ''}`} dir='ltr'>✨ {it.ai_provider}</Badge>}
                         {it.latest_score != null && <span className='rounded px-1 text-[10px] text-white' style={{ background: it.latest_score >= 80 ? '#16a34a' : it.latest_score >= 60 ? '#f59e0b' : '#dc2626' }} title={`امتیاز کیفیت · ${it.review_status === 'ready' ? 'آماده' : it.review_status === 'changes_requested' ? 'نیاز به اصلاح' : 'بازبینی نشده'}`}>{Math.round(it.latest_score)}{it.review_status === 'ready' ? ' ✓' : ''}</span>}
@@ -122,7 +122,7 @@ export function ContentBrainPage({ sites, initialSiteId, initialContentId = null
                   <TableRow key={it.id} className='cursor-pointer' onClick={() => openEditor(it.id)}>
                     <TableCell className='font-medium'>{it.title}</TableCell><TableCell>{it.target_keyword ?? '—'}</TableCell><TableCell>{it.topic ?? '—'}</TableCell>
                     <TableCell><Badge style={{ background: STATUS_COLOR[it.status] }}>{it.status_fa}</Badge></TableCell>
-                    <TableCell>{it.priority ? PRIORITY_FA[it.priority] : '—'}</TableCell><TableCell dir='ltr'>{it.publish_date ?? '—'}{it.publish_time ? ` ${it.publish_time}` : ''}</TableCell>
+                    <TableCell>{it.priority ? PRIORITY_FA[it.priority] : '—'}</TableCell><TableCell dir='ltr' title={it.publish_date ?? undefined}>{it.publish_date ? jalaliNumeric(it.publish_date) : '—'}{it.publish_time ? ` ${it.publish_time}` : ''}</TableCell>
                     <TableCell dir='ltr'>{it.ai_provider ?? '—'}</TableCell><TableCell className='max-w-48 truncate' dir='ltr'>{it.url ?? '—'}</TableCell><TableCell>{it.has_brief ? '✓' : '—'}</TableCell>
                   </TableRow>
                 ))}

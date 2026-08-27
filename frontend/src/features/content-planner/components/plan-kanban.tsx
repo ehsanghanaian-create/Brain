@@ -5,6 +5,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { ApiError, endpoints, type ContentPlan, type PlanCategory, type PlanStatus } from '@/lib/api/client';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { jalaliNumeric } from '@/features/content/constants';
 import { PAGE_TYPE_FA, PLAN_STATUS_COLOR, PLAN_STATUS_FA, PRIORITY_COLOR, fa } from '../constants';
 
 export function PlanKanban({ siteId, categories, onOpen, refreshKey, onChanged }: { siteId: string; categories: PlanCategory[]; onOpen: (pid: number) => void; refreshKey: number; onChanged: () => void }) {
@@ -31,7 +32,7 @@ export function PlanKanban({ siteId, categories, onOpen, refreshKey, onChanged }
                 <div key={p.id} role='button' tabIndex={0} draggable onDragStart={() => setDrag(p)} onClick={() => onOpen(p.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onOpen(p.id); }} className='bg-card cursor-pointer rounded border p-1.5 text-xs shadow-sm hover:shadow' style={{ borderInlineStartWidth: 3, borderInlineStartColor: PRIORITY_COLOR[p.priority ?? ''] ?? '#e5e7eb' }}>
                   <div className='font-medium'>{p.title}</div>
                   <div className='text-muted-foreground mt-0.5 flex flex-wrap gap-1'>{p.primary_keyword && <span>🔑 {p.primary_keyword}</span>}{p.page_type && <span>· {PAGE_TYPE_FA[p.page_type]}</span>}{p.category && <span>· {p.category.name}</span>}</div>
-                  <div className='mt-1 flex flex-wrap items-center gap-1'>{p.publish_date && <Badge variant='outline' dir='ltr' className='text-[10px]'>{p.publish_date}</Badge>}{p.priority_score != null && <Badge variant='outline' className='text-[10px]'>اولویت {p.priority_score}</Badge>}{p.content_item?.latest_score != null && <Badge variant='secondary' className='text-[10px]'>امتیاز {p.content_item.latest_score}</Badge>}{p.content_gap === 'full' && <Badge className='text-[10px]'>شکاف</Badge>}{(p.cannibalization_risk ?? 0) >= 0.5 && <Badge variant='destructive' className='text-[10px]'>هم‌نوع‌خواری</Badge>}</div>
+                  <div className='mt-1 flex flex-wrap items-center gap-1'>{p.publish_date && <Badge variant='outline' dir='ltr' className='text-[10px]' title={p.publish_date}>{jalaliNumeric(p.publish_date)}</Badge>}{p.priority_score != null && <Badge variant='outline' className='text-[10px]'>اولویت {p.priority_score}</Badge>}{p.content_item?.latest_score != null && <Badge variant='secondary' className='text-[10px]'>امتیاز {p.content_item.latest_score}</Badge>}{p.content_gap === 'full' && <Badge className='text-[10px]'>شکاف</Badge>}{(p.cannibalization_risk ?? 0) >= 0.5 && <Badge variant='destructive' className='text-[10px]'>هم‌نوع‌خواری</Badge>}</div>
                 </div>
               ))}
             </div>

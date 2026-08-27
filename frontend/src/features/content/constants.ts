@@ -64,3 +64,22 @@ export function jalaliMonthDays(anchor: Date): { days: Date[]; y: number; m: num
 }
 export const faNum = new Intl.NumberFormat('fa-IR');
 export const faYear = new Intl.NumberFormat('fa-IR', { useGrouping: false });
+
+/** Inverse via the same ICU calendar: Gregorian ISO day for a Jalali date; null if invalid (e.g. ۳۰ اسفند سال غیرکبیسه). */
+export function jalaliToIso(jy: number, jm: number, jd: number): string | null {
+  if (jy < 1300 || jy > 1500 || jm < 1 || jm > 12 || jd < 1 || jd > 31) return null;
+  let cur = utcDate(`${jy + 621}-03-15`);                                   // چند روز قبل از نوروز همان سال
+  for (let i = 0; i < 12 && !(jalali(cur).m === 1 && jalali(cur).d === 1); i += 1) cur = addDays(cur, 1);
+  const g = addDays(cur, (jm <= 7 ? (jm - 1) * 31 : 186 + (jm - 7) * 30) + jd - 1);
+  const back = jalali(g);
+  return back.y === jy && back.m === jm && back.d === jd ? iso(g) : null;
+}
+const toLatinDigits = (s: string) => s.replace(/[۰-۹]/g, (c) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(c))).replace(/[٠-٩]/g, (c) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(c)));
+/** «۱۴۰۵/۶/۵» یا 1405-06-05 (ارقام فارسی/عربی/لاتین، جداکننده / - . فاصله) → ISO میلادی، وگرنه null. */
+export function parseJalali(text: string): string | null {
+  const m = toLatinDigits(text.trim()).match(/^(\d{4})[/\-.\s](\d{1,2})[/\-.\s](\d{1,2})$/);
+  return m ? jalaliToIso(+m[1], +m[2], +m[3]) : null;
+}
+const fa2 = (n: number) => faYear.format(n).padStart(2, '۰');
+export const jalaliNumeric = (isoDay?: string | null): string => { if (!isoDay) return ''; const j = jalali(utcDate(isoDay)); return `${faYear.format(j.y)}/${fa2(j.m)}/${fa2(j.d)}`; };
+export const jalaliLong = (isoDay?: string | null): string => { if (!isoDay) return ''; const j = jalali(utcDate(isoDay)); return `${faNum.format(j.d)} ${JMONTHS[j.m - 1]} ${faYear.format(j.y)}`; };

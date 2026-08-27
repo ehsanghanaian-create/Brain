@@ -89,7 +89,7 @@ export function CalendarPage({ sites, initialSiteId }: { sites: Site[]; initialS
               <TableBody>
                 {scheduled.map((it: ContentItem) => (
                   <TableRow key={it.id} className='cursor-pointer' onClick={() => setEditing(it.id)}>
-                    <TableCell dir='ltr'>{it.publish_date} <span className='text-muted-foreground'>({(() => { const j = jalali(new Date(it.publish_date + 'T00:00:00Z')); return `${faNum.format(j.d)} ${JMONTHS[j.m - 1]}`; })()})</span></TableCell>
+                    <TableCell title={it.publish_date ?? undefined}>{(() => { const j = jalali(new Date(it.publish_date + 'T00:00:00Z')); return `${faNum.format(j.d)} ${JMONTHS[j.m - 1]} ${faYear.format(j.y)}`; })()}</TableCell>
                     <TableCell dir='ltr'>{it.publish_time ?? '—'}</TableCell><TableCell className='font-medium'>{it.title}</TableCell><TableCell>{it.target_keyword ?? '—'}</TableCell>
                     <TableCell><Badge style={{ background: STATUS_COLOR[it.status] }}>{it.status_fa}</Badge></TableCell><TableCell>{it.priority ?? '—'}</TableCell><TableCell className='max-w-48 truncate' dir='ltr'>{it.url ?? '—'}</TableCell>
                   </TableRow>

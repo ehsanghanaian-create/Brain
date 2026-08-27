@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { INTENT_FA, PRIORITY_FA, STATUS_COLOR, STATUS_FA, STATUS_ORDER } from '../constants';
+import { JalaliDateInput } from './jalali-date-input';
 import { DraftPanel } from './draft-panel';
 
 export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: string; cid: number | 'new' | null; onClose: () => void; onChanged: () => void }) {
@@ -118,7 +119,7 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
               <div className='grid gap-1.5'><Label>موضوع</Label><Input value={f.topic ?? ''} onChange={set('topic')} /></div>
               <div className='grid gap-1.5'><Label>اینتنت</Label><NativeSelect value={f.intent ?? ''} onChange={set('intent')}><NativeSelectOption value=''>—</NativeSelectOption>{Object.entries(INTENT_FA).map(([k, v]) => <NativeSelectOption key={k} value={k}>{v}</NativeSelectOption>)}</NativeSelect></div>
               <div className='grid gap-1.5'><Label>اولویت</Label><NativeSelect value={f.priority ?? ''} onChange={set('priority')}><NativeSelectOption value=''>—</NativeSelectOption>{Object.entries(PRIORITY_FA).map(([k, v]) => <NativeSelectOption key={k} value={k}>{v}</NativeSelectOption>)}</NativeSelect></div>
-              <div className='grid gap-1.5'><Label>تاریخ انتشار</Label><Input type='date' value={f.publish_date ?? ''} onChange={set('publish_date')} dir='ltr' /></div>
+              <div className='grid gap-1.5'><Label>تاریخ انتشار (شمسی)</Label><JalaliDateInput value={f.publish_date || null} onChange={(d) => setF((s: any) => ({ ...s, publish_date: d ?? '' }))} /></div>
               <div className='grid gap-1.5'><Label>ساعت</Label><Input type='time' value={f.publish_time ?? ''} onChange={set('publish_time')} dir='ltr' /></div>
               <div className='grid gap-1.5'><Label>ارائه‌دهنده AI</Label><Input value={f.ai_provider ?? ''} onChange={set('ai_provider')} placeholder='مثلاً Claude' /></div>
               <div className='grid gap-1.5'><Label>مدل</Label><Input value={f.ai_model ?? ''} onChange={set('ai_model')} dir='ltr' /></div>

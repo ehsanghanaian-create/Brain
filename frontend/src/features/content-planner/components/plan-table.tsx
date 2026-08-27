@@ -64,8 +64,8 @@ export function PlanTable({ siteId, meta, categories, onOpen, refreshKey, onChan
         <span className='ms-auto flex flex-wrap gap-1'>
           <Button size='sm' variant='outline' onClick={() => setColsOpen(true)}>ستون‌ها ({visible.length})</Button>
           <Button size='sm' variant='outline' onClick={() => setImportOpen(true)}>ورود CSV/XLSX/Sheet</Button>
-          <Button size='sm' variant='outline' nativeButton={false} render={<a href={endpoints.planExportUrl(siteId, 'csv', { status: filters.status, category_id: filters.category_id, page_type: filters.page_type, intent: filters.intent, priority: filters.priority, q: filters.q, columns: visible.join(',') })} />}>خروجی CSV</Button>
-          <Button size='sm' variant='outline' nativeButton={false} render={<a href={endpoints.planExportUrl(siteId, 'xlsx', { status: filters.status, category_id: filters.category_id, columns: visible.join(',') })} />}>خروجی XLSX</Button>
+          <Button size='sm' variant='outline' nativeButton={false} render={<a href={endpoints.planExportUrl(siteId, 'csv', { status: filters.status, category_id: filters.category_id, page_type: filters.page_type, intent: filters.intent, priority: filters.priority, q: filters.q, columns: visible.join(',') })} aria-label='دریافت خروجی CSV' />}>خروجی CSV</Button>
+          <Button size='sm' variant='outline' nativeButton={false} render={<a href={endpoints.planExportUrl(siteId, 'xlsx', { status: filters.status, category_id: filters.category_id, columns: visible.join(',') })} aria-label='دریافت خروجی XLSX' />}>خروجی XLSX</Button>
           <Button size='sm' variant='secondary' onClick={async () => { try { const r = await endpoints.planAnalyzeAll(siteId); toast.success(r.mode === 'job' ? `تحلیل در پس‌زمینه (${r.run_id})` : `تحلیل ${r.analyzed} برنامه و ${r.categories} دسته انجام شد`); load(); onChanged(); } catch (e) { err(e); } }}>تحلیل همه با مغز</Button>
         </span>
       </div>
@@ -95,7 +95,7 @@ export function PlanTable({ siteId, meta, categories, onOpen, refreshKey, onChan
           <thead className='bg-muted/60 sticky top-0 z-10'>
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
-                <th className='w-8 p-1'><input type='checkbox' checked={allIds.length > 0 && allIds.every((i) => selected.has(i))} onChange={(e) => setSelected(e.target.checked ? new Set(allIds) : new Set())} /></th>
+                <th className='w-8 p-1'><input aria-label='انتخاب همه برنامه‌ها' type='checkbox' checked={allIds.length > 0 && allIds.every((i) => selected.has(i))} onChange={(e) => setSelected(e.target.checked ? new Set(allIds) : new Set())} /></th>
                 {hg.headers.map((h) => (
                   <th key={h.id} className='whitespace-nowrap p-1.5 text-start font-medium select-none' onClick={h.column.getCanSort() ? () => setSorting([{ id: h.column.id, desc: sorting[0]?.id === h.column.id ? !sorting[0].desc : true }]) : undefined} style={{ cursor: h.column.getCanSort() ? 'pointer' : 'default' }}>
                     {flexRender(h.column.columnDef.header, h.getContext())}{sorting[0]?.id === h.column.id ? (sorting[0].desc ? ' ↓' : ' ↑') : ''}
@@ -107,7 +107,7 @@ export function PlanTable({ siteId, meta, categories, onOpen, refreshKey, onChan
           <tbody>
             {table.getRowModel().rows.map((row) => (
               <tr key={row.id} className={`border-t ${selected.has(row.original.id) ? 'bg-accent/40' : 'hover:bg-accent/20'}`}>
-                <td className='p-1 text-center'><input type='checkbox' checked={selected.has(row.original.id)} onChange={(e) => setSelected((s) => { const n = new Set(s); e.target.checked ? n.add(row.original.id) : n.delete(row.original.id); return n; })} /></td>
+                <td className='p-1 text-center'><input aria-label={`انتخاب ${row.original.title}`} type='checkbox' checked={selected.has(row.original.id)} onChange={(e) => setSelected((s) => { const n = new Set(s); e.target.checked ? n.add(row.original.id) : n.delete(row.original.id); return n; })} /></td>
                 {row.getVisibleCells().map((cell) => <td key={cell.id} className='max-w-72 p-1 align-top'>{flexRender(cell.column.columnDef.cell, cell.getContext())}</td>)}
               </tr>
             ))}
@@ -158,7 +158,7 @@ function Cell({ plan, col, editing, onEdit, onDone, onPatch, meta, categories, c
 
 function InlineText({ value, onSave, onDone, type = 'text' }: { value: unknown; onSave: (v: string) => void; onDone: () => void; type?: string }) {
   const [v, setV] = useState(value == null ? '' : String(value));
-  return <input autoFocus type={type} value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { onSave(v); onDone(); } if (e.key === 'Escape') onDone(); }} onBlur={() => { onSave(v); onDone(); }} className='h-7 w-full rounded border bg-background px-1' dir='auto' />;
+  return <input aria-label='ویرایش مقدار' type={type} value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { onSave(v); onDone(); } if (e.key === 'Escape') onDone(); }} onBlur={() => { onSave(v); onDone(); }} className='h-7 w-full rounded border bg-background px-1' dir='auto' />;
 }
 
 // ---------------------------------------------------------------- import dialog (file + Google Sheet source)

@@ -1,0 +1,37 @@
+# BEGIN SEO-BRAIN
+seo.gearboxemdad.com {
+	encode zstd gzip
+
+	@ads_collector path /api/ads-data/collect
+	handle @ads_collector {
+		header Cache-Control "no-store, private, max-age=0"
+		reverse_proxy seo-brain-frontend:3000 {
+			header_up X-Collector-Client-IP {http.request.header.X-Real-IP}
+			header_up X-Collector-XFF {http.request.header.X-Forwarded-For}
+			header_up X-Collector-Proxy-IP {remote_host}
+		}
+	}
+
+	handle {
+		basic_auth {
+			saleh {$SEO_BRAIN_BASIC_AUTH_HASH}
+		}
+
+		reverse_proxy seo-brain-frontend:3000
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Robots-Tag "noindex, nofollow, noarchive"
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+# END SEO-BRAIN

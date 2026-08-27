@@ -144,10 +144,10 @@ def get_credentials(interactive: bool = True):
 
 class GscClient:
     def __init__(self, site_id: str, interactive: bool = True, save_raw: bool = True):
-        from googleapiclient.discovery import build
+        from ..common.google_http import build_google_service
         self.site_id = site_id
         self.creds = get_gsc_credentials(interactive=interactive)
-        self.svc = build("searchconsole", "v1", credentials=self.creds, cache_discovery=False)
+        self.svc = build_google_service("searchconsole", "v1", self.creds)
         self.save_raw = save_raw
         self.raw_dir: Path = raw_data_dir() / "gsc" / site_id
         if save_raw:

@@ -21,7 +21,10 @@ def env(tmp_path, monkeypatch):
     monkeypatch.delenv("API_TOKEN", raising=False)
     monkeypatch.setattr(sites_router, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr("seo_brain.connections.service._google_client_configured", lambda: True)
-    monkeypatch.setattr("seo_brain.connections.service._token_info", lambda: {"present": True, "scopes": []})
+    monkeypatch.setattr("seo_brain.connections.service._token_info", lambda: {
+        "present": True,
+        "scopes": ["https://www.googleapis.com/auth/webmasters.readonly"],
+    })
     app = create_app(); app.dependency_overrides[deps.engine] = lambda: eng
     c = TestClient(app)
     r = c.post("/api/v1/sites", json={"site_id": SID, "name": "Demo", "canonical_url": "https://demo.example/",

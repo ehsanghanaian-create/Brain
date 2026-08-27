@@ -1,17 +1,5 @@
-import { Vazirmatn, Geist_Mono } from 'next/font/google';
-
-import { cn } from '@/lib/utils';
-
-// Persian-first UI: Vazirmatn covers Arabic-script + Latin glyphs; Geist Mono for code/ids.
-const fontSans = Vazirmatn({
-  subsets: ['arabic', 'latin'],
-  variable: '--font-vazirmatn',
-  display: 'swap'
-});
-
-const fontMono = Geist_Mono({
-  subsets: ['latin'],
-  variable: '--font-mono'
-});
-
-export const fontVariables = cn(fontSans.variable, fontMono.variable);
+// Keep production builds network-independent. The previous next/font/google
+// imports downloaded Vazirmatn and Geist during every build, which made Docker
+// builds fail whenever Google Fonts was unavailable. The CSS theme already has
+// Persian-friendly system fallbacks, so no runtime class is required here.
+export const fontVariables = '';

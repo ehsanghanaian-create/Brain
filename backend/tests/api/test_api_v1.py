@@ -1,6 +1,9 @@
 """API tests against an isolated temporary database (no dependency on data/seo.db)."""
+import json
+
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from seo_brain.api import deps
 from seo_brain.api.main import create_app
@@ -79,6 +82,37 @@ def test_graph_endpoints_neo4j_shape(client):
     assert [x["id"] for x in sr["nodes"]] == ["query:امداد"] and "fts" in sr
     assert client.get("/api/v1/sites/demo/graph/node/nope").status_code == 404
     assert client.get("/api/v1/sites/demo/graph/orphans").status_code == 200
+
+
+def test_portfolio_overview_is_one_consistent_snapshot(client):
+    _seed(client)
+    body = client.get("/api/v1/portfolio/overview").json()
+    assert body["totals"]["sites"] == 1
+    assert body["totals"]["graph_nodes"] == 3 and body["totals"]["graph_edges"] == 2
+    assert body["by_node_type"] == {"PAGE": 1, "QUERY": 1, "SITE": 1}
+    assert body["sites"][0]["site_id"] == "demo"
+    assert body["sites"][0]["state"] == "partial"
+    assert body["sites"][0]["setup_progress"] == 50
+
+    with client.eng.begin() as cx:
+        cx.execute(text("INSERT INTO posts(site_id,wp_id,type,url,title,status) VALUES('demo',1,'post','https://demo.example/post','Post','publish')"))
+        notes = json.dumps({"status": "succeeded", "progress": 1, "finished_at": "2026-08-20T10:00:00Z", "errors": []})
+        cx.execute(text("INSERT INTO sync_runs(run_id,site_id,source,started_at,finished_at,status,notes) VALUES('run-1','demo','wordpress_pipeline','2026-08-20T09:00:00Z','2026-08-20T10:00:00Z','succeeded',:notes)"), {"notes": notes})
+
+    body = client.get("/api/v1/portfolio/overview").json()
+    assert body["totals"]["content"] == 1 and body["totals"]["ready_sites"] == 1
+    assert body["sites"][0]["state"] == "ready"
+    assert body["sites"][0]["state_reason"] and body["sites"][0]["next_action"]
+    assert body["sites"][0]["setup_steps"]["graph_ready"] is True
+    assert body["recent_activity"][0]["site_name"] == "Demo"
+
+    # A stale local snapshot must not hide a broken WordPress connection.
+    with client.eng.begin() as cx:
+        cx.execute(text("INSERT INTO site_connections(site_id,kind,status,detail,tested_at) VALUES('demo','wordpress','error','{}','2026-08-20T11:00:00Z')"))
+    body = client.get("/api/v1/portfolio/overview").json()
+    assert body["sites"][0]["state"] == "attention"
+    assert body["sites"][0]["next_action"] == "اصلاح اتصال وردپرس"
+    assert body["sites"][0]["issues"][0]["severity"] == "blocking"
 
 
 def test_memory_and_ai_orchestrator_endpoints(client):

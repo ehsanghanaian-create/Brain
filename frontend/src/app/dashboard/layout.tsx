@@ -6,6 +6,7 @@ import { InfobarProvider } from '@/components/ui/infobar';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
+import { BackgroundJobs } from '@/components/layout/background-jobs';
 
 export const metadata: Metadata = {
   description: 'داشبورد SEO Brain — سیستم‌عامل سئوی محلی',
@@ -34,6 +35,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <div className='flex min-w-0 flex-1 flex-col'>
               <Header />
               {children}
+              <BackgroundJobs />
             </div>
             <InfoSidebar side='right' />
           </InfobarProvider>

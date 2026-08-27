@@ -148,7 +148,7 @@ export function AiStudio({ sites, initialSiteId, initialContentId }: { sites: Si
                   {run.status === 'succeeded' && (
                     <div className='mt-3 flex flex-wrap gap-2'>
                       {run.mode === 'manual' && !run.draft_id && <Button onClick={() => accept(run)}>ساخت پیش‌نویس از این خروجی (تأیید انسانی)</Button>}
-                      {run.draft_id && <Button variant='secondary' nativeButton={false} render={<Link href={`/dashboard/content?site=${siteId}`} />}>باز کردن در مغز محتوا (امتیاز/بازبینی/تأیید)</Button>}
+                      {run.draft_id && <Button variant='secondary' nativeButton={false} render={<Link href={`/dashboard/content?site=${siteId}`} aria-label='باز کردن پیش‌نویس در مغز محتوا' />}>باز کردن در مغز محتوا (امتیاز/بازبینی/تأیید)</Button>}
                       <Button variant='outline' onClick={() => setCompare(([a, b]) => (a ? [a, run] : [run, b]))}>افزودن به مقایسه</Button>
                     </div>
                   )}

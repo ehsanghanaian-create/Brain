@@ -6,15 +6,17 @@ import { endpoints, settle } from '@/lib/api/client';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'مغز محتوا' };
 
-export default async function Page({ searchParams }: { searchParams: Promise<{ site?: string }> }) {
-  const { site } = await searchParams;
+export default async function Page({ searchParams }: { searchParams: Promise<{ site?: string; content?: string }> }) {
+  const { site, content } = await searchParams;
   const sites = await settle(endpoints.sites());
   if (sites.error) return <PageContainer pageTitle='مغز محتوا'><BackendError error={sites.error} /></PageContainer>;
   const list = sites.data!;
   const initial = list.find((s) => s.site_id === site)?.site_id ?? list[0]?.site_id;
+  const parsedContent = Number(content);
+  const initialContentId = Number.isInteger(parsedContent) && parsedContent > 0 ? parsedContent : null;
   return (
     <PageContainer pageTitle='مغز محتوا' pageDescription='خط لوله محتوا با تأیید انسانی: برنامه‌ریزی → بریف → نگارش → بازبینی → تأیید → انتشار. بریف‌ها از کلمه کلیدی، خوشه، Search Console و گراف ساخته می‌شوند. انتشار خودکار غیرفعال است.'>
-      {!initial ? <p className='text-muted-foreground text-sm'>ابتدا یک سایت بسازید.</p> : <ContentBrainPage sites={list} initialSiteId={initial} />}
+      {!initial ? <p className='text-muted-foreground text-sm'>ابتدا یک سایت بسازید.</p> : <ContentBrainPage sites={list} initialSiteId={initial} initialContentId={initialContentId} />}
     </PageContainer>
   );
 }

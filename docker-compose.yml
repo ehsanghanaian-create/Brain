@@ -1,0 +1,52 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: seo-brain-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./.env:/app/.env
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./data/seo.db:/app/seed/seo.db:ro
+      - seo-brain-db:/app/runtime-db
+      - ./obsidian:/app/obsidian
+    environment:
+      - DATABASE_PATH=/app/runtime-db/seo.db
+      - FRONTEND_ORIGIN=http://localhost:3000,http://127.0.0.1:3000
+      # The host bridge started by start-docker.bat chains Docker traffic through
+      # the local Xray SOCKS endpoint, so scheduled Google syncs can run safely.
+      - SCHEDULER_ENABLED=1
+      - HTTP_PROXY=http://seo-brain:local-docker@host.docker.internal:18080
+      - HTTPS_PROXY=http://seo-brain:local-docker@host.docker.internal:18080
+      # These managed sites are fetched directly. Routing their large WordPress
+      # REST responses through the local forward proxy causes read timeouts and
+      # intermittent 502 responses during portfolio-wide synchronization.
+      - NO_PROXY=localhost,127.0.0.1,backend,frontend,emdadasanmotors.com,www.emdadasanmotors.com,emdadonlinecar.com,www.emdadonlinecar.com,emdad-bahmanmotor.com,www.emdad-bahmanmotor.com,renaultemdad.com,www.renaultemdad.com,emdadmodiran.com,www.emdadmodiran.com,emdadcar-tehran.com,www.emdadcar-tehran.com,emdadkermanmotor.com,www.emdadkermanmotor.com,renuemdad.com,www.renuemdad.com,modirankhodro-emdad.com,www.modirankhodro-emdad.com,modiranemdad.com,www.modiranemdad.com,hyundaemdad.com,www.hyundaemdad.com,kermanemdad.com,www.kermanemdad.com,kermanmootor.com,www.kermanmootor.com
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: seo-brain-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - SEO_BRAIN_API_URL=http://backend:8000
+      - SEO_BRAIN_API_TOKEN=
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  seo-brain-db:
+    name: emdad-panel-seo-db

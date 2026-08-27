@@ -24,6 +24,14 @@ PROVIDER_KINDS: dict[str, dict[str, Any]] = {
     "openai": {"label": "ChatGPT (OpenAI)", "base_url": "https://api.openai.com/v1", "models": ["gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4o"], "needs_key": True},
     "google": {"label": "Gemini (Google)", "base_url": "https://generativelanguage.googleapis.com/v1beta", "models": ["gemini-2.5-pro", "gemini-2.5-flash"], "needs_key": True},
     "openrouter": {"label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "models": [], "needs_key": True},
+    "groq": {"label": "Groq Cloud (سهمیه رایگان)", "base_url": "https://api.groq.com/openai/v1",
+             "models": ["qwen/qwen3.6-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"], "needs_key": True,
+             "setup": {"console_url": "https://console.groq.com/keys", "key_prefix": "gsk_", "docs": "https://console.groq.com/docs/quickstart",
+                       "fa": "کلید Groq Cloud روی سرور ذخیره می‌شود. پلن رایگان برای Qwen 3.6 روزانه ۱۰۰۰ درخواست و ۲۰۰هزار توکن دارد؛ در برخورد با محدودیت، SEO Brain سراغ مسیر جایگزین می‌رود."}},
+    "cloudflare": {"label": "Cloudflare Workers AI (سهمیه رایگان)", "base_url": "",
+                    "models": ["@cf/qwen/qwen3-30b-a3b-fp8", "@cf/openai/gpt-oss-20b"], "needs_key": True,
+                    "setup": {"console_url": "https://dash.cloudflare.com/profile/api-tokens", "key_prefix": "", "docs": "https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/",
+                              "fa": "یک API Token با دسترسی Workers AI و Account ID لازم است. Base URL باید به شکل https://api.cloudflare.com/client/v4/accounts/ACCOUNT_ID/ai/v1 ثبت شود؛ کلید فقط روی سرور نگهداری می‌شود."}},
     "ollama": {"label": "مدل محلی (Ollama)", "base_url": "http://127.0.0.1:11434", "models": [], "needs_key": False},
     "custom": {"label": "API سفارشی (سازگار با OpenAI)", "base_url": "", "models": [], "needs_key": False},
     # external routing gateway (OpenAI-compatible) — SEO Brain Gateway → OmniRoute → Claude/OpenAI/Gemini/…
@@ -212,6 +220,9 @@ class ProviderConfigRepository(Repository):
 
 # task_kind → (primary model, fallback model) — Sonnet balanced, Opus quality, Haiku fast
 RECOMMENDED_ROUTES: dict[str, dict[str, tuple[str, str | None]]] = {
+    # Cloud-only free-tier routes. A second model handles model-specific throttling.
+    "groq": {k: (("openai/gpt-oss-20b", "qwen/qwen3.6-27b") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic") else ("qwen/qwen3.6-27b", "openai/gpt-oss-120b")) for k in TASK_KINDS},
+    "cloudflare": {k: (("@cf/openai/gpt-oss-20b", "@cf/qwen/qwen3-30b-a3b-fp8") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic") else ("@cf/qwen/qwen3-30b-a3b-fp8", "@cf/openai/gpt-oss-20b")) for k in TASK_KINDS},
     # OmniRoute: let its own router pick upstreams; fast tasks → auto/fast; everything falls back to plain auto
     "omniroute": {k: (("auto/fast", "auto") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic") else ("auto", "auto/fast")) for k in TASK_KINDS},
     "anthropic": {
@@ -236,7 +247,15 @@ def test_provider(p: ProviderConfig, api_key: str | None, fetch: Callable[..., h
         if p.kind == "anthropic":
             r = get(f"{base}/v1/models", {"x-api-key": api_key or "", "anthropic-version": "2023-06-01"})
             models = [m.get("id") for m in (r.json().get("data") or [])] if r.status_code == 200 else []
-        elif p.kind in ("openai", "openrouter", "custom", "omniroute"):
+        elif p.kind == "cloudflare":
+            marker = "/accounts/"
+            if marker not in base or "/ai" not in base.split(marker, 1)[1]:
+                return {"ok": False, "status": "error", "message": "Base URL کلادفلر نامعتبر است", "tested_at": utcnow()}
+            root, rest = base.split(marker, 1)
+            account_id = rest.split("/", 1)[0]
+            r = get(f"{root}{marker}{account_id}/tokens/verify", {"Authorization": f"Bearer {api_key}"})
+            models = list(p.models or kd.get("models") or [])
+        elif p.kind in ("openai", "openrouter", "groq", "custom", "omniroute"):
             r = get(f"{base}/models", {"Authorization": f"Bearer {api_key}"} if api_key else {})
             models = [m.get("id") for m in (r.json().get("data") or [])] if r.status_code == 200 else []
         elif p.kind == "google":

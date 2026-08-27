@@ -128,8 +128,8 @@ export function LinkingPage({ sites, initialSiteId }: { sites: Site[]; initialSi
                 </div>
                 <div className='mt-2 flex flex-wrap items-center gap-2'>
                   <span className='text-xs'>انکر:</span>
-                  <Input value={anchorEdit[s.id] ?? s.anchor ?? ''} onChange={(e) => setAnchorEdit((a) => ({ ...a, [s.id]: e.target.value }))} className='h-7 w-64 text-xs' list={`alts-${s.id}`} />
-                  <datalist id={`alts-${s.id}`}>{s.anchor_alternatives.map((a) => <option key={a} value={a} />)}</datalist>
+                  <Input aria-label={`انکر پیشنهادی برای ${s.target_title ?? s.target_node_id}`} value={anchorEdit[s.id] ?? s.anchor ?? ''} onChange={(e) => setAnchorEdit((a) => ({ ...a, [s.id]: e.target.value }))} className='h-7 w-64 text-xs' list={`alts-${s.id}`} />
+                  <datalist id={`alts-${s.id}`} aria-label='انکرهای جایگزین'>{s.anchor_alternatives.map((a) => <option key={a} value={a}>{a}</option>)}</datalist>
                   {s.anchor_alternatives.slice(0, 3).map((a) => <button key={a} className='text-muted-foreground text-[11px] underline' onClick={() => setAnchorEdit((x) => ({ ...x, [s.id]: a }))}>{a}</button>)}
                   {s.placement_hint && <span className='text-muted-foreground text-[11px]'>· {s.placement_hint}</span>}
                 </div>

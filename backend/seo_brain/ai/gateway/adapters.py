@@ -4,6 +4,7 @@ Business logic never imports these directly — only the Gateway does."""
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any, Callable
 
@@ -254,7 +255,7 @@ class AnthropicAdapter(HttpAdapter):
 
 
 class OpenAICompatAdapter(HttpAdapter):
-    """OpenAI, OpenRouter, and any OpenAI-compatible endpoint (custom): POST {base}/chat/completions."""
+    """OpenAI-compatible clouds (OpenAI, Groq, Cloudflare, OpenRouter, custom)."""
     kind = "openai"
 
     def default_base_url(self) -> str:
@@ -290,6 +291,43 @@ class OpenAICompatAdapter(HttpAdapter):
         inp, out = int(u.get("prompt_tokens", 0)), int(u.get("completion_tokens", 0))
         return AIResponse(text=_strip_fences(text) if request.json_schema else text, model=data.get("model", request.model), provider=self.name, input_tokens=inp, output_tokens=out,
                           cost_usd=self._cost(request.model, inp, out), latency_ms=int((time.perf_counter() - t0) * 1000), raw={"id": data.get("id"), "finish_reason": choice.get("finish_reason")})
+
+
+class CloudflareAdapter(OpenAICompatAdapter):
+    """Workers AI exposes OpenAI chat completions but not ``GET /ai/v1/models``.
+
+    Model discovery therefore uses SEO Brain's curated catalog, while the read-only
+    connection probe verifies the account token against Cloudflare's token endpoint.
+    This validates the real stored credential without spending inference quota.
+    """
+
+    kind = "cloudflare"
+
+    def list_models(self) -> list[str]:
+        return list(self.models)
+
+    def _token_verify_url(self) -> str:
+        match = re.search(r"^(?P<root>.+?/accounts/(?P<account>[^/]+))/ai(?:/v1)?$", self.base_url)
+        if not match:
+            raise ProviderError("invalid Cloudflare Workers AI base URL", retryable=False)
+        return f"{match.group('root')}/tokens/verify"
+
+    def test_connection(self) -> dict:
+        try:
+            r = self._get(self._token_verify_url())
+        except ProviderError as e:
+            return {"ok": False, "provider": self.name, "error": str(e), "retryable": e.retryable}
+        if r.status_code in (401, 403):
+            return {"ok": False, "provider": self.name, "error": f"unauthorized (HTTP {r.status_code})", "retryable": False}
+        if r.status_code != 200:
+            return {"ok": False, "provider": self.name, "error": f"HTTP {r.status_code}", "retryable": r.status_code >= 500}
+        try:
+            valid = r.json().get("success") is not False
+        except ValueError:
+            valid = False
+        if not valid:
+            return {"ok": False, "provider": self.name, "error": "Cloudflare token verification failed", "retryable": False}
+        return {"ok": True, "provider": self.name, "models": self.list_models()[:50]}
 
 
 class GeminiAdapter(HttpAdapter):
@@ -351,7 +389,9 @@ class OllamaAdapter(HttpAdapter):
                           latency_ms=int((time.perf_counter() - t0) * 1000), raw={"done_reason": data.get("done_reason")})
 
 
-ADAPTERS = {"anthropic": AnthropicAdapter, "openai": OpenAICompatAdapter, "openrouter": OpenAICompatAdapter, "custom": OpenAICompatAdapter, "google": GeminiAdapter, "ollama": OllamaAdapter}
+ADAPTERS = {"anthropic": AnthropicAdapter, "openai": OpenAICompatAdapter, "openrouter": OpenAICompatAdapter,
+            "groq": OpenAICompatAdapter, "cloudflare": CloudflareAdapter, "custom": OpenAICompatAdapter,
+            "google": GeminiAdapter, "ollama": OllamaAdapter}
 
 
 def make_adapter(kind: str, name: str, api_key: str | None, base_url: str | None, models: list[str] | None, prices: dict[str, tuple[float, float]] | None,

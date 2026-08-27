@@ -252,8 +252,14 @@ def extract_entities(conn: sqlite3.Connection, site: SiteConfig) -> dict:
                                   "aliases": j(sorted(e.aliases)), "parent_slug": e.parent, "source": e.source,
                                   "evidence": j(e.evidence)}, ["site_id", "entity_type", "slug"])
 
-    # mentions: page ABOUT entity — evidence-based scoring
-    pages = rows(conn, "SELECT url, title, h1 FROM pages WHERE site_id=? AND status_code=200", (sid,))
+    # mentions: content ABOUT entity — evidence-based scoring. WordPress is the
+    # source of truth for published content, so do not discard hundreds of
+    # valid posts merely because a bounded crawl enriched only the first N URLs.
+    crawled = {p["url"]: p for p in rows(conn, "SELECT url, title, h1 FROM pages WHERE site_id=? AND status_code=200", (sid,))}
+    mention_pages = {p["url"]: {"url": p["url"], "title": p["title"], "h1": None} for p in posts}
+    for url, page in crawled.items():
+        mention_pages[url] = {"url": url, "title": page["title"] or mention_pages.get(url, {}).get("title"), "h1": page["h1"]}
+    pages = list(mention_pages.values())
     post_by_url = {p["url"]: p for p in posts}
     cat_urls = {c["wp_id"]: r["url"] for c in cats for r in rows(conn, "SELECT url FROM categories WHERE site_id=? AND wp_id=?", (sid, c["wp_id"]))}
     n_mentions = 0

@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import type { NodeDetails } from '@/lib/api/client';
+import { IconClick, IconFocus2, IconSearch } from '@tabler/icons-react';
 import { CONTENT_STATUS_FA, NODE_STYLE, RELATION_FA, SEVERITY_FA } from '../constants';
 
 const fa = new Intl.NumberFormat('fa-IR');
@@ -27,8 +28,18 @@ export function NodeDetailsPanel({
 }) {
   if (!details && !loading && !error) {
     return (
-      <aside className='bg-card text-muted-foreground flex h-full w-full flex-col items-center justify-center rounded-lg border p-6 text-center text-sm'>
-        روی یک گره کلیک کنید تا داده‌های سئوی آن (جایگاه، CTR، لینک‌ها، مشکلات، اقدام پیشنهادی) اینجا نمایش داده شود.
+      <aside className='bg-card flex h-full w-full flex-col overflow-hidden rounded-xl border shadow-sm'>
+        <header className='border-b p-4'><h3 className='font-semibold'>راهنمای خواندن گراف</h3><p className='text-muted-foreground mt-1 text-xs leading-5'>لازم نیست همه گره‌ها را هم‌زمان بررسی کنید؛ از جست‌وجو یا یک گره مهم شروع کنید.</p></header>
+        <div className='flex-1 space-y-5 overflow-y-auto p-4 text-sm'>
+          <ol className='space-y-3'>
+            <li className='flex gap-3'><span className='flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600'><IconSearch className='size-4' /></span><span><strong className='block text-sm'>۱. گره را پیدا کن</strong><span className='text-muted-foreground text-xs leading-5'>نام صفحه، URL یا کلمه کلیدی را جست‌وجو کن.</span></span></li>
+            <li className='flex gap-3'><span className='flex size-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600'><IconClick className='size-4' /></span><span><strong className='block text-sm'>۲. روی گره کلیک کن</strong><span className='text-muted-foreground text-xs leading-5'>فقط همسایه‌های مرتبط پررنگ می‌شوند و اطلاعات اینجا باز می‌شود.</span></span></li>
+            <li className='flex gap-3'><span className='flex size-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600'><IconFocus2 className='size-4' /></span><span><strong className='block text-sm'>۳. نمای متمرکز را فعال کن</strong><span className='text-muted-foreground text-xs leading-5'>برای حذف شلوغی، فقط ارتباط‌های مستقیم همان گره را ببین.</span></span></li>
+          </ol>
+          <Separator />
+          <section><h4 className='mb-2 text-xs font-semibold'>راهنمای رنگ‌ها</h4><div className='flex flex-wrap gap-1.5'>{['PAGE', 'QUERY', 'BRAND', 'SERVICE', 'SEO_PROBLEM', 'SEO_OPPORTUNITY'].map((type) => <Badge key={type} variant='outline' className='gap-1.5'><span className='size-2 rounded-full' style={{ background: NODE_STYLE[type]?.color }} />{NODE_STYLE[type]?.fa}</Badge>)}</div></section>
+          <p className='text-muted-foreground rounded-lg border bg-muted/25 p-3 text-xs leading-5'>رنگ فقط نوع داده را نشان می‌دهد؛ ضخیم‌شدن رابطه یعنی آن یال مستقیماً به گره انتخاب‌شده وصل است.</p>
+        </div>
       </aside>
     );
   }

@@ -29,10 +29,10 @@ _METRICS_LEGACY = ["sessions", "totalUsers", "screenPageViews", "engagementRate"
 
 class Ga4Client:
     def __init__(self, site_id: str, interactive: bool = False, save_raw: bool = True):
-        from googleapiclient.discovery import build
+        from ..common.google_http import build_google_service
         self.site_id = site_id
         self.creds = get_credentials(interactive=interactive)
-        self.svc = build("analyticsdata", "v1beta", credentials=self.creds, cache_discovery=False)
+        self.svc = build_google_service("analyticsdata", "v1beta", self.creds)
         self.save_raw = save_raw
         self.raw_dir: Path = raw_data_dir() / "ga4" / site_id
         if save_raw:

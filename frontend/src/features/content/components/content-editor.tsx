@@ -28,6 +28,7 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
     if (typeof cid !== 'number') return;
     endpoints.content(siteId, cid).then((x) => {
       setD(x);
+      setTab(x.current_draft_id ? 'draft' : 'fields');
       setF({ title: x.title, target_keyword: x.target_keyword ?? '', topic: x.topic ?? '', intent: x.intent ?? '', priority: x.priority ?? '', publish_date: x.publish_date ?? '', publish_time: x.publish_time ?? '',
              url: x.url ?? '', ai_provider: x.ai_provider ?? '', ai_model: x.ai_model ?? '', notes: x.notes ?? '' });
     }).catch((e) => toast.error(e instanceof ApiError ? e.message : String(e)));
@@ -75,7 +76,7 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side='left' className='w-full overflow-y-auto p-4 sm:max-w-xl' dir='rtl'>
+      <SheetContent side='left' className='w-full overflow-y-auto p-4 sm:max-w-4xl xl:max-w-5xl' dir='rtl'>
         <SheetHeader className='p-0'>
           <SheetTitle className='flex items-center gap-2'>{cid === 'new' ? 'محتوای جدید' : d?.title ?? '…'}{d && <Badge style={{ background: STATUS_COLOR[d.status] }}>{d.status_fa}</Badge>}</SheetTitle>
           <SheetDescription>{d?.target_keyword ? `کلمه کلیدی هدف: ${d.target_keyword}` : 'محتوا را به یک کلمه کلیدی وصل کنید تا بریف از داده‌های واقعی ساخته شود'}{d?.metadata?.plan_id ? <> · <a className='underline' href={`/dashboard/content-planner?site=${siteId}&plan=${String(d.metadata.plan_id)}`}>برنامه محتوایی #{String(d.metadata.plan_id)}</a></> : null}</SheetDescription>

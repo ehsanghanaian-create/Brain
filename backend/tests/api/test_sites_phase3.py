@@ -120,6 +120,7 @@ def test_connections_status_and_gsc_flow(env, monkeypatch):
     monkeypatch.setattr(conn_service, "env", lambda k, d=None: {"GOOGLE_CLIENT_ID": "x", "GOOGLE_CLIENT_SECRET": "y",
                                                                   "GSC_TOKEN_PATH": str(env["root"] / "tok.json")}.get(k, d))
     (env["root"] / "tok.json").write_text(json.dumps({"refresh_token": "r", "scopes": [conn_service.GSC_SCOPE]}), encoding="utf-8")
+    monkeypatch.setattr("seo_brain.gsc.client.read_token_json", lambda: (env["root"] / "tok.json").read_text(encoding="utf-8"))
     fake = FakeGsc([{"siteUrl": "sc-domain:demo.example", "permissionLevel": "siteOwner"}])
     app = c.app; app.dependency_overrides[sites_router.connections_service] = lambda: ConnectionsService(env["eng"], gsc_client_factory=lambda sid: fake)
     r = c.post("/api/v1/sites/demo/connections/gsc/test", json={"property": "https://demo.example/"}).json()

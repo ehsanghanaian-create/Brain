@@ -36,6 +36,7 @@ export function AiModelsPage({ sites = [] }: { sites?: Site[] }) {
   const kind = kinds.find((k) => k.kind === f.kind);
   function openNew() { setEditing(null); setF({ name: '', kind: 'anthropic', api_key: '', base_url: '', default_model: '' }); setOpen(true); }
   function openClaude() { const k = kinds.find((x) => x.kind === 'anthropic'); setEditing(null); setF({ name: 'anthropic', kind: 'anthropic', api_key: '', base_url: k?.base_url ?? 'https://api.anthropic.com', default_model: 'claude-sonnet-5' }); setOpen(true); }
+  function openCloudProvider(kindKey: 'groq' | 'cloudflare') { const k = kinds.find((x) => x.kind === kindKey); setEditing(null); setF({ name: kindKey, kind: kindKey, api_key: '', base_url: k?.base_url ?? '', default_model: k?.models[0] ?? '' }); setOpen(true); }
   function openOmni() { const k = kinds.find((x) => x.kind === 'omniroute'); setEditing(null); setF({ name: 'omniroute', kind: 'omniroute', api_key: '', base_url: k?.base_url ?? 'http://127.0.0.1:20128/v1', default_model: 'auto' }); setOpen(true); }
   function openEdit(p: ProviderConfig) { setEditing(p); setF({ name: p.name, kind: p.kind, api_key: '', base_url: p.base_url ?? '', default_model: p.default_model ?? '' }); setOpen(true); }
   async function save() {
@@ -68,11 +69,15 @@ export function AiModelsPage({ sites = [] }: { sites?: Site[] }) {
       <TabsList className='flex-wrap'><TabsTrigger value='providers'>ارائه‌دهنده‌ها و مسیردهی</TabsTrigger><TabsTrigger value='catalog'>کاتالوگ مدل‌ها</TabsTrigger><TabsTrigger value='usage'>مصرف و بودجه</TabsTrigger><TabsTrigger value='prompts'>پرامپت‌ها</TabsTrigger><TabsTrigger value='insights'>یادگیری AI</TabsTrigger></TabsList>
       <TabsContent value='providers' className='flex flex-col gap-4'>
       <ProviderKindCard kindKey='anthropic' providers={providers} kind={kinds.find((k) => k.kind === 'anthropic')} onConnect={openClaude} onEdit={openEdit} onTest={test} onChanged={load} busy={busy} setBusy={setBusy} />
+      <div className='grid gap-4 xl:grid-cols-2'>
+        <ProviderKindCard kindKey='groq' providers={providers} kind={kinds.find((k) => k.kind === 'groq')} onConnect={() => openCloudProvider('groq')} onEdit={openEdit} onTest={test} onChanged={load} busy={busy} setBusy={setBusy} />
+        <ProviderKindCard kindKey='cloudflare' providers={providers} kind={kinds.find((k) => k.kind === 'cloudflare')} onConnect={() => openCloudProvider('cloudflare')} onEdit={openEdit} onTest={test} onChanged={load} busy={busy} setBusy={setBusy} />
+      </div>
       <ProviderKindCard kindKey='omniroute' providers={providers} kind={kinds.find((k) => k.kind === 'omniroute')} onConnect={openOmni} onEdit={openEdit} onTest={test} onChanged={load} busy={busy} setBusy={setBusy} />
       <Card>
         <CardHeader>
           <CardTitle className='flex items-center justify-between'>ارائه‌دهنده‌ها <Button size='sm' onClick={openNew}>افزودن ارائه‌دهنده</Button></CardTitle>
-          <CardDescription>Claude · ChatGPT · Gemini · OpenRouter · مدل محلی (Ollama) · API سفارشی. کلیدها هرگز به مرورگر برنمی‌گردند و در دیتابیس ذخیره نمی‌شوند (رمزنگاری DPAPI روی همین دستگاه؛ فقط ۴ رقم آخر نمایش داده می‌شود).</CardDescription>
+          <CardDescription>Groq و Cloudflare Workers AI برای اجرای ابری با سهمیه رایگان، به‌همراه Claude · ChatGPT · Gemini · OpenRouter · API سفارشی. کلیدها هرگز به مرورگر برنمی‌گردند و فقط ۴ رقم آخر نمایش داده می‌شود.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className='overflow-x-auto rounded-md border'>
@@ -111,7 +116,7 @@ export function AiModelsPage({ sites = [] }: { sites?: Site[] }) {
                     <TableCell className='font-medium'>{TASK_FA[r.task_kind] ?? r.task_kind}</TableCell>
                     <TableCell><NativeSelect value={r.policy ?? 'auto'} onChange={(e) => setRoute(r.task_kind, { policy: e.target.value as TaskRoute['policy'] })} className='h-8 w-36 text-xs'>{Object.entries(POLICY_FA).map(([k, v]) => <NativeSelectOption key={k} value={k}>{v}</NativeSelectOption>)}</NativeSelect></TableCell>
                     <TableCell><NativeSelect value={r.provider_id ?? ''} onChange={(e) => setRoute(r.task_kind, { provider_id: e.target.value ? Number(e.target.value) : null, model: null })} className='h-8 w-40 text-xs'><NativeSelectOption value=''>—</NativeSelectOption>{providers.map((p) => <NativeSelectOption key={p.id} value={p.id}>{p.name}</NativeSelectOption>)}</NativeSelect></TableCell>
-                    <TableCell><Input value={r.model ?? ''} onChange={(e) => setRoute(r.task_kind, { model: e.target.value || null })} list={`m-${r.task_kind}`} placeholder={providers.find((p) => p.id === r.provider_id)?.default_model ?? ''} dir='ltr' className='h-8 w-44 text-xs' /><datalist id={`m-${r.task_kind}`}>{modelsOf(r.provider_id).map((m) => <option key={m} value={m} />)}</datalist></TableCell>
+                    <TableCell><Input aria-label={`مدل اصلی ${TASK_FA[r.task_kind] ?? r.task_kind}`} value={r.model ?? ''} onChange={(e) => setRoute(r.task_kind, { model: e.target.value || null })} list={`m-${r.task_kind}`} placeholder={providers.find((p) => p.id === r.provider_id)?.default_model ?? ''} dir='ltr' className='h-8 w-44 text-xs' /><datalist id={`m-${r.task_kind}`} aria-label='مدل‌های اصلی'>{modelsOf(r.provider_id).map((m) => <option key={m} value={m}>{m}</option>)}</datalist></TableCell>
                     <TableCell><NativeSelect value={r.fallback_provider_id ?? ''} onChange={(e) => setRoute(r.task_kind, { fallback_provider_id: e.target.value ? Number(e.target.value) : null, fallback_model: null })} className='h-8 w-40 text-xs'><NativeSelectOption value=''>—</NativeSelectOption>{providers.map((p) => <NativeSelectOption key={p.id} value={p.id}>{p.name}</NativeSelectOption>)}</NativeSelect></TableCell>
                     <TableCell><Input value={r.fallback_model ?? ''} onChange={(e) => setRoute(r.task_kind, { fallback_model: e.target.value || null })} dir='ltr' className='h-8 w-44 text-xs' /></TableCell>
                     <TableCell className='text-xs'>
@@ -147,7 +152,7 @@ export function AiModelsPage({ sites = [] }: { sites?: Site[] }) {
             )}
             <div className='grid gap-1.5'><Label>کلید API {kind?.needs_key === false && <span className='text-muted-foreground'>(اختیاری)</span>}</Label><Input type='password' value={f.api_key} onChange={(e) => setF((s) => ({ ...s, api_key: e.target.value }))} placeholder={editing?.has_key ? `فعلی: ••••${editing.key_hint} — برای تغییر وارد کنید` : ''} dir='ltr' autoComplete='off' /></div>
             <div className='grid gap-1.5'><Label>Base URL</Label><Input value={f.base_url} onChange={(e) => setF((s) => ({ ...s, base_url: e.target.value }))} dir='ltr' placeholder={kind?.base_url} /></div>
-            <div className='grid gap-1.5'><Label>مدل پیش‌فرض</Label><Input value={f.default_model} onChange={(e) => setF((s) => ({ ...s, default_model: e.target.value }))} dir='ltr' list='kind-models' /><datalist id='kind-models'>{(kind?.models ?? []).map((m) => <option key={m} value={m} />)}</datalist></div>
+            <div className='grid gap-1.5'><Label htmlFor='default-model'>مدل پیش‌فرض</Label><Input id='default-model' value={f.default_model} onChange={(e) => setF((s) => ({ ...s, default_model: e.target.value }))} dir='ltr' list='kind-models' /><datalist id='kind-models' aria-label='مدل‌های پیشنهادی'>{(kind?.models ?? []).map((m) => <option key={m} value={m}>{m}</option>)}</datalist></div>
             <div className='flex justify-end gap-2'><Button variant='ghost' onClick={() => setOpen(false)}>انصراف</Button><Button onClick={save} disabled={!!busy || !f.name.trim()}>{busy === 'save' ? '…' : 'ذخیره'}</Button></div>
           </div>
         </DialogContent>
@@ -172,10 +177,12 @@ const CLAUDE_STATUS_FA: Record<ClaudeStatus, { fa: string; cls: string }> = {
 
 const CARD_META: Record<string, { title: string; wanted: string[]; connectLabel: string; okText: string; needKey: boolean }> = {
   anthropic: { title: 'Claude (Anthropic)', wanted: ['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5'], connectLabel: 'اتصال Claude', needKey: true, okText: 'Claude متصل است. مدل پیش‌فرض Sonnet (متعادل)، Opus برای کیفیت و Haiku برای وظایف سریع. مسیرهای وظایف را با «اعمال مسیرهای پیشنهادی» تنظیم کنید (تغییر مسیر همیشه اقدام انسانی است).' },
+  groq: { title: 'Groq Cloud — اجرای رایگان روی سرور', wanted: ['qwen/qwen3.6-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'], connectLabel: 'اتصال Groq رایگان', needKey: true, okText: 'Groq متصل است. تولید متن روی زیرساخت ابری Groq انجام می‌شود و هیچ مدلی روی کامپیوتر شما اجرا نمی‌شود. خطای محدودیت سهمیه به‌صورت خودکار وارد زنجیره جایگزین می‌شود.' },
+  cloudflare: { title: 'Cloudflare Workers AI — جایگزین رایگان', wanted: ['@cf/qwen/qwen3-30b-a3b-fp8', '@cf/openai/gpt-oss-20b'], connectLabel: 'اتصال Workers AI', needKey: true, okText: 'Workers AI متصل است و به‌عنوان مسیر ابری جایگزین هنگام محدودیت یا قطعی Groq قابل استفاده است.' },
   omniroute: { title: 'OmniRoute (گیت‌وی مسیریابی خارجی)', wanted: ['auto', 'auto/fast', 'auto/cheap', 'auto/coding'], connectLabel: 'افزودن OmniRoute', needKey: false, okText: 'OmniRoute متصل است: SEO Brain Gateway → OmniRoute → Claude / OpenAI / Gemini / … . مدل «auto» مسیریابی خود OmniRoute است؛ ids به شکل provider/model هم قابل انتخاب‌اند. بودجه، دفتر مصرف، اعتبارسنجی و مسیریابی SEO Brain همچنان اعمال می‌شود.' },
 };
 
-export function ProviderKindCard({ kindKey, providers, kind, onConnect, onEdit, onTest, onChanged, busy, setBusy }: { kindKey: 'anthropic' | 'omniroute'; providers: ProviderConfig[]; kind?: ProviderKind; onConnect: () => void; onEdit: (p: ProviderConfig) => void; onTest: (p: ProviderConfig) => Promise<void>; onChanged: () => void; busy: string | null; setBusy: (v: string | null) => void }) {
+export function ProviderKindCard({ kindKey, providers, kind, onConnect, onEdit, onTest, onChanged, busy, setBusy }: { kindKey: 'anthropic' | 'groq' | 'cloudflare' | 'omniroute'; providers: ProviderConfig[]; kind?: ProviderKind; onConnect: () => void; onEdit: (p: ProviderConfig) => void; onTest: (p: ProviderConfig) => Promise<void>; onChanged: () => void; busy: string | null; setBusy: (v: string | null) => void }) {
   const meta = CARD_META[kindKey];
   const claude = providers.find((p) => p.kind === kindKey);
   const status: ClaudeStatus = kindKey === 'omniroute' ? (!claude ? 'missing_credentials' : !claude.enabled ? 'error' : !claude.last_test ? 'untested' : claude.last_test.ok ? 'connected' : 'error') : claudeStatus(claude);
@@ -237,8 +244,8 @@ export function ProviderKindCard({ kindKey, providers, kind, onConnect, onEdit, 
             <span className='block space-y-1'>
               <span className='block font-medium text-foreground'>برای تولید واقعی محتوا، کلید API کلود لازم است.</span>
               <span className='block'>{kind?.setup?.fa ?? 'کلید API را از کنسول Anthropic بسازید و اینجا وارد کنید.'}</span>
-              <span className='block' dir='ltr'>1) <a className='underline' href={kind?.setup?.console_url ?? 'https://platform.claude.com/settings/keys'} target='_blank' rel='noreferrer'>platform.claude.com → Settings → API keys</a> → Create Key &nbsp; 2) «{claude ? 'ثبت کلید' : 'اتصال Claude'}» → paste (sk-ant-…) &nbsp; 3) تست اتصال</span>
-              <span className='block'>تا آن زمان کارگاه محتوا با Echo (تست آفلاین) کار می‌کند و هیچ فراخوانی خارجی انجام نمی‌شود.</span>
+              <span className='block' dir='ltr'>1) <a className='underline' href={kind?.setup?.console_url ?? 'https://platform.claude.com/settings/keys'} target='_blank' rel='noreferrer'>کنسول ارائه‌دهنده</a> → Create Key &nbsp; 2) «{claude ? 'ثبت کلید' : meta.connectLabel}» → paste {kind?.setup?.key_prefix ? `(${kind.setup.key_prefix}…)` : ''} &nbsp; 3) تست اتصال</span>
+              <span className='block'>کلید و اجرای مدل فقط روی سرور انجام می‌شود؛ چیزی روی کامپیوتر شما نصب یا اجرا نمی‌شود.</span>
             </span>
           ) : status === 'error' ? `آخرین تست ناموفق: ${claude?.last_test?.message ?? '—'} — کلید را بررسی/تعویض کنید یا دوباره تست بگیرید.`
           : status === 'untested' ? 'کلید ثبت شده است؛ برای تأیید دسترسی «تست اتصال» را بزنید (فقط فهرست مدل‌ها خوانده می‌شود، پرامپتی ارسال نمی‌شود).'
@@ -265,7 +272,7 @@ export function ProviderKindCard({ kindKey, providers, kind, onConnect, onEdit, 
               <StatChip label='فراخوانی موفق' value={`${usage?.ok ?? 0} / ${usage?.calls ?? 0}`} /><StatChip label='هزینه' value={`${(usage?.cost_usd ?? 0).toFixed(4)}$`} />
               <StatChip label='توکن ورودی' value={usage?.input_tokens ?? 0} /><StatChip label='توکن خروجی' value={usage?.output_tokens ?? 0} />
             </div>
-            <div className='text-muted-foreground mt-1 text-[11px]'>کلید: {claude.has_key ? `••••${claude.key_hint}` : meta.needKey ? '—' : 'بدون کلید (اختیاری)'} (رمزنگاری DPAPI، SecretStore){routesApplied != null && ` · ${routesApplied} مسیر اعمال شد`}</div>
+            <div className='text-muted-foreground mt-1 text-[11px]'>کلید: {claude.has_key ? `••••${claude.key_hint}` : meta.needKey ? '—' : 'بدون کلید (اختیاری)'} (SecretStore رمزنگاری‌شده روی سرور){routesApplied != null && ` · ${routesApplied} مسیر اعمال شد`}</div>
           </div>
           {kindKey === 'omniroute' && (
             <div className='rounded-md border p-2 md:col-span-3'>

@@ -3,19 +3,20 @@ import { BackendError } from '@/components/seo-brain/backend-error';
 import { SiteDetail } from '@/features/sites/components/site-detail';
 import { endpoints, settle } from '@/lib/api/client';
 import { notFound } from 'next/navigation';
+import { cache } from 'react';
 
-export const dynamic = 'force-dynamic';
+const getSite = cache((siteId: string) => settle(endpoints.site(siteId)));
 
 export async function generateMetadata({ params }: { params: Promise<{ siteId: string }> }) {
   const { siteId } = await params;
-  const site = await settle(endpoints.site(siteId));
+  const site = await getSite(siteId);
   return { title: site.data ? site.data.name : 'سایت' };
 }
 
 export default async function SitePage({ params, searchParams }: { params: Promise<{ siteId: string }>; searchParams: Promise<{ tab?: string }> }) {
   const { siteId } = await params;
   const { tab } = await searchParams;
-  const site = await settle(endpoints.site(siteId));
+  const site = await getSite(siteId);
   if (site.error?.status === 404) notFound();
   if (site.error) {
     return (

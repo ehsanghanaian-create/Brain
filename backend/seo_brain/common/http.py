@@ -17,6 +17,14 @@ log = logging.getLogger("http")
 RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
 
 
+def site_proxy() -> str | None:
+    """Optional egress proxy for requests to the user's OWN sites (WP REST test/sync, crawler, publisher) —
+    e.g. WP_PROXY=socks5://127.0.0.1:1080 through an SSH tunnel when the local ISP filters the site's domain
+    (TLS SNI drop). Google/AI provider traffic is unaffected. Empty/unset → direct connection."""
+    import os
+    return (os.environ.get("WP_PROXY") or "").strip() or None
+
+
 @dataclass
 class RateLimiter:
     min_interval: float = 1.0
@@ -40,7 +48,7 @@ class ReadOnlyClient:
                  verify: bool = True):
         self._client = httpx.Client(
             headers={"User-Agent": user_agent, "Accept-Language": "fa,en;q=0.8"},
-            timeout=timeout, follow_redirects=follow_redirects, auth=auth, verify=verify,
+            timeout=timeout, follow_redirects=follow_redirects, auth=auth, verify=verify, proxy=site_proxy(),
         )
         self.max_retries = max_retries
         self.rate = RateLimiter(min_interval=min_interval)

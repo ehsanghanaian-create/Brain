@@ -75,7 +75,8 @@ class WordPressWriter:
     def _request(self, method: str, url: str, auth: tuple[str, str], **kw) -> httpx.Response:
         if self._http:
             return self._http(method, url, auth=auth, **kw)
-        return httpx.request(method, url, auth=auth, timeout=30, follow_redirects=True,
+        from ...common.http import site_proxy
+        return httpx.request(method, url, auth=auth, timeout=30, follow_redirects=True, proxy=site_proxy(),
                              headers={"User-Agent": "SEO-Brain-Writer/1.0"}, **kw)
 
     def _site(self, site_id: str):

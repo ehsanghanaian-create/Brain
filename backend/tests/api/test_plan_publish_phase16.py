@@ -88,6 +88,8 @@ def wp_http(responses: dict, seen: list):
     def handler(method, url, auth=None, **kw):
         seen.append({"method": method, "url": url, "auth": auth, "json": kw.get("json")})
         status, body = responses.get((method, url.rsplit("/", 1)[-1].split("?")[0]), (200, {}))
+        if isinstance(body, str):                                            # host-firewall style HTML block page
+            return httpx.Response(status, text=body, headers={"content-type": "text/html"}, request=httpx.Request(method, url))
         return httpx.Response(status, json=body, request=httpx.Request(method, url))
     return handler
 
@@ -156,6 +158,16 @@ def test_capability_probe_roles_and_endpoint(c, monkeypatch):
     assert r["configured"] and r["can_publish"] and r["username"] == "ehsan" and "انتشار مجاز" in r["message"]
     low = WordPressWriter(c.eng, http=wp_http({("GET", "me"): (200, {"slug": "x", "roles": ["subscriber"]})}, []))
     assert low.capability(SID)["can_publish"] is False
+    # host firewall (LiteSpeed anti-enumeration) blocks wp/v2/users* with an HTML 403 → fall back to posts?context=edit
+    waf_ok = WordPressWriter(c.eng, http=wp_http({("GET", "me"): (403, "<html>403 Forbidden</html>"), ("GET", "posts"): (200, [])}, []))
+    r2 = waf_ok.capability(SID)
+    assert r2["configured"] and r2["can_publish"] and "فایروال" in r2["message"]
+    waf_bad = WordPressWriter(c.eng, http=wp_http({("GET", "me"): (403, "<html>403</html>"), ("GET", "posts"): (401, {"code": "rest_forbidden_context"})}, []))
+    assert waf_bad.capability(SID)["can_publish"] is False
+    # a JSON 401 (real WordPress auth failure) must NOT trigger the fallback
+    json401 = []
+    auth_bad = WordPressWriter(c.eng, http=wp_http({("GET", "me"): (401, {"code": "incorrect_password"})}, json401))
+    assert auth_bad.capability(SID)["can_publish"] is False and len(json401) == 1
     monkeypatch.setattr("seo_brain.integrations.wordpress.writer.resolve_auth", lambda sid: None)
     ep = c.get(f"/api/v1/sites/{SID}/wordpress/publish-capability").json()
     assert ep["site_id"] == SID and ep["configured"] is False and "Application Password" in ep["message"]

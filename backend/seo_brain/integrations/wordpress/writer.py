@@ -92,11 +92,25 @@ class WordPressWriter:
         if not auth:
             return {"configured": False, "can_publish": False,
                     "message": "‏Application Password ذخیره نشده — در کارت وردپرس، نام‌کاربری و رمز برنامه را وارد و تست کنید"}
+        base = wp_rest_v2(site[0]).rstrip("/")
         try:
-            r = self._request("GET", f"{wp_rest_v2(site[0]).rstrip('/')}/users/me?context=edit", (auth.username, auth.app_password))
+            r = self._request("GET", f"{base}/users/me?context=edit", (auth.username, auth.app_password))
         except Exception as e:  # noqa: BLE001
             return {"configured": True, "can_publish": False, "message": f"اتصال برقرار نشد ({e.__class__.__name__})"}
         if r.status_code != 200:
+            # هاست‌های LiteSpeed/پلاگین‌های امنیتی اغلب مسیر wp/v2/users* را با 403 (صفحه HTML) می‌بندند —
+            # در این حالت با یک probe فقط‌خواندنی نیازمند مجوز ویرایش (posts?context=edit) دسترسی را می‌سنجیم.
+            html_block = "json" not in (r.headers.get("content-type") or "").lower()
+            if r.status_code in (401, 403) and html_block:
+                try:
+                    r2 = self._request("GET", f"{base}/posts?context=edit&per_page=1", (auth.username, auth.app_password))
+                except Exception as e:  # noqa: BLE001
+                    return {"configured": True, "can_publish": False, "message": f"اتصال برقرار نشد ({e.__class__.__name__})"}
+                if r2.status_code == 200:
+                    return {"configured": True, "can_publish": True, "username": auth.username, "roles": [],
+                            "message": "انتشار مجاز است — مسیر users توسط فایروال هاست بسته است؛ دسترسی ویرایش با probe جایگزین تأیید شد"}
+                return {"configured": True, "can_publish": False,
+                        "message": "احراز هویت ناموفق — رمز برنامه یا مجوز کاربر را بررسی کنید (مسیر users هم توسط فایروال هاست بسته است)"}
             return {"configured": True, "can_publish": False,
                     "message": "احراز هویت ناموفق (401/403) — رمز برنامه یا مجوز کاربر را بررسی کنید" if r.status_code in (401, 403) else f"HTTP {r.status_code}"}
         me = r.json()

@@ -173,6 +173,35 @@ def test_capability_probe_roles_and_endpoint(c, monkeypatch):
     assert ep["site_id"] == SID and ep["configured"] is False and "Application Password" in ep["message"]
 
 
+def test_wp_connection_test_waf_fallback_saves_auth_status_ok(c):
+    """کارت وردپرس: وقتی فایروال هاست users/me را با HTML 403 می‌بندد، probe جایگزین posts?context=edit احراز هویت را تأیید می‌کند."""
+    from seo_brain.connections.service import ConnectionsService
+
+    def pub(url):
+        if "wp-json" in url:
+            return httpx.Response(200, json={"name": "دمو", "namespaces": ["wp/v2"]}, request=httpx.Request("GET", url))
+        return httpx.Response(200, text="<html>home</html>", headers={"content-type": "text/html"}, request=httpx.Request("GET", url))
+
+    def auth_fetch(url, basic):
+        if "/users/me" in url:
+            return httpx.Response(403, text="<html>403 Forbidden</html>", headers={"content-type": "text/html"}, request=httpx.Request("GET", url))
+        assert "posts?context=edit" in url and basic == ("ehsan", "pw")
+        return httpx.Response(200, json=[], request=httpx.Request("GET", url))
+
+    svc = ConnectionsService(c.eng, wp_fetch=pub, wp_fetch_auth=auth_fetch)
+    res = svc.test_wordpress(SID, "https://demo.example", "ehsan", "pw")
+    a = res.detail["auth"]
+    assert res.status == "ok" and a["status"] == "ok" and "فایروال" in a["message"]
+    assert any(d["step"] == "auth_fallback" and d["ok"] for d in res.detail["diagnostics"])
+    # probe جایگزین هم رد شود → احراز هویت واقعاً ناموفق است
+    def auth_bad(url, basic):
+        if "/users/me" in url:
+            return httpx.Response(403, text="<html>403</html>", headers={"content-type": "text/html"}, request=httpx.Request("GET", url))
+        return httpx.Response(401, json={"code": "incorrect_password"}, request=httpx.Request("GET", url))
+    res2 = ConnectionsService(c.eng, wp_fetch=pub, wp_fetch_auth=auth_bad).test_wordpress(SID, "https://demo.example", "ehsan", "bad")
+    assert res2.detail["auth"]["status"] == "not_authorized"
+
+
 def test_due_autopilot_plans_calendar_logic(c):
     pid_due = _mk_plan(c, title="سررسید", publish_date="2020-01-01")
     pid_future = _mk_plan(c, title="آینده", publish_date="2099-01-01")

@@ -403,6 +403,29 @@ class ConnectionsService:
         rr = e3.pop("_resp", None)
         e3.update({"stage": "auth", "fa": "احراز هویت (users/me با Application Password)", "username": auth.username, "source": auth.source})
         code = e3.get("status_code")
+        e4 = None
+        if code in (401, 403) and rr is not None and "json" not in (rr.headers.get("content-type") or "").lower():
+            # هاست‌های LiteSpeed/افزونه‌های امنیتی اغلب کل مسیر wp/v2/users* را با 403 (صفحه HTML) می‌بندند حتی با auth درست —
+            # در این حالت احراز هویت را با یک probe فقط‌خواندنی نیازمند مجوز ویرایش (posts?context=edit) می‌سنجیم.
+            alt_url = wp_rest_v2(base) + "posts?context=edit&per_page=1"
+            e4 = probe("auth_fallback", alt_url, auth.basic); e4.pop("_resp", None)
+            e4.update({"stage": "auth", "fa": "احراز هویت جایگزین (posts?context=edit — مسیر users توسط فایروال هاست بسته است)", "username": auth.username, "source": auth.source})
+            alt_code = e4.get("status_code")
+            if alt_code == 200:
+                e3["hint"] = f"HTTP {code} با صفحه HTML — فایروال هاست مسیر users را می‌بندد؛ احراز هویت با probe جایگزین تأیید شد."
+                e4["ok"] = True; e4["hint"] = "۲۰۰ — دسترسی ویرایش (edit_posts) تأیید شد"
+                st = {"configured": True, "status": "ok", "message": "احراز هویت تأیید شد — مسیر users توسط فایروال هاست بسته است؛ دسترسی ویرایش با probe جایگزین تأیید شد"}
+            elif alt_code in (401, 403):
+                e3["ok"] = False
+                e4["ok"] = False; e4["hint"] = "نام‌کاربری/Application Password نادرست است یا کاربر مجوز ویرایش ندارد."
+                st = {"configured": True, "status": "not_authorized", "message": "نام‌کاربری یا Application Password نادرست است (probe جایگزین هم رد شد)"}
+            else:
+                e3["ok"] = False
+                e4["hint"] = f"پاسخ غیرمنتظره probe جایگزین: HTTP {alt_code}" if alt_code else f"خطای شبکه: {e4.get('error')}"
+                st = {"configured": True, "status": "error", "message": f"احراز هویت نامشخص — probe جایگزین: {alt_code or e4.get('error')}"}
+            st.update({"username": auth.username, "source": auth.source, "key_hint": SecretStoreHint(auth.app_password)})
+            out.append(e3); out.append(e4)
+            return out, st
         if code == 200:
             info = {}
             try:

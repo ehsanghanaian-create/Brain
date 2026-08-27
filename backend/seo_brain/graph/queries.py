@@ -209,12 +209,30 @@ def find_cannibalization(conn, sid, min_confidence: float = 0.0, limit: int = 50
 
 
 def find_internal_link_opportunities(conn, sid, page: str | None = None, as_target: bool = False, limit: int = 30) -> list[dict]:
-    sql, params = "SELECT * FROM seo_opportunities WHERE site_id=? AND opp_type='internal_link'", [sid]
+    # Phase 8 is the canonical internal-link engine. Keep the legacy
+    # seo_opportunities query below as a compatibility fallback for older DBs.
+    modern_sql = ("SELECT * FROM link_suggestions WHERE site_id=? AND scope='internal' "
+                  "AND kind!='anchor_fix' AND status IN ('new','accepted')")
+    modern_params: list = [sid]
+    resolved_url = page
     if page:
         nid = resolve_node_id(conn, sid, page)
-        url = one(conn, "SELECT url FROM graph_nodes WHERE site_id=? AND node_id=?", (sid, nid))["url"] if nid else page
+        resolved_url = one(conn, "SELECT url FROM graph_nodes WHERE site_id=? AND node_id=?", (sid, nid))["url"] if nid else page
+        modern_sql += " AND target_url=?" if as_target else " AND source_url=?"
+        modern_params.append(resolved_url)
+    modern_sql += " ORDER BY score DESC LIMIT ?"
+    modern_params.append(_lim(limit))
+    modern = rows(conn, modern_sql, modern_params)
+    if modern:
+        return [{"source_page": unquote(r["source_url"] or ""), "target_page": unquote(r["target_url"] or ""),
+                 "potential_anchor": r["anchor"], "reason": r["reason_fa"], "confidence": r["confidence"],
+                 "score": r["score"], "score_breakdown": json.loads(r["score_breakdown"] or "{}")}
+                for r in modern]
+
+    sql, params = "SELECT * FROM seo_opportunities WHERE site_id=? AND opp_type='internal_link'", [sid]
+    if page:
         sql += " AND related_url=?" if as_target else " AND url=?"
-        params.append(url)
+        params.append(resolved_url)
     sql += " ORDER BY score DESC LIMIT ?"
     params.append(_lim(limit))
     out = []
@@ -343,9 +361,15 @@ def get_site_structure(conn, sid) -> dict:
         return out
 
     ents = rows(conn, "SELECT entity_type, name, slug, parent_slug, aliases FROM entities WHERE site_id=? ORDER BY entity_type, name", (sid,))
+    suggestion_sources = {r["source_url"] for r in rows(conn, "SELECT DISTINCT source_url FROM link_suggestions WHERE site_id=? AND status IN ('new','accepted')", (sid,))}
+    page_rows = sorted((p for p in posts if p["type"] == "page"), key=lambda p: (p["url"] not in suggestion_sources, p["title"] or ""))
+    post_rows = sorted((p for p in posts if p["type"] == "post"), key=lambda p: (p["url"] not in suggestion_sources, p["title"] or ""))
+    page_items = [{"title": p["title"], "url": unquote(p["url"]), "word_count": p["word_count"]} for p in page_rows]
+    post_items = [{"title": p["title"], "url": unquote(p["url"]), "word_count": p["word_count"]} for p in post_rows]
     return {
         "site": {"site_id": sid, "name": site["name"], "url": site["canonical_url"], "language": site["language"]} if site else None,
-        "pages": [{"title": p["title"], "url": unquote(p["url"]), "word_count": p["word_count"]} for p in posts if p["type"] == "page"],
+        "pages": page_items,
+        "posts": post_items,
         "category_tree": tree(0),
         "custom_post_types": sorted({p["type"] for p in posts if p["type"] not in ("post", "page")}),
         "entities": {t: [{"name": e["name"], "aliases": json.loads(e["aliases"] or "[]"), "parent": e["parent_slug"]} for e in ents if e["entity_type"] == t] for t in ("SERVICE", "BRAND", "MODEL", "LOCATION")},

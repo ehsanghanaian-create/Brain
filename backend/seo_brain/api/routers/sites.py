@@ -191,10 +191,10 @@ def integrations(site_id: str, site: Site = Depends(require_site), eng: Engine =
 
     wp = WordPressSyncOrchestrator(eng)
     gsc = GscPipeline(eng)
-    from ...connections.service import GA4_SCOPE, _google_client_configured, _token_info
+    from ...connections.service import GA4_SCOPE, GSC_SCOPE, _token_info
     from ...ga4.pipeline import Ga4Pipeline as _Ga4Pipeline
     _tok = _token_info()
-    gsc_authorized = bool(_google_client_configured() and _tok.get("present"))
+    gsc_authorized = bool(_tok.get("present") and GSC_SCOPE in (_tok.get("scopes") or []))
     ga4_authorized = bool(gsc_authorized and GA4_SCOPE in (_tok.get("scopes") or []))
     _ga4_pipe = _Ga4Pipeline(eng)
     out = [
@@ -288,8 +288,9 @@ def gsc_sync_start(site_id: str, body: GscSyncStart | None = None, site: Site = 
     body = body or GscSyncStart()
     if not site.gsc_property:
         raise ApiError(409, "برای این سایت property سرچ‌کنسول تنظیم نشده است — ابتدا اتصال GSC را تست کنید", code="gsc_not_configured")
-    from ...connections.service import _google_client_configured, _token_info
-    if not _google_client_configured() or not _token_info().get("present"):
+    from ...connections.service import GSC_SCOPE, _token_info
+    tok = _token_info()
+    if not tok.get("present") or GSC_SCOPE not in (tok.get("scopes") or []):
         raise ApiError(409, "توکن Google موجود نیست؛ برای اتصال حساب گوگل، از بخش «حساب گوگل» در مرکز اتصال‌ها اتصال را انجام دهید", code="gsc_not_authorized")
     return _queue_gsc_sync(site_id, eng, q, days=body.days, reason="manual")
 
@@ -297,10 +298,10 @@ def gsc_sync_start(site_id: str, body: GscSyncStart | None = None, site: Site = 
 @router.get("/{site_id}/gsc/sync/status")
 def gsc_sync_status(site_id: str, site: Site = Depends(require_site), eng: Engine = Depends(engine), q: JobQueue = Depends(job_queue)) -> dict:
     """Latest pipeline run (from the existing sync_runs table) + live coverage: date range, rows, queries, pages, snapshots."""
-    from ...connections.service import _google_client_configured, _token_info
+    from ...connections.service import GSC_SCOPE, _token_info
     from ...gsc.pipeline import GscPipeline
     return {"site_id": site_id, "property": site.gsc_property or None,
-            "authorized": bool(_google_client_configured() and _token_info().get("present")),
+            "authorized": bool((tok := _token_info()).get("present") and GSC_SCOPE in (tok.get("scopes") or [])),
             **GscPipeline(eng).status(site_id, q)}
 
 

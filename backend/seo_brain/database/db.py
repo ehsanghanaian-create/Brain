@@ -24,7 +24,14 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(p), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 30000")
+    # Changing journal_mode takes a write/exclusive lock. Re-issuing the setter
+    # on every request can fail transiently when the same Windows bind-mounted
+    # DB is also read by a host-side MCP/test process. Read first and only
+    # perform the one-time transition for a freshly created database.
+    mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    if str(mode).lower() != "wal":
+        conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 

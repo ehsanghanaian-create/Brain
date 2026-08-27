@@ -15,10 +15,10 @@ import { PRIORITY_FA, STATUS_COLOR, STATUS_FA, STATUS_ORDER, faNum } from '../co
 import { ContentEditor } from './content-editor';
 import { AnalyticsPanel } from './analytics-panel';
 
-export function ContentBrainPage({ sites, initialSiteId }: { sites: Site[]; initialSiteId: string }) {
+export function ContentBrainPage({ sites, initialSiteId, initialContentId = null }: { sites: Site[]; initialSiteId: string; initialContentId?: number | null }) {
   const [siteId, setSiteId] = useState(initialSiteId);
   const [board, setBoard] = useState<ContentBoard | null>(null);
-  const [editing, setEditing] = useState<number | 'new' | null>(null);
+  const [editing, setEditing] = useState<number | 'new' | null>(initialContentId);
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +33,22 @@ export function ContentBrainPage({ sites, initialSiteId }: { sites: Site[]; init
   const items = board?.columns.flatMap((c) => c.items) ?? [];
   const filtered = items.filter((i) => (!q || i.title.includes(q) || (i.target_keyword ?? '').includes(q)) && (!statusFilter || i.status === statusFilter));
 
+  function syncUrl(nextSiteId: string, contentId: number | 'new' | null) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('site', nextSiteId);
+    if (typeof contentId === 'number') url.searchParams.set('content', String(contentId));
+    else url.searchParams.delete('content');
+    window.history.replaceState(window.history.state, '', url);
+  }
+  function openEditor(contentId: number | 'new') {
+    setEditing(contentId);
+    syncUrl(siteId, contentId);
+  }
+  function closeEditor() {
+    setEditing(null);
+    syncUrl(siteId, null);
+  }
+
   async function move(item: ContentItem, to: ContentStatus) {
     if (item.status === to) return;
     try { await endpoints.transitionContent(siteId, item.id, to); toast.success(`${item.title} → ${STATUS_FA[to]}`); load(); }
@@ -45,9 +61,9 @@ export function ContentBrainPage({ sites, initialSiteId }: { sites: Site[]; init
   return (
     <div className='flex flex-col gap-4'>
       <div className='flex flex-wrap items-center gap-2'>
-        <NativeSelect value={siteId} onChange={(e) => setSiteId(e.target.value)} className='w-44'>{sites.map((s) => <NativeSelectOption key={s.site_id} value={s.site_id}>{s.name}</NativeSelectOption>)}</NativeSelect>
-        <Button onClick={() => setEditing('new')}>محتوای جدید</Button>
-        <Button variant='outline' nativeButton={false} render={<Link href={`/dashboard/keywords?site=${siteId}`} />}>از فرصت‌های کلمات کلیدی</Button>
+        <NativeSelect value={siteId} onChange={(e) => { setSiteId(e.target.value); setEditing(null); syncUrl(e.target.value, null); }} className='w-44'>{sites.map((s) => <NativeSelectOption key={s.site_id} value={s.site_id}>{s.name}</NativeSelectOption>)}</NativeSelect>
+        <Button onClick={() => openEditor('new')}>محتوای جدید</Button>
+        <Button variant='outline' nativeButton={false} render={<Link href={`/dashboard/keywords?site=${siteId}`} aria-label='فرصت‌های کلمات کلیدی' />}>از فرصت‌های کلمات کلیدی</Button>
         <Button variant='ghost' onClick={syncGraph}>همگام‌سازی گراف</Button>
         <Link href={`/dashboard/calendar?site=${siteId}`} className='text-xs underline'>تقویم محتوایی</Link>
         <Link href={`/dashboard/graph?site=${siteId}`} className='text-xs underline'>گراف</Link>
@@ -59,7 +75,7 @@ export function ContentBrainPage({ sites, initialSiteId }: { sites: Site[]; init
         <KpiCard label='در جریان' value={board ? board.counts.by_status.brief_ready + board.counts.by_status.writing + board.counts.by_status.review : null} hint='بریف آماده + نگارش + بازبینی' />
         <KpiCard label='منتشرشده' value={board?.counts.by_status.published ?? null} hint='انتشار خودکار غیرفعال است' />
       </div>
-      <Tabs defaultValue='board'>
+      <Tabs defaultValue={initialContentId ? 'list' : 'board'}>
         <TabsList><TabsTrigger value='board'>کانبان</TabsTrigger><TabsTrigger value='list'>فهرست</TabsTrigger><TabsTrigger value='analytics'>تحلیل و یادگیری</TabsTrigger></TabsList>
         <TabsContent value='board'>
           <p className='text-muted-foreground mb-2 text-xs'>کارت‌ها را بین ستون‌ها بکشید (فقط یک مرحله جلو یا عقب؛ «بریف آماده» بریف می‌خواهد و «منتشرشده» URL). تأیید همیشه با شماست.</p>
@@ -72,7 +88,7 @@ export function ContentBrainPage({ sites, initialSiteId }: { sites: Site[]; init
                 </div>
                 <div className='flex flex-1 flex-col gap-1.5 p-1.5'>
                   {col.items.map((it) => (
-                    <div key={it.id} draggable onDragStart={() => setDragId(it.id)} onClick={() => setEditing(it.id)}
+                    <div key={it.id} role='button' tabIndex={0} draggable onDragStart={() => setDragId(it.id)} onClick={() => openEditor(it.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') openEditor(it.id); }}
                          className='bg-background hover:border-primary cursor-pointer rounded-md border p-2 text-xs shadow-sm'>
                       <div className='font-medium'>{it.title}</div>
                       {it.target_keyword && <div className='text-muted-foreground truncate'>🔑 {it.target_keyword}</div>}
@@ -103,7 +119,7 @@ export function ContentBrainPage({ sites, initialSiteId }: { sites: Site[]; init
               <TableHeader><TableRow><TableHead>عنوان</TableHead><TableHead>کلمه کلیدی</TableHead><TableHead>موضوع</TableHead><TableHead>وضعیت</TableHead><TableHead>اولویت</TableHead><TableHead>تاریخ انتشار</TableHead><TableHead>AI</TableHead><TableHead>URL</TableHead><TableHead>بریف</TableHead></TableRow></TableHeader>
               <TableBody>
                 {filtered.map((it) => (
-                  <TableRow key={it.id} className='cursor-pointer' onClick={() => setEditing(it.id)}>
+                  <TableRow key={it.id} className='cursor-pointer' onClick={() => openEditor(it.id)}>
                     <TableCell className='font-medium'>{it.title}</TableCell><TableCell>{it.target_keyword ?? '—'}</TableCell><TableCell>{it.topic ?? '—'}</TableCell>
                     <TableCell><Badge style={{ background: STATUS_COLOR[it.status] }}>{it.status_fa}</Badge></TableCell>
                     <TableCell>{it.priority ? PRIORITY_FA[it.priority] : '—'}</TableCell><TableCell dir='ltr'>{it.publish_date ?? '—'}{it.publish_time ? ` ${it.publish_time}` : ''}</TableCell>
@@ -115,9 +131,9 @@ export function ContentBrainPage({ sites, initialSiteId }: { sites: Site[]; init
             </Table>
           </div>
         </TabsContent>
-        <TabsContent value='analytics'><AnalyticsPanel siteId={siteId} onOpen={(cid) => setEditing(cid)} /></TabsContent>
+        <TabsContent value='analytics'><AnalyticsPanel siteId={siteId} onOpen={(cid) => openEditor(cid)} /></TabsContent>
       </Tabs>
-      <ContentEditor siteId={siteId} cid={editing} onClose={() => setEditing(null)} onChanged={load} />
+      <ContentEditor siteId={siteId} cid={editing} onClose={closeEditor} onChanged={load} />
     </div>
   );
 }

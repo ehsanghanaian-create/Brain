@@ -1,0 +1,25 @@
+# Keep the backend build context small and prevent local/runtime data from
+# being sent to Docker. The backend image copies only backend/ and the SQL
+# migrations under database/.
+.git/
+.github/
+.venv/
+.env
+.env.*
+data/
+obsidian/
+config/
+frontend/
+docs/
+sample-site/
+tokens/
+__pycache__/
+*.py[cod]
+*.db
+*.db-shm
+*.db-wal
+*.log
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+

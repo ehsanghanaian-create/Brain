@@ -19,8 +19,8 @@ export type SeoFlowNode = Node<SeoNodeData, 'seo'>;
 export type Grouping = 'none' | 'type' | 'community';
 export type Direction = 'TB' | 'LR' | 'RL';
 
-const NODE_W = 180;
-const NODE_H = 46;
+const NODE_W = 210;
+const NODE_H = 58;
 
 function metricFor(n: GraphNode): string | undefined {
   const p = (n.metadata.props ?? {}) as Record<string, unknown>;
@@ -81,7 +81,7 @@ export function toFlowEdges(edges: GraphEdge[]): Edge[] {
 export function layoutLayered(nodes: SeoFlowNode[], edges: Edge[], direction: Direction = 'TB'): SeoFlowNode[] {
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: direction, nodesep: 24, ranksep: 70, marginx: 20, marginy: 20 });
+  g.setGraph({ rankdir: direction, nodesep: 34, ranksep: 84, marginx: 28, marginy: 28 });
   nodes.forEach((n) => g.setNode(n.id, { width: NODE_W, height: NODE_H }));
   edges.forEach((e) => {
     if (g.hasNode(e.source) && g.hasNode(e.target)) g.setEdge(e.source, e.target);

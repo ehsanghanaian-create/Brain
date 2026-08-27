@@ -238,8 +238,8 @@ export function SiteWizard() {
               <Button variant='ghost' onClick={() => setStep(2)}>بازگشت</Button>
               {init && (
                 <div className='flex gap-2'>
-                  <Button variant='secondary' nativeButton={false} render={<Link href={`/dashboard/sites/${site.site_id}?tab=brain`} />}>پیکربندی مغز سایت</Button>
-                  <Button nativeButton={false} render={<Link href={`/dashboard/sites/${site.site_id}`} />}>رفتن به صفحه سایت</Button>
+                  <Button variant='secondary' nativeButton={false} render={<Link href={`/dashboard/sites/${site.site_id}?tab=brain`} aria-label='پیکربندی مغز سایت' />}>پیکربندی مغز سایت</Button>
+                  <Button nativeButton={false} render={<Link href={`/dashboard/sites/${site.site_id}`} aria-label='رفتن به صفحه سایت' />}>رفتن به صفحه سایت</Button>
                 </div>
               )}
             </div>

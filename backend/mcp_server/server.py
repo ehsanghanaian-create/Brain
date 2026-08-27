@@ -50,7 +50,32 @@ def _conn():
 
 
 def _sid(site_id: str | None) -> str:
-    return get_site(site_id).site_id
+    if site_id:
+        return get_site(site_id).site_id
+    configured = os.environ.get("SEO_BRAIN_DEFAULT_SITE")
+    if configured:
+        return get_site(configured).site_id
+
+    # With multiple sites, alphabetical/config order is not a meaningful MCP
+    # default. Prefer a site that has completed the usable WP → crawl → graph
+    # path, then choose the richest snapshot deterministically.
+    conn = _conn()
+    try:
+        row = conn.execute(
+            """
+            SELECT s.site_id,
+                   (SELECT COUNT(*) FROM pages p WHERE p.site_id=s.site_id AND p.crawl_status='ok') AS crawled,
+                   (SELECT COUNT(*) FROM posts w WHERE w.site_id=s.site_id) AS content,
+                   (SELECT COUNT(*) FROM graph_nodes g WHERE g.site_id=s.site_id) AS graph_nodes
+              FROM sites s
+             ORDER BY CASE WHEN crawled > 0 AND content > 0 AND graph_nodes > 0 THEN 1 ELSE 0 END DESC,
+                      crawled DESC, content DESC, graph_nodes DESC, s.site_id
+             LIMIT 1
+            """
+        ).fetchone()
+        return row[0] if row else get_site().site_id
+    finally:
+        conn.close()
 
 
 def _run(fn, *args, **kwargs):

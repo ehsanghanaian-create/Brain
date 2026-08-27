@@ -46,10 +46,8 @@ def meta() -> dict:
 
 @router.post("/analyze")
 def analyze(site_id: str, e: LinkEngine = Depends(eng), q: JobQueue = Depends(job_queue), force_sync: bool = False, response: Response = None) -> dict:  # type: ignore[assignment]
-    """≤ sync_threshold_pages (500) → synchronous result; larger sites → 202 job (poll /jobs/{run_id})."""
-    n = e.page_count(site_id)
-    thr = int(e.settings(site_id).get("sync_threshold_pages", 500))
-    if n <= thr or force_sync:
+    """Queue analysis by default so its lifetime is independent from the browser request."""
+    if force_sync:
         return {"mode": "sync", **e.analyze(site_id)}
     run = q.enqueue(Job(type="links_analyze", payload={"site_id": site_id}, site_id=site_id))
     if response is not None:

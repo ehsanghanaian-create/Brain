@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { DraftFeedback } from './draft-feedback';
+import { ArticlePreview } from './article-preview';
 
 const SEV_FA = { high: 'مهم', medium: 'متوسط', low: 'جزئی' } as const;
 const SEV_COLOR = { high: '#dc2626', medium: '#f59e0b', low: '#64748b' } as const;
@@ -81,7 +82,7 @@ export function DraftPanel({ siteId, cid, onChanged }: { siteId: string; cid: nu
         )}
         {selected && !editing && <Button size='sm' variant='secondary' onClick={() => startEdit(selected)}>ویرایش → نسخه جدید</Button>}
         {!editing && drafts.length === 0 && <Button size='sm' onClick={() => startEdit(null)}>ثبت پیش‌نویس</Button>}
-        {!editing && <Button size='sm' variant='outline' nativeButton={false} render={<Link href={`/dashboard/ai-studio?site=${encodeURIComponent(siteId)}&content=${cid}`} />} title='تولید چندعاملی با تزریق حافظه سایت؛ خروجی فقط پیش‌نویس است'>تولید با AI</Button>}
+        {!editing && <Button size='sm' variant='outline' nativeButton={false} render={<Link href={`/dashboard/ai-studio?site=${encodeURIComponent(siteId)}&content=${cid}`} aria-label='تولید پیش‌نویس با AI' />} title='تولید چندعاملی با تزریق حافظه سایت؛ خروجی فقط پیش‌نویس است'>تولید با AI</Button>}
         {selected && !editing && (
           <>
             <Button size='sm' disabled={!!busy} onClick={() => runReview(false)}>{busy === 'review' ? '…' : 'بازبینی و امتیاز'}</Button>
@@ -107,10 +108,20 @@ export function DraftPanel({ siteId, cid, onChanged }: { siteId: string; cid: nu
       {selected && !editing && <DraftFeedback siteId={siteId} cid={cid} draftId={selected.id} runId={selected.provenance?.run_id ? String(selected.provenance.run_id) : null} />}
 
       {selected && !editing && (
-        <details className='rounded-md border p-2'>
-          <summary className='cursor-pointer text-xs'>ساختار پیش‌نویس v{selected.version} — {selected.word_count} کلمه، {selected.structure.h2.length} H2، {selected.structure.links.length} لینک، {selected.structure.faq ? 'با FAQ' : 'بدون FAQ'}{selected.provenance && Object.keys(selected.provenance).length ? ` · منشأ: ${String(selected.provenance.provider ?? selected.source)}` : ''}</summary>
-          <pre className='bg-muted mt-2 max-h-64 overflow-auto rounded p-2 text-xs whitespace-pre-wrap' dir='auto'>{selected.body}</pre>
-        </details>
+        <>
+          <ArticlePreview draft={selected} />
+          <details className='rounded-md border p-2'>
+            <summary className='cursor-pointer text-xs'>جزئیات ساختار v{selected.version} — {selected.structure.h2.length} سرفصل H2، {selected.structure.links.length} لینک، {selected.structure.faq ? 'با FAQ' : 'بدون FAQ'}{selected.provenance && Object.keys(selected.provenance).length ? ` · منشأ: ${String(selected.provenance.provider ?? selected.source)}` : ''}</summary>
+            <div className='text-muted-foreground mt-2 grid gap-1 text-xs sm:grid-cols-3'>
+              <span>H1: {fa.format(selected.structure.h1.length)}</span>
+              <span>H2: {fa.format(selected.structure.h2.length)}</span>
+              <span>H3: {fa.format(selected.structure.h3.length)}</span>
+              <span>پاراگراف: {fa.format(selected.structure.paragraphs.length)}</span>
+              <span>تصویر: {fa.format(selected.structure.images.length)}</span>
+              <span>پرسش: {fa.format(selected.structure.questions.length)}</span>
+            </div>
+          </details>
+        </>
       )}
 
       {score && (

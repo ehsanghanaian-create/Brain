@@ -58,7 +58,14 @@ class ConnectionsRepository(Repository):
 
 # --------------------------------------------------------------------------- google helpers
 def _google_client_configured() -> bool:
-    return bool(env("GOOGLE_CLIENT_ID") and env("GOOGLE_CLIENT_SECRET"))
+    if env("GOOGLE_CLIENT_ID") and env("GOOGLE_CLIENT_SECRET"):
+        return True
+    try:
+        from ..core.secrets import get_secret_store
+        store = get_secret_store()
+        return bool(store.get("google-client-id") and store.get("google-client-secret"))
+    except Exception:  # noqa: BLE001 — unavailable secret storage is equivalent to an unconfigured client
+        return False
 
 
 def _token_info() -> dict[str, Any]:
@@ -66,12 +73,17 @@ def _token_info() -> dict[str, Any]:
     from ..gsc.client import read_token_json
     raw = read_token_json()
     if not raw:
-        return _merge_sa({"present": False, "scopes": [], "expiry": None, "source": None})
+        return _merge_sa({"present": False, "oauth_present": False, "scopes": [], "oauth_scopes": [],
+                          "expiry": None, "source": None})
     try:
         data = json.loads(raw)
     except ValueError:
-        return {"present": False, "scopes": []}
-    out = {"present": bool(data.get("refresh_token")), "scopes": list(data.get("scopes") or []), "expiry": data.get("expiry"), "source": "oauth"}
+        return _merge_sa({"present": False, "oauth_present": False, "scopes": [], "oauth_scopes": [],
+                          "expiry": None, "source": None})
+    oauth_scopes = list(data.get("scopes") or [])
+    oauth_present = bool(data.get("refresh_token"))
+    out = {"present": oauth_present, "oauth_present": oauth_present, "scopes": oauth_scopes,
+           "oauth_scopes": oauth_scopes, "expiry": data.get("expiry"), "source": "oauth"}
     return _merge_sa(out)
 
 
@@ -129,7 +141,7 @@ class ConnectionsService:
     def list_gsc_properties(self) -> dict[str, Any]:
         from .service_account import sa_configured
         if not _google_client_configured() and not sa_configured():
-            return {"status": "not_configured", "properties": [], "message": "نه Service Account ثبت شده و نه OAuth Client پیکربندی شده است"}
+            return {"status": "not_configured", "properties": [], "message": "نه Service Account ثبت شده و نه OAuth Client (GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET) پیکربندی شده است"}
         tok = _token_info()
         if not tok["present"]:
             return {"status": "not_authorized", "properties": [], "message": "توکن Google وجود ندارد؛ برای اتصال حساب گوگل، از بخش «حساب گوگل» در مرکز اتصال‌ها اتصال را انجام دهید"}
@@ -152,9 +164,10 @@ class ConnectionsService:
         _step(trace, f"input property = {_redact(wanted)}")
         if not wanted:
             return ConnectionResult("gsc", "not_configured", "برای این سایت هیچ property تعریف نشده است", {"hint": "sc-domain:example.com یا https://example.com/"})
-        _step(trace, f"GOOGLE_CLIENT_ID/SECRET in .env: {'yes' if _google_client_configured() else 'NO'}")
-        if not _google_client_configured():
-            return ConnectionResult("gsc", "not_configured", "GOOGLE_CLIENT_ID/SECRET در .env تنظیم نشده است", {"property": wanted})
+        from .service_account import sa_configured
+        _step(trace, f"Google credential provider: OAuth client={'yes' if _google_client_configured() else 'no'}, service account={'yes' if sa_configured() else 'no'}")
+        if not _google_client_configured() and not sa_configured():
+            return ConnectionResult("gsc", "not_configured", "نه Service Account ثبت شده و نه OAuth Client (GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET) پیکربندی شده است", {"property": wanted})
         tok = _token_info()
         _step(trace, f"OAuth token file {resolve_path(env('GSC_TOKEN_PATH', 'tokens/gsc_token.json')).name}: present={tok['present']} scopes={len(tok['scopes'])} expiry={tok.get('expiry') or '?'}")
         if not tok["present"]:
@@ -223,9 +236,9 @@ class ConnectionsService:
 
     @staticmethod
     def _build_ga4_admin():
-        from googleapiclient.discovery import build  # lazy
+        from ..common.google_http import build_google_service
         from ..gsc.client import get_credentials
-        return build("analyticsadmin", "v1beta", credentials=get_credentials(interactive=False), cache_discovery=False)
+        return build_google_service("analyticsadmin", "v1beta", get_credentials(interactive=False))
 
     def test_ga4(self, site_id: str, property_id: str | None) -> ConnectionResult:
         res = self._test_ga4(site_id, property_id)
@@ -259,9 +272,9 @@ class ConnectionsService:
         return ConnectionResult("ga4", "ok", "دسترسی GA4 تأیید شد", {"property": pid, "rows": report.get("rowCount", 0)})
 
     def _run_ga4_probe(self, pid: str) -> dict:
-        from googleapiclient.discovery import build  # lazy
+        from ..common.google_http import build_google_service
         from ..gsc.client import get_credentials
-        svc = build("analyticsdata", "v1beta", credentials=get_credentials(interactive=False), cache_discovery=False)
+        svc = build_google_service("analyticsdata", "v1beta", get_credentials(interactive=False))
         body = {"dateRanges": [{"startDate": "7daysAgo", "endDate": "yesterday"}], "metrics": [{"name": "sessions"}], "limit": 1}
         return svc.properties().runReport(property=f"properties/{pid}", body=body).execute()
 

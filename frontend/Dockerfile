@@ -4,25 +4,28 @@
 
 ARG NODE_VERSION=22-slim
 
-FROM node:${NODE_VERSION} AS dependencies
+FROM node:${NODE_VERSION} AS pnpm-base
+
+COPY docker-cache/pnpm /opt/pnpm
+RUN ln -s /opt/pnpm/bin/pnpm.cjs /usr/local/bin/pnpm
+
+FROM pnpm-base AS dependencies
 
 WORKDIR /app
 
-# Install bun to use bun.lock for dependency resolution
-RUN npm install -g bun
-
 # Copy package-related files to leverage Docker cache
-COPY package.json bun.lock* ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY docker-cache/pnpm-store /pnpm/store
 
-# Install dependencies with frozen lockfile for reproducible builds
-RUN --mount=type=cache,target=/root/.bun/install/cache \
-    bun install --no-save --frozen-lockfile
+# All packages are fetched on the host into docker-cache/pnpm-store. Docker's
+# outbound network may be unavailable, so dependency installation is offline.
+RUN pnpm install --offline --frozen-lockfile --store-dir /pnpm/store
 
 # ============================================
 # Stage 2: Build the Next.js application
 # ============================================
 
-FROM node:${NODE_VERSION} AS builder
+FROM pnpm-base AS builder
 
 WORKDIR /app
 
@@ -36,7 +39,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 ENV BUILD_STANDALONE=true
 
-RUN npm run build
+RUN pnpm build
 
 # ============================================
 # Stage 3: Production runner

@@ -75,6 +75,8 @@ config/sites.yaml
 __pycache__/
 *.py[cod]
 .venv/
+/docker-cache/
+/frontend/docker-cache/
 venv/
 .pytest_cache/
 *.egg-info/

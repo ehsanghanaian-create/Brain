@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from seo_brain.ai.config import ProviderConfigRepository
 from seo_brain.ai.gateway import CallMeta, Gateway, RouteStep, TaskRouter
-from seo_brain.ai.gateway.adapters import AnthropicAdapter, GeminiAdapter, OllamaAdapter, OpenAICompatAdapter
+from seo_brain.ai.gateway.adapters import AnthropicAdapter, CloudflareAdapter, GeminiAdapter, OllamaAdapter, OpenAICompatAdapter
 from seo_brain.ai.prompts import PromptError, PromptLibrary, render
 from seo_brain.ai.types import AIMessage, AIRequest, AIResponse, AITask, TaskKind
 from seo_brain.api import deps
@@ -86,6 +86,20 @@ def test_adapters_complete_and_list_models_via_fake_transports():
     with pytest.raises(ProviderError) as ei:
         bad.complete(req)
     assert ei.value.retryable is False
+
+
+def test_cloudflare_uses_token_verify_and_catalog_for_connection_probe():
+    seen = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append((req.method, str(req.url), req.headers.get("authorization")))
+        return httpx.Response(200, json={"success": True}, request=req)
+
+    base = "https://api.cloudflare.com/client/v4/accounts/account-id/ai/v1"
+    adapter = CloudflareAdapter("cloudflare", "cf_token", base, ["@cf/qwen/qwen3-30b-a3b-fp8"], {}, transport=httpx.MockTransport(handler))
+    result = adapter.test_connection()
+    assert result["ok"] and result["models"] == ["@cf/qwen/qwen3-30b-a3b-fp8"]
+    assert seen == [("GET", "https://api.cloudflare.com/client/v4/accounts/account-id/tokens/verify", "Bearer cf_token")]
 
 
 @pytest.fixture

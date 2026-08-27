@@ -337,14 +337,25 @@ class WordPressSyncOrchestrator:
                 out["graph"] = GraphBuild(conn, site).build()
         # layers added by later phases live in graph_nodes too and GraphBuild rebuilds the site namespace → re-sync them
         syncs: dict[str, Any] = {}
-        for name, fn in (("keywords", self._sync_keywords), ("content", self._sync_content), ("planner", self._sync_planner)):
+        for name, fn in (("keywords", self._sync_keywords), ("content", self._sync_content), ("planner", self._sync_planner), ("links", self._sync_links)):
             try:
                 syncs[name] = fn(site_id)
             except Exception as e:  # noqa: BLE001
                 syncs[name] = {"error": f"{e.__class__.__name__}: {str(e)[:120]}"}
+        # Export after every graph-producing layer, so the vault reflects the
+        # same final graph the API and MCP expose.
+        if self._graph_build is None:
+            try:
+                from ..common.config import vault_path
+                from ..database.db import db
+                from ..graph import ObsidianWriter
+                with db() as conn:
+                    out["obsidian"] = ObsidianWriter(conn, site, vault_path()).write()
+            except Exception as e:  # noqa: BLE001 — graph remains usable if the local vault is unavailable
+                out["obsidian_error"] = f"{e.__class__.__name__}: {str(e)[:120]}"
         c = self.counts(site_id)
         g = out.get("graph") if isinstance(out.get("graph"), dict) else {}
-        return {"graph_nodes": c["graph_nodes"], "graph_edges": c["graph_edges"], "by_type": c["graph_by_type"], "build": {k: g.get(k) for k in ("nodes", "edges", "run_id") if isinstance(g, dict) and k in g}, "syncs": syncs,
+        return {"graph_nodes": c["graph_nodes"], "graph_edges": c["graph_edges"], "by_type": c["graph_by_type"], "build": {k: g.get(k) for k in ("nodes", "edges", "run_id") if isinstance(g, dict) and k in g}, "obsidian": out.get("obsidian"), "syncs": syncs,
                 "analysis_error": out.get("analysis_error")}
 
     def _sync_keywords(self, site_id: str) -> dict:
@@ -358,6 +369,10 @@ class WordPressSyncOrchestrator:
     def _sync_planner(self, site_id: str) -> dict:
         from ..brain.planner.graph_sync import PlannerGraphSync
         return PlannerGraphSync(self.engine).sync(site_id)
+
+    def _sync_links(self, site_id: str) -> dict:
+        from ..brain.linking import LinkEngine
+        return LinkEngine(self.engine).analyze(site_id)
 
 
 def _default_probe(url: str) -> int | None:

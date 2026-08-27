@@ -27,6 +27,16 @@ DEFAULT_CATALOG: dict[str, list[dict[str, Any]]] = {
         {"model_id": "gemini-2.5-flash", "display": "Gemini 2.5 Flash", "tier": "fast", "tags": ["cheap", "json", "translation"], "context_tokens": 1000000, "price_in_per_m": 0.3, "price_out_per_m": 2.5},
     ],
     "openrouter": [],
+    # Free-tier execution is cost-free until the provider quota is exhausted; the gateway falls back on HTTP 429.
+    "groq": [
+        {"model_id": "qwen/qwen3.6-27b", "display": "Qwen 3.6 27B (Groq free tier)", "tier": "quality", "tags": ["persian", "long_form", "reasoning", "json", "free_quota"], "context_tokens": 131072, "price_in_per_m": 0.0, "price_out_per_m": 0.0},
+        {"model_id": "openai/gpt-oss-120b", "display": "GPT-OSS 120B (Groq free tier)", "tier": "reasoning", "tags": ["long_form", "reasoning", "json", "free_quota"], "context_tokens": 131072, "price_in_per_m": 0.0, "price_out_per_m": 0.0},
+        {"model_id": "openai/gpt-oss-20b", "display": "GPT-OSS 20B (Groq free tier)", "tier": "fast", "tags": ["cheap", "json", "free_quota"], "context_tokens": 131072, "price_in_per_m": 0.0, "price_out_per_m": 0.0},
+    ],
+    "cloudflare": [
+        {"model_id": "@cf/qwen/qwen3-30b-a3b-fp8", "display": "Qwen 3 30B A3B (Workers AI)", "tier": "balanced", "tags": ["persian", "reasoning", "json", "free_quota"], "context_tokens": 32768, "price_in_per_m": 0.0, "price_out_per_m": 0.0},
+        {"model_id": "@cf/openai/gpt-oss-20b", "display": "GPT-OSS 20B (Workers AI)", "tier": "fast", "tags": ["json", "reasoning", "free_quota"], "context_tokens": 131072, "price_in_per_m": 0.0, "price_out_per_m": 0.0},
+    ],
     "ollama": [],
     "custom": [],
     # OmniRoute auto-routing entries (prices unknown → 0, user-editable); real provider/model ids are discovered from /v1/models

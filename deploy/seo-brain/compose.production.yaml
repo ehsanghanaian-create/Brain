@@ -1,0 +1,67 @@
+name: seo-brain
+
+services:
+  backend:
+    image: seo-brain-backend:20260824-ads-ip-fix1
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_PATH: /app/runtime-db/seo.db
+      FRONTEND_ORIGIN: https://seo.gearboxemdad.com
+      SCHEDULER_ENABLED: "1"
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data
+      - ./runtime-db:/app/runtime-db
+      - ./obsidian:/app/obsidian
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 6
+    mem_limit: 640m
+    cpus: 0.45
+    networks:
+      - seo_net
+
+  frontend:
+    image: seo-brain-frontend:20260824-ads-ip-fix1
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      SEO_BRAIN_API_URL: http://backend:8000
+      SEO_BRAIN_API_TOKEN: ${API_TOKEN}
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      start_period: 25s
+      retries: 6
+    mem_limit: 384m
+    cpus: 0.30
+    networks:
+      seo_net: {}
+      gearboxemdad_app_net:
+        aliases:
+          - seo-brain-frontend
+
+networks:
+  seo_net:
+    driver: bridge
+  gearboxemdad_app_net:
+    external: true

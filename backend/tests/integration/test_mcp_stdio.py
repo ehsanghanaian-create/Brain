@@ -73,7 +73,9 @@ def test_site_summary_and_orphans_and_structure():
     st = out["structure"]
     assert st["category_tree"] and st["pages"]
     assert out["gsc"]["status"] in ("OK", "NO_GSC_DATA")
-    assert isinstance(out["models"], list) and out["models"][0]["name"]
+    assert isinstance(out["models"], list)
+    if out["models"]:                  # the auto-picked default site may have no MODEL entities
+        assert out["models"][0]["name"]
 
 
 @pytest.mark.skipif(not DB.exists(), reason="database not built")

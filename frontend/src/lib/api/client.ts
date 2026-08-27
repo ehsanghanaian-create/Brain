@@ -28,18 +28,24 @@ function newRequestId(): string {
   return crypto.randomUUID().replace(/-/g, '').slice(0, 16);
 }
 
-export async function api<T>(path: string, init: RequestInit & { json?: unknown } = {}): Promise<T> {
+type ApiInit = RequestInit & { json?: unknown; cacheSeconds?: number };
+
+export async function api<T>(path: string, init: ApiInit = {}): Promise<T> {
+  const { json, cacheSeconds, ...requestInit } = init;
   const requestId = newRequestId();
-  const headers: Record<string, string> = { Accept: 'application/json', 'X-Request-ID': requestId, ...(init.headers as Record<string, string> | undefined) };
-  let body = init.body;
-  if (init.json !== undefined) {
+  const headers: Record<string, string> = { Accept: 'application/json', 'X-Request-ID': requestId, ...(requestInit.headers as Record<string, string> | undefined) };
+  let body = requestInit.body;
+  if (json !== undefined) {
     headers['Content-Type'] = 'application/json';
-    body = JSON.stringify(init.json);
+    body = JSON.stringify(json);
   }
   if (isServer && process.env.SEO_BRAIN_API_TOKEN) headers['X-API-Token'] = process.env.SEO_BRAIN_API_TOKEN;
   let res: Response;
   try {
-    res = await fetch(`${baseUrl()}${path.startsWith('/') ? path : `/${path}`}`, { ...init, headers, body, cache: 'no-store' });
+    const cacheOptions = isServer && cacheSeconds && (!requestInit.method || requestInit.method === 'GET')
+      ? { next: { revalidate: cacheSeconds } }
+      : { cache: 'no-store' as const };
+    res = await fetch(`${baseUrl()}${path.startsWith('/') ? path : `/${path}`}`, { ...requestInit, headers, body, ...cacheOptions });
   } catch (e) {
     throw new ApiError(0, 'network_error', `ارتباط با بک‌اند برقرار نشد (${String(e)})`, null, requestId);
   }
@@ -62,6 +68,27 @@ function safeJson(text: string): unknown {
 
 // ---- typed helpers for the endpoints the foundation uses (more are added per phase) --------------
 export type Health = { status: string; version: string; database: string; migrations: { applied: string[]; pending: string[] } };
+export type PortfolioSiteState = 'ready' | 'running' | 'attention' | 'partial' | 'not_started';
+export type PortfolioActivity = {
+  site_id: string; site_name: string; run_id: string; status: string; progress: number; step: string | null; step_fa: string | null;
+  started_at: string | null; finished_at: string | null; errors: string[];
+};
+export type PortfolioSite = {
+  site_id: string; name: string; canonical_url: string; wp_url: string | null; mode: 'manual' | 'assisted' | 'autopilot';
+  state: PortfolioSiteState; state_reason: string; next_action: string;
+  issues: { kind: string; severity: 'blocking' | 'warning'; message: string }[];
+  setup_progress: number; setup_steps: { wordpress_configured: boolean; content_synced: boolean; crawl_ready: boolean; graph_ready: boolean };
+  connections: Record<string, string>; latest_sync: PortfolioActivity | null;
+  counts: { content: number; crawled: number; graph_nodes: number; graph_edges: number; keywords: number; planned_content: number; new_link_suggestions: number; high_link_suggestions: number };
+};
+export type PortfolioOverview = {
+  generated_at: string;
+  totals: { sites: number; ready_sites: number; needs_attention: number; content: number; crawled: number; graph_nodes: number; graph_edges: number; keywords: number; planned_content: number; new_link_suggestions: number; high_link_suggestions: number };
+  state_counts: Record<PortfolioSiteState, number>;
+  by_node_type: Record<string, number>;
+  sites: PortfolioSite[];
+  recent_activity: PortfolioActivity[];
+};
 export type GraphSummary = { site_id: string; nodes: number; edges: number; by_node_type: Record<string, number>; by_relation_type: Record<string, number>; site: Record<string, unknown> };
 export type SiteMemory = {
   site_id: string;
@@ -231,20 +258,34 @@ export type WsResult = { ok: boolean; run_id: string; step: string; result: { ti
 export type SiteCreateBody = Schemas['SiteCreate'];
 export type SiteUpdateBody = Schemas['SiteUpdate'];
 export type MemoryUpdateBody = Schemas['MemoryUpdate'];
+export type JobRun = {
+  run_id: string;
+  type: string;
+  site_id: string | null;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | string;
+  queued_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  result: unknown;
+  error: string | null;
+};
 
 export const endpoints = {
   health: () => api<Health>('/health'),
-  sites: () => api<Site[]>('/sites'),
-  site: (id: string) => api<Site>(`/sites/${encodeURIComponent(id)}`),
-  graphSummary: (id: string) => api<GraphSummary>(`/sites/${encodeURIComponent(id)}/graph/summary`),
-  memory: (id: string) => api<SiteMemory>(`/sites/${encodeURIComponent(id)}/memory`),
+  jobs: (limit = 50) => api<JobRun[]>(`/jobs?limit=${limit}`),
+  job: (runId: string) => api<JobRun>(`/jobs/${encodeURIComponent(runId)}`),
+  portfolioOverview: () => api<PortfolioOverview>('/portfolio/overview', { cacheSeconds: 10 }),
+  sites: () => api<Site[]>('/sites', { cacheSeconds: 10 }),
+  site: (id: string) => api<Site>(`/sites/${encodeURIComponent(id)}`, { cacheSeconds: 5 }),
+  graphSummary: (id: string) => api<GraphSummary>(`/sites/${encodeURIComponent(id)}/graph/summary`, { cacheSeconds: 10 }),
+  memory: (id: string) => api<SiteMemory>(`/sites/${encodeURIComponent(id)}/memory`, { cacheSeconds: 5 }),
   // phase 3 — sites management
   createSite: (body: SiteCreateBody) => api<Site>('/sites', { method: 'POST', json: body }),
   updateSite: (id: string, body: SiteUpdateBody) => api<Site>(`/sites/${encodeURIComponent(id)}`, { method: 'PATCH', json: body }),
   deleteSite: (id: string, force = false) => api<{ deleted: string }>(`/sites/${encodeURIComponent(id)}${force ? '?force=true' : ''}`, { method: 'DELETE' }),
-  connections: (id: string) => api<ConnectionsStatus>(`/sites/${encodeURIComponent(id)}/connections`),
+  connections: (id: string) => api<ConnectionsStatus>(`/sites/${encodeURIComponent(id)}/connections`, { cacheSeconds: 3 }),
   testConnection: (id: string, kind: ConnectionKind, property?: string | null, extra?: { wp_username?: string | null; wp_app_password?: string | null; clear_wp_credentials?: boolean }) =>
-    api<ConnectionResult>(`/sites/${encodeURIComponent(id)}/connections/${kind}/test`, { method: 'POST', json: { property: property || null, ...(extra ?? {}) } }),
+    api<ConnectionResult>(`/sites/${encodeURIComponent(id)}/connections/${kind}/test`, { method: 'POST', json: { property: property || null, ...extra } }),
   gscProperties: () => api<GscProperties>('/connections/gsc/properties'),
   initializeSite: (id: string) => api<InitializeResult>(`/sites/${encodeURIComponent(id)}/initialize`, { method: 'POST' }),
   saGscStatus: () => api<SaGscStatus>('/connections/gsc/service-account/status'),

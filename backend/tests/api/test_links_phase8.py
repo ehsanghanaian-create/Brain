@@ -89,7 +89,7 @@ def test_journey_model_and_confidence_and_health():
 
 def test_analyze_produces_explainable_journey_aware_suggestions(c):
     _seed(c)
-    r = c.post(f"/api/v1/sites/{SID}/links/analyze")
+    r = c.post(f"/api/v1/sites/{SID}/links/analyze?force_sync=true")
     assert r.status_code == 200, r.text
     d = r.json()
     assert d["mode"] == "sync" and d["suggestions"] > 0 and d["stats"]["orphans"] >= 1 and set(d["by_confidence"]) <= {"low", "recommended", "high"}
@@ -134,13 +134,13 @@ def test_analyze_produces_explainable_journey_aware_suggestions(c):
     summ = c.get(f"/api/v1/sites/{SID}/links/summary").json()
     assert summ["by_status"]["new"] == len(items) and summ["flags"]["orphan"] >= 1 and summ["avg_health"] is not None
     # determinism: second run keeps counts (no duplicates)
-    d2 = c.post(f"/api/v1/sites/{SID}/links/analyze").json()
+    d2 = c.post(f"/api/v1/sites/{SID}/links/analyze?force_sync=true").json()
     assert d2["suggestions"] == d["suggestions"] and d2["created"] == 0 and c.get(f"/api/v1/sites/{SID}/links/summary").json()["by_status"]["new"] == len(items)
 
 
 def test_statuses_graph_patterns_memory_content_task_export_settings_and_job(c):
     _seed(c)
-    c.post(f"/api/v1/sites/{SID}/links/analyze")
+    c.post(f"/api/v1/sites/{SID}/links/analyze?force_sync=true")
     items = c.get(f"/api/v1/sites/{SID}/links/suggestions", params={"limit": 200}).json()["items"]
     s = next(x for x in items if x["source_node_id"] == "post:gearbox" and x["target_node_id"] == "page:sandero")
     # accept with edited anchor → SUGGESTED_LINK edge, LINK_OPPORTUNITY removed
@@ -156,7 +156,7 @@ def test_statuses_graph_patterns_memory_content_task_export_settings_and_job(c):
     edges = c.get(f"/api/v1/sites/{SID}/graph/view", params={"mode": "links"}).json()["edges"]
     assert not any(e["relation_type"] in ("LINK_OPPORTUNITY", "SUGGESTED_LINK") and e["source"] == other["source_node_id"] and e["target"] == other["target_node_id"] for e in edges)
     # re-analyze keeps user statuses
-    c.post(f"/api/v1/sites/{SID}/links/analyze")
+    c.post(f"/api/v1/sites/{SID}/links/analyze?force_sync=true")
     assert c.get(f"/api/v1/sites/{SID}/links/suggestions/{s['id']}").json()["status"] == "done"
     assert c.get(f"/api/v1/sites/{SID}/links/summary").json()["by_status"]["dismissed"] == 1
     # patterns appear after ≥2 decisions; accept → Site Brain memory (source internal_linking); never automatic before that
@@ -174,7 +174,7 @@ def test_statuses_graph_patterns_memory_content_task_export_settings_and_job(c):
     # export csv (accepted+done)
     ex = c.get(f"/api/v1/sites/{SID}/links/export.csv")
     assert ex.status_code == 200 and "text/csv" in ex.headers["content-type"] and "امداد خودرو ساندرو در تهران" in ex.text and ex.text.count("\n") >= 2
-    # settings + job mode when page count exceeds threshold
+    # settings + job mode (the default now: analyze always queues unless force_sync)
     st = c.put(f"/api/v1/sites/{SID}/links/settings", json={"min_score": 0.5, "max_per_source": 2, "sync_threshold_pages": 0}).json()
     assert st["min_score"] == 0.5 and st["max_per_source"] == 2 and st["weights"]["topic"] == 0.3
     r = c.post(f"/api/v1/sites/{SID}/links/analyze")

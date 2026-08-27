@@ -1,0 +1,28 @@
+# BEGIN SEO-BRAIN
+seo.gearboxemdad.com {
+	encode zstd gzip
+
+
+	handle {
+		basic_auth {
+			saleh {$SEO_BRAIN_BASIC_AUTH_HASH}
+		}
+
+		reverse_proxy seo-brain-frontend:3000
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Robots-Tag "noindex, nofollow, noarchive"
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+# END SEO-BRAIN

@@ -74,7 +74,7 @@ export function AnalyticsPanel({ siteId, onOpen }: { siteId: string; onOpen: (ci
                     <TableCell className='font-medium'>{r.title}<div className='text-muted-foreground truncate text-[10px]' dir='ltr'>{r.url}</div></TableCell>
                     <TableCell><Badge variant='outline'>{r.status}</Badge></TableCell>
                     <TableCell className='tabular-nums'>{faNum.format(r.clicks)}</TableCell><TableCell className='tabular-nums'>{faNum.format(r.impressions)}</TableCell><TableCell>{pct(r.ctr)}</TableCell><TableCell className='tabular-nums'>{r.position ?? '—'}</TableCell>
-                    <TableCell className='text-xs' dir='ltr'>{r.delta && Object.keys(r.delta).length ? `clicks ${r.delta.clicks ?? 0 >= 0 ? '+' : ''}${r.delta.clicks ?? 0} · pos ${r.delta.position ?? '—'}` : '—'}</TableCell>
+                    <TableCell className='text-xs' dir='ltr'>{r.delta && Object.keys(r.delta).length ? `clicks ${(r.delta.clicks ?? 0) >= 0 ? '+' : ''}${r.delta.clicks ?? 0} · pos ${r.delta.position ?? '—'}` : '—'}</TableCell>
                     <TableCell className='text-xs'>{r.top_queries.map((q) => q.query).join('، ')}</TableCell>
                   </TableRow>
                 ))}

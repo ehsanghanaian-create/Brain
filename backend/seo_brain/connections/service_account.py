@@ -84,8 +84,8 @@ def check_access(list_sites: Callable[[], list[dict]] | None = None) -> dict[str
     email = sa_email()
     try:
         if list_sites is None:
-            from googleapiclient.discovery import build
-            svc = build("searchconsole", "v1", credentials=sa_credentials(), cache_discovery=False)
+            from ..common.google_http import build_google_service
+            svc = build_google_service("searchconsole", "v1", sa_credentials())
             entries = (svc.sites().list().execute() or {}).get("siteEntry", [])
         else:
             entries = list_sites()

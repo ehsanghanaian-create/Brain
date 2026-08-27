@@ -132,10 +132,11 @@ def status() -> dict[str, Any]:
             acct = json.loads(account_path().read_text(encoding="utf-8"))
         except ValueError:
             acct = {}
-    return {"connected": bool(tok.get("present")), "email": acct.get("email"),
-            "scopes": tok.get("scopes") or [], "expiry": tok.get("expiry"),
-            "gsc_scope": any(s.endswith("webmasters.readonly") for s in (tok.get("scopes") or [])),
-            "ga4_scope": GA4_SCOPE in (tok.get("scopes") or []),
+    oauth_scopes = tok.get("oauth_scopes") or []
+    return {"connected": bool(tok.get("oauth_present")), "email": acct.get("email"),
+            "scopes": oauth_scopes, "expiry": tok.get("expiry"),
+            "gsc_scope": any(s.endswith("webmasters.readonly") for s in oauth_scopes),
+            "ga4_scope": GA4_SCOPE in oauth_scopes,
             "client_configured": _google_client_configured() or _has_store_client(),
             "client_id_hint": client_hint(),
             "connected_at": acct.get("connected_at")}

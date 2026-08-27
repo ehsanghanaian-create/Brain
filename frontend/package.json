@@ -2,6 +2,7 @@
   "name": "next-shadcn-dashboard-starter",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "pnpm@10.34.5",
   "author": {
     "name": "Kiran",
     "url": "https://github.com/Kiranism"

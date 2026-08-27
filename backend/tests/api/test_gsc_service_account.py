@@ -54,6 +54,21 @@ def test_credential_loading_and_provider_priority(env, monkeypatch):
     assert tok["source"] == "service_account" and tok["sa_email"].startswith("seo-brain-gsc-reader@")
 
 
+def test_service_account_is_not_reported_as_oauth_connection(env):
+    env["store"].set(sa_mod.SA_REF, _fake_sa_json())
+    status = env["client"].get("/api/v1/connections/google/status").json()
+    assert status["connected"] is False
+    assert status["gsc_scope"] is False
+    assert status["ga4_scope"] is False
+
+
+def test_oauth_client_is_detected_in_encrypted_store(env):
+    env["store"].set("google-client-id", "123456789.apps.googleusercontent.com")
+    env["store"].set("google-client-secret", "configured-secret")
+    from seo_brain.connections.service import _google_client_configured
+    assert _google_client_configured() is True
+
+
 def test_status_and_check_endpoints_no_secret_leakage(env, monkeypatch):
     c = env["client"]
     # not configured
@@ -91,10 +106,10 @@ def test_gsc_client_uses_service_account_when_configured(env, monkeypatch):
     env["store"].set(sa_mod.SA_REF, _fake_sa_json())
     from seo_brain.gsc.client import GscClient
     built = {}
-    def fake_build(api, ver, credentials=None, cache_discovery=False):
-        built["api"], built["creds"] = api, credentials
+    def fake_build(api, ver, http=None, cache_discovery=False):
+        built["api"], built["transport"] = api, http
         return object()
     monkeypatch.setattr("googleapiclient.discovery.build", fake_build)
     c = GscClient("demo", interactive=False, save_raw=False)
     assert built["api"] == "searchconsole"
-    assert built["creds"].service_account_email.startswith("seo-brain-gsc-reader@")   # SA-first, pipeline untouched
+    assert built["transport"].credentials.service_account_email.startswith("seo-brain-gsc-reader@")   # SA-first, proxy-aware pipeline

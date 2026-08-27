@@ -187,3 +187,23 @@ def test_test_provider_with_fake_http():
     assert probe_provider(ProviderConfig(name="o", kind="ollama", base_url="http://127.0.0.1:11434"), None, fetch=fake)["models_found"] == ["llama3"]
     assert probe_provider(ProviderConfig(name="g", kind="openai"), "bad", fetch=fake)["status"] == "not_authorized"
     assert probe_provider(ProviderConfig(name="g", kind="openai"), None, fetch=fake)["status"] == "not_configured"
+
+
+def test_free_cloud_provider_kinds_and_read_only_probe():
+    seen = []
+
+    def fake(url, headers=None):
+        seen.append((url, headers or {}))
+        return httpx.Response(200, json={"data": [{"id": "qwen/qwen3.6-27b"}]}, request=httpx.Request("GET", url))
+
+    groq = ProviderConfig(name="groq", kind="groq")
+    result = probe_provider(groq, "gsk_test", fetch=fake)
+    assert result["ok"] and result["models_found"] == ["qwen/qwen3.6-27b"]
+    assert seen[-1][0] == "https://api.groq.com/openai/v1/models"
+    assert seen[-1][1]["Authorization"] == "Bearer gsk_test"
+
+    cf = ProviderConfig(name="cloudflare", kind="cloudflare", base_url="https://api.cloudflare.com/client/v4/accounts/account-id/ai/v1")
+    result = probe_provider(cf, "cf_token", fetch=fake)
+    assert result["ok"]
+    assert seen[-1][0].endswith("/accounts/account-id/tokens/verify")
+    assert seen[-1][1]["Authorization"] == "Bearer cf_token"

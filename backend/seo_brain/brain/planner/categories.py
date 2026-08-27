@@ -20,7 +20,8 @@ Fetch = Callable[[str, dict], tuple[Any, dict]]
 
 
 def _default_fetch(url: str, params: dict) -> tuple[Any, dict]:
-    r = httpx.get(url, params=params, timeout=30, headers={"User-Agent": "SEO-Brain-Planner/0.1 (read-only)"})
+    from ...common.http import site_proxy
+    r = httpx.get(url, params=params, timeout=30, proxy=site_proxy(), headers={"User-Agent": "SEO-Brain-Planner/0.1 (read-only)"})
     r.raise_for_status()
     return r.json(), dict(r.headers)
 

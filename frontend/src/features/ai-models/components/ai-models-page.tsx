@@ -36,7 +36,7 @@ export function AiModelsPage({ sites = [] }: { sites?: Site[] }) {
   const kind = kinds.find((k) => k.kind === f.kind);
   function openNew() { setEditing(null); setF({ name: '', kind: 'anthropic', api_key: '', base_url: '', default_model: '' }); setOpen(true); }
   function openClaude() { const k = kinds.find((x) => x.kind === 'anthropic'); setEditing(null); setF({ name: 'anthropic', kind: 'anthropic', api_key: '', base_url: k?.base_url ?? 'https://api.anthropic.com', default_model: 'claude-sonnet-5' }); setOpen(true); }
-  function openCloudProvider(kindKey: 'groq' | 'cloudflare') { const k = kinds.find((x) => x.kind === kindKey); setEditing(null); setF({ name: kindKey, kind: kindKey, api_key: '', base_url: k?.base_url ?? '', default_model: k?.models[0] ?? '' }); setOpen(true); }
+  function openCloudProvider(kindKey: 'groq' | 'cloudflare' | 'google') { const k = kinds.find((x) => x.kind === kindKey); setEditing(null); setF({ name: kindKey, kind: kindKey, api_key: '', base_url: k?.base_url ?? '', default_model: k?.models[0] ?? '' }); setOpen(true); }
   function openOmni() { const k = kinds.find((x) => x.kind === 'omniroute'); setEditing(null); setF({ name: 'omniroute', kind: 'omniroute', api_key: '', base_url: k?.base_url ?? 'http://127.0.0.1:20128/v1', default_model: 'auto' }); setOpen(true); }
   function openEdit(p: ProviderConfig) { setEditing(p); setF({ name: p.name, kind: p.kind, api_key: '', base_url: p.base_url ?? '', default_model: p.default_model ?? '' }); setOpen(true); }
   async function save() {
@@ -73,6 +73,7 @@ export function AiModelsPage({ sites = [] }: { sites?: Site[] }) {
         <ProviderKindCard kindKey='groq' providers={providers} kind={kinds.find((k) => k.kind === 'groq')} onConnect={() => openCloudProvider('groq')} onEdit={openEdit} onTest={test} onChanged={load} busy={busy} setBusy={setBusy} />
         <ProviderKindCard kindKey='cloudflare' providers={providers} kind={kinds.find((k) => k.kind === 'cloudflare')} onConnect={() => openCloudProvider('cloudflare')} onEdit={openEdit} onTest={test} onChanged={load} busy={busy} setBusy={setBusy} />
       </div>
+      <ProviderKindCard kindKey='google' providers={providers} kind={kinds.find((k) => k.kind === 'google')} onConnect={() => openCloudProvider('google')} onEdit={openEdit} onTest={test} onChanged={load} busy={busy} setBusy={setBusy} />
       <ProviderKindCard kindKey='omniroute' providers={providers} kind={kinds.find((k) => k.kind === 'omniroute')} onConnect={openOmni} onEdit={openEdit} onTest={test} onChanged={load} busy={busy} setBusy={setBusy} />
       <Card>
         <CardHeader>
@@ -179,10 +180,11 @@ const CARD_META: Record<string, { title: string; wanted: string[]; connectLabel:
   anthropic: { title: 'Claude (Anthropic)', wanted: ['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5'], connectLabel: 'اتصال Claude', needKey: true, okText: 'Claude متصل است. مدل پیش‌فرض Sonnet (متعادل)، Opus برای کیفیت و Haiku برای وظایف سریع. مسیرهای وظایف را با «اعمال مسیرهای پیشنهادی» تنظیم کنید (تغییر مسیر همیشه اقدام انسانی است).' },
   groq: { title: 'Groq Cloud — اجرای رایگان روی سرور', wanted: ['qwen/qwen3.6-27b', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'], connectLabel: 'اتصال Groq رایگان', needKey: true, okText: 'Groq متصل است. تولید متن روی زیرساخت ابری Groq انجام می‌شود و هیچ مدلی روی کامپیوتر شما اجرا نمی‌شود. خطای محدودیت سهمیه به‌صورت خودکار وارد زنجیره جایگزین می‌شود.' },
   cloudflare: { title: 'Cloudflare Workers AI — جایگزین رایگان', wanted: ['@cf/qwen/qwen3-30b-a3b-fp8', '@cf/openai/gpt-oss-20b'], connectLabel: 'اتصال Workers AI', needKey: true, okText: 'Workers AI متصل است و به‌عنوان مسیر ابری جایگزین هنگام محدودیت یا قطعی Groq قابل استفاده است.' },
+  google: { title: 'Google Gemini', wanted: ['gemini-3.6-flash', 'gemini-2.5-pro', 'gemini-2.5-flash'], connectLabel: 'اتصال Gemini', needKey: true, okText: 'Gemini متصل است. مدل پیش‌فرض Gemini 3.6 Flash (متن بلند تا ۱M توکن، خروجی JSON، تولید محتوا/تحلیل سئو/بازنویسی). کلید را از Google AI Studio بگیرید؛ مسیرهای وظایف را با «اعمال مسیرهای پیشنهادی» تنظیم کنید.' },
   omniroute: { title: 'OmniRoute (گیت‌وی مسیریابی خارجی)', wanted: ['auto', 'auto/fast', 'auto/cheap', 'auto/coding'], connectLabel: 'افزودن OmniRoute', needKey: false, okText: 'OmniRoute متصل است: SEO Brain Gateway → OmniRoute → Claude / OpenAI / Gemini / … . مدل «auto» مسیریابی خود OmniRoute است؛ ids به شکل provider/model هم قابل انتخاب‌اند. بودجه، دفتر مصرف، اعتبارسنجی و مسیریابی SEO Brain همچنان اعمال می‌شود.' },
 };
 
-export function ProviderKindCard({ kindKey, providers, kind, onConnect, onEdit, onTest, onChanged, busy, setBusy }: { kindKey: 'anthropic' | 'groq' | 'cloudflare' | 'omniroute'; providers: ProviderConfig[]; kind?: ProviderKind; onConnect: () => void; onEdit: (p: ProviderConfig) => void; onTest: (p: ProviderConfig) => Promise<void>; onChanged: () => void; busy: string | null; setBusy: (v: string | null) => void }) {
+export function ProviderKindCard({ kindKey, providers, kind, onConnect, onEdit, onTest, onChanged, busy, setBusy }: { kindKey: 'anthropic' | 'groq' | 'cloudflare' | 'google' | 'omniroute'; providers: ProviderConfig[]; kind?: ProviderKind; onConnect: () => void; onEdit: (p: ProviderConfig) => void; onTest: (p: ProviderConfig) => Promise<void>; onChanged: () => void; busy: string | null; setBusy: (v: string | null) => void }) {
   const meta = CARD_META[kindKey];
   const claude = providers.find((p) => p.kind === kindKey);
   const status: ClaudeStatus = kindKey === 'omniroute' ? (!claude ? 'missing_credentials' : !claude.enabled ? 'error' : !claude.last_test ? 'untested' : claude.last_test.ok ? 'connected' : 'error') : claudeStatus(claude);

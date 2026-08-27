@@ -22,7 +22,12 @@ PROVIDER_KINDS: dict[str, dict[str, Any]] = {
                   "setup": {"console_url": "https://platform.claude.com/settings/keys", "key_prefix": "sk-ant-", "docs": "https://platform.claude.com/docs/en/get-started",
                             "fa": "کلید API را از کنسول Anthropic (Settings → API keys) بسازید و همین‌جا وارد کنید. کلید فقط یک‌بار ارسال می‌شود، با DPAPI روی همین دستگاه رمزنگاری می‌شود و هرگز در پاسخ API، لاگ یا دیتابیس ظاهر نمی‌شود."}},
     "openai": {"label": "ChatGPT (OpenAI)", "base_url": "https://api.openai.com/v1", "models": ["gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4o"], "needs_key": True},
-    "google": {"label": "Gemini (Google)", "base_url": "https://generativelanguage.googleapis.com/v1beta", "models": ["gemini-2.5-pro", "gemini-2.5-flash"], "needs_key": True},
+    "google": {"label": "Gemini (Google)", "base_url": "https://generativelanguage.googleapis.com/v1beta", "models": ["gemini-3.6-flash", "gemini-2.5-pro", "gemini-2.5-flash"], "needs_key": True,
+               # env fallback only — the primary path stays UI → SecretStore; the env var is read, never stored or logged
+               "env_key": "GEMINI_API_KEY", "env_model": "GEMINI_MODEL",
+               "capabilities": ["content_generation", "seo_analysis", "content_rewrite", "structured_output", "long_context"],
+               "setup": {"console_url": "https://aistudio.google.com/apikey", "key_prefix": "AIza", "docs": "https://ai.google.dev/gemini-api/docs",
+                         "fa": "کلید API را از Google AI Studio (aistudio.google.com/apikey) بسازید و همین‌جا وارد کنید. کلید با DPAPI روی همین دستگاه رمزنگاری می‌شود و هرگز در پاسخ API، لاگ یا دیتابیس ظاهر نمی‌شود. مدل پیش‌فرض Gemini 3.6 Flash است (متن بلند، خروجی JSON، فارسی)."}},
     "openrouter": {"label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "models": [], "needs_key": True},
     "groq": {"label": "Groq Cloud (سهمیه رایگان)", "base_url": "https://api.groq.com/openai/v1",
              "models": ["qwen/qwen3.6-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"], "needs_key": True,
@@ -40,6 +45,13 @@ PROVIDER_KINDS: dict[str, dict[str, Any]] = {
                             "fa": "OmniRoute یک گیت‌وی متن‌باز است که Claude/OpenAI/Gemini و صدها ارائه‌دهنده دیگر را پشت یک endpoint سازگار با OpenAI قرار می‌دهد (پیش‌فرض http://127.0.0.1:20128/v1؛ نصب: npm i -g omniroute). کلید API اختیاری است (Dashboard → Endpoints) و فقط در SecretStore نگهداری می‌شود. Gateway خود SEO Brain (بودجه، دفتر مصرف، اعتبارسنجی، مسیردهی) دست‌نخورده می‌ماند."}},
 }
 KEYLESS_KINDS = ("ollama", "custom", "omniroute")      # configured without a stored key
+
+
+def env_api_key(kind: str) -> str | None:
+    """Optional env fallback (e.g. GEMINI_API_KEY) for headless/server deploys — SecretStore stays the primary path."""
+    import os
+    var = PROVIDER_KINDS.get(kind, {}).get("env_key")
+    return (os.environ.get(var) or "").strip() or None if var else None
 GATEWAY_KINDS = ("omniroute",)                          # external routers (provider/model ids resolved upstream)
 TASK_KINDS = ("content_writing", "seo_analysis", "research", "brief", "keyword_analysis", "internal_linking", "schema", "generic",
               # phase 9 task kinds
@@ -69,7 +81,8 @@ class ProviderConfig:
         d["is_gateway"] = self.kind in GATEWAY_KINDS
         d["route_kind"] = "gateway" if self.kind in GATEWAY_KINDS else "direct"
         d["endpoint_url"] = self.base_url                # explicit alias for gateways (same column)
-        d["configured"] = bool(self.enabled and (self.secret_ref or self.kind in KEYLESS_KINDS))
+        d["configured"] = bool(self.enabled and (self.secret_ref or self.kind in KEYLESS_KINDS or env_api_key(self.kind)))
+        d["key_source"] = "secret_store" if self.secret_ref else ("env" if env_api_key(self.kind) else None)
         return d
 
 
@@ -105,6 +118,9 @@ class ProviderConfigRepository(Repository):
         if self.get_by_name(name):
             raise ValueError(f"provider '{name}' already exists")
         kd = PROVIDER_KINDS[kind]
+        if not default_model and kd.get("env_model"):
+            import os
+            default_model = (os.environ.get(kd["env_model"]) or "").strip() or None
         now = utcnow()
         with self.engine.begin() as cx:
             res = cx.execute(ai_providers.insert().values(name=name, kind=kind, base_url=base_url or kd["base_url"] or None, default_model=default_model or (kd["models"][0] if kd["models"] else None),
@@ -143,7 +159,7 @@ class ProviderConfigRepository(Repository):
             cx.execute(ai_providers.update().where(ai_providers.c.id == pid).values(secret_ref=None, key_hint=None, updated_at=utcnow()))
 
     def api_key(self, p: ProviderConfig) -> str | None:
-        return self.secrets.get(p.secret_ref)
+        return (self.secrets.get(p.secret_ref) if p.secret_ref else None) or env_api_key(p.kind)
 
     def delete(self, pid: int) -> bool:
         p = self.get(pid)
@@ -232,6 +248,9 @@ RECOMMENDED_ROUTES: dict[str, dict[str, tuple[str, str | None]]] = {
         "outline": ("claude-haiku-4-5", "claude-sonnet-5"), "rewrite": ("claude-haiku-4-5", "claude-sonnet-5"), "title_meta": ("claude-haiku-4-5", "claude-sonnet-5"), "faq": ("claude-haiku-4-5", "claude-sonnet-5"),
         "internal_linking": ("claude-haiku-4-5", "claude-sonnet-5"), "schema": ("claude-haiku-4-5", "claude-sonnet-5"), "keyword_analysis": ("claude-haiku-4-5", "claude-sonnet-5"), "generic": ("claude-haiku-4-5", "claude-sonnet-5"),
     },
+    # Gemini 3.6 Flash covers every task; heavier tasks fall back to 2.5 Pro, light ones to 2.5 Flash
+    "google": {k: (("gemini-3.6-flash", "gemini-2.5-flash") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic")
+                   else ("gemini-3.6-flash", "gemini-2.5-pro")) for k in TASK_KINDS},
 }
 
 

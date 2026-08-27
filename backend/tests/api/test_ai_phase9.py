@@ -40,8 +40,9 @@ def fake_transport(kind: str, fail_first: int = 0, status: int = 200):
         text_in = json.dumps(body, ensure_ascii=False)
         want_json = "JSON" in text_in or "json" in text_in.lower()
         keys = []
-        for m in (body.get("messages") or []):
-            c = m.get("content") if isinstance(m, dict) else ""
+        parts = [p for ct in (body.get("contents") or []) for p in (ct.get("parts") or [])]   # Gemini wire format
+        for m in (body.get("messages") or []) + parts:
+            c = (m.get("content") or m.get("text")) if isinstance(m, dict) else ""
             if isinstance(c, str) and "کلیدهای" in c:
                 keys = [k.strip() for k in c.split("کلیدهای", 1)[1].split("برگردان")[0].replace("،", ",").split(",") if k.strip()]
         out = json.dumps({k: (["x"] if k.endswith("s") else "x") for k in keys} or {"text": "سلام"}, ensure_ascii=False) if want_json else "پاسخ آزمایشی فارسی برای " + kind
@@ -300,10 +301,12 @@ def test_pipeline_echo_manual_and_real_assisted_with_sse_feedback_learning(c):
         acc_i = c.patch(f"/api/v1/ai/insights/{ins[0]['id']}", json={"status": "accepted"}).json()
         assert acc_i["status"] == "accepted"
     assert c.get("/api/v1/ai/task-routes").json()["routes"] == routes_before                                  # routing never auto-changes
-    # meta / no publishing endpoint
+    # meta / publishing endpoints: phase 16 allows ONLY the mode-gated writer paths (plan publish + capability probe)
     meta = c.get(f"/api/v1/sites/{SID}/generation/meta").json()
     assert meta["modes"] == ["manual", "assisted"] and meta["reserved_modes"] == ["autopilot"] and "fact_check" in [a["agent"] for a in meta["agents"]]
-    assert not any("publish" in p_ and "metadata" not in p_ for p_ in c.get("/api/openapi.json").json()["paths"])   # phase 8.5 adds /publishing-metadata (metadata only, publishing disabled)
+    allowed_publish = {"/api/v1/sites/{site_id}/content-plans/{plan_id}/publish", "/api/v1/sites/{site_id}/wordpress/publish-capability"}
+    extra = {p_ for p_ in c.get("/api/openapi.json").json()["paths"] if "publish" in p_ and "metadata" not in p_} - allowed_publish
+    assert not extra, f"unexpected publish endpoints: {extra}"
 
 
 def _debug(c, run):
@@ -472,6 +475,51 @@ def test_claude_provider_setup_routes_and_workspace_default(c):
     p2 = c.post("/api/v1/ai/provider-configs", json={"name": "claude-nokey", "kind": "anthropic"}).json()
     o2 = next(pp for pp in c.get(f"/api/v1/sites/{SID}/ai-workspace/options").json()["providers"] if pp["name"] == "claude-nokey")
     assert o2["status"] == "missing_credentials" and not o2["configured"] and p2["has_key"] is False
+
+
+def test_gemini_provider_setup_routes_env_fallback_and_workspace(c, monkeypatch):
+    """Gemini 3.6 Flash as a first-class provider: kind metadata + setup, catalog seeding, recommended routes,
+    workspace generation through the gateway (fake google transport), and the optional GEMINI_API_KEY env fallback."""
+    _seed_content(c)
+    kinds = {k["kind"]: k for k in c.get("/api/v1/ai/provider-kinds").json()}
+    g = kinds["google"]
+    assert g["models"][0] == "gemini-3.6-flash" and g["setup"]["console_url"].startswith("https://aistudio.google.com")
+    assert "content_generation" in g["capabilities"] and g["env_key"] == "GEMINI_API_KEY"
+    p = _add_provider(c, "gemini", "google", "AIzaTestKey12345678")
+    assert p["has_key"] and p["default_model"] == "gemini-3.6-flash" and "api_key" not in json.dumps(p) and "secret_ref" not in p
+    models = {m["model_id"]: m for m in c.get(f"/api/v1/ai/models?provider_id={p['id']}").json()}
+    assert {"gemini-3.6-flash", "gemini-2.5-pro", "gemini-2.5-flash"} <= set(models)
+    assert models["gemini-3.6-flash"]["tier"] == "balanced" and models["gemini-3.6-flash"]["context_tokens"] == 1000000
+    t = c.post(f"/api/v1/ai/provider-configs/{p['id']}/test").json()
+    assert t["ok"] and "AIzaTest" not in json.dumps(t)
+    # recommended routes: heavy tasks fall back to 2.5 Pro, light tasks to 2.5 Flash — applying stays a human action
+    rec = {r["task_kind"]: r for r in c.get(f"/api/v1/ai/provider-configs/{p['id']}/recommended-routes").json()["routes"]}
+    assert rec["article_long"]["model"] == "gemini-3.6-flash" and rec["article_long"]["fallback_model"] == "gemini-2.5-pro"
+    assert rec["faq"]["model"] == "gemini-3.6-flash" and rec["faq"]["fallback_model"] == "gemini-2.5-flash"
+    ap = c.post(f"/api/v1/ai/provider-configs/{p['id']}/recommended-routes", json={}).json()
+    assert ap["applied"] == len(rec)
+    prev = c.get("/api/v1/ai/routing/preview?task_kind=content_writing").json()
+    assert prev["policy"] == "explicit" and [s["model"] for s in prev["chain"][:2]] == ["gemini-3.6-flash", "gemini-2.5-pro"]
+    # workspace generation goes through the same gateway/ledger path
+    spec = {"title": "امداد خودرو پژو", "keyword": "امداد خودرو پژو", "word_count": 400}
+    r = c.post(f"/api/v1/sites/{SID}/ai-workspace/generate", json={**spec, "provider": "gemini", "model": "gemini-3.6-flash"})
+    assert r.status_code == 200, r.text
+    m = r.json()["meta"]
+    assert m["provider"] == "gemini" and m["provider_kind"] == "google" and m["model"] == "gemini-3.6-flash" and m["placeholder"] is False
+    assert m["input_tokens"] == 90 and m["output_tokens"] == 50
+    # optional env fallback: a keyless google provider becomes configured once GEMINI_API_KEY is set (key never stored)
+    p2 = c.post("/api/v1/ai/provider-configs", json={"name": "gemini-env", "kind": "google"}).json()
+    assert p2["has_key"] is False and p2["configured"] is False and p2["key_source"] is None
+    monkeypatch.setenv("GEMINI_API_KEY", "AIzaEnvKey")
+    p2b = next(x for x in c.get("/api/v1/ai/provider-configs").json() if x["name"] == "gemini-env")
+    assert p2b["configured"] is True and p2b["key_source"] == "env" and p2b["has_key"] is False
+    repo = ProviderConfigRepository(c.eng, c.store)
+    assert repo.api_key(repo.get_by_name("gemini-env")) == "AIzaEnvKey"
+    monkeypatch.delenv("GEMINI_API_KEY")
+    # optional GEMINI_MODEL env: default model for a new google provider
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-2.5-flash")
+    p3 = c.post("/api/v1/ai/provider-configs", json={"name": "gemini-envmodel", "kind": "google"}).json()
+    assert p3["default_model"] == "gemini-2.5-flash"
 
 
 # --------------------------------------------------------------------------- OmniRoute (external gateway behind the SEO Brain Gateway)

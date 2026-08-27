@@ -23,6 +23,8 @@ DEFAULT_CATALOG: dict[str, list[dict[str, Any]]] = {
         {"model_id": "gpt-4o-mini", "display": "GPT-4o mini", "tier": "fast", "tags": ["cheap", "json", "translation"], "context_tokens": 128000, "price_in_per_m": 0.15, "price_out_per_m": 0.6},
     ],
     "google": [
+        # prices are indicative defaults (user-editable in AI Models) — correct them when Google publishes list prices
+        {"model_id": "gemini-3.6-flash", "display": "Gemini 3.6 Flash", "tier": "balanced", "tags": ["persian", "long_form", "json", "translation"], "context_tokens": 1000000, "price_in_per_m": 0.5, "price_out_per_m": 3.0},
         {"model_id": "gemini-2.5-pro", "display": "Gemini 2.5 Pro", "tier": "reasoning", "tags": ["reasoning", "long_form", "json", "translation"], "context_tokens": 1000000, "price_in_per_m": 1.25, "price_out_per_m": 10.0},
         {"model_id": "gemini-2.5-flash", "display": "Gemini 2.5 Flash", "tier": "fast", "tags": ["cheap", "json", "translation"], "context_tokens": 1000000, "price_in_per_m": 0.3, "price_out_per_m": 2.5},
     ],

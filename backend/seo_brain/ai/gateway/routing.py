@@ -11,7 +11,7 @@ from sqlalchemy import Engine, select
 
 from ...db.repositories.base import loads, utcnow
 from ...db.tables import ai_routes
-from ..config import GATEWAY_KINDS, KEYLESS_KINDS, ProviderConfigRepository
+from ..config import GATEWAY_KINDS, KEYLESS_KINDS, ProviderConfigRepository, env_api_key
 from .catalog import TIERS
 from .gateway import Gateway, RouteStep
 
@@ -72,7 +72,7 @@ class TaskRouter:
                 continue
             if p.kind in GATEWAY_KINDS and m.get("source") == "discovered":
                 continue        # gateways: auto-routing uses only the curated auto* entries; discovered provider/model ids are for explicit selection
-            out.append({**m, "provider": p.name, "kind": p.kind, "p50_ms": (h or {}).get("p50_ms"), "has_key": bool(p.secret_ref) or p.kind in KEYLESS_KINDS})
+            out.append({**m, "provider": p.name, "kind": p.kind, "p50_ms": (h or {}).get("p50_ms"), "has_key": bool(p.secret_ref) or p.kind in KEYLESS_KINDS or bool(env_api_key(p.kind))})
         return [m for m in out if m["has_key"]]
 
     def resolve(self, task_kind: str, site_id: str | None, priority: str = "normal", quality_min: str | None = None, override: dict[str, str] | None = None) -> RoutingDecision:

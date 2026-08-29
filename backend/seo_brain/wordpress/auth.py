@@ -3,7 +3,8 @@
 
 Resolution order used by the connector and the diagnostics: explicit credentials → per-site SecretStore → `.env`
 (`WP_USERNAME` / `WP_APP_PASSWORD`, legacy single-site setup) → none (public, read-only REST only).
-SEO Brain never writes to WordPress; credentials only unlock identity (`users/me`) and authenticated *reads*.
+The same credentials are also required by the explicit, human-triggered publishing flow.  Merely connecting a site
+never writes anything; a write happens only after a separate publish/schedule action in Content Brain.
 """
 from __future__ import annotations
 

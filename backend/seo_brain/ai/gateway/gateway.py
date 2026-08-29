@@ -241,7 +241,11 @@ class Gateway:
                     return result
                 except ValidationError as e:
                     ms = int((time.perf_counter() - t0) * 1000); last_err = f"ValidationError: {e}"
-                    result.attempts.append(Attempt(step.provider, step.model, False, last_err, ms)); break
+                    result.attempts.append(Attempt(step.provider, step.model, False, last_err, ms))
+                    if attempt_no == 0:
+                        time.sleep(0.1)
+                        continue
+                    break
                 except ProviderError as e:
                     ms = int((time.perf_counter() - t0) * 1000); last_err = f"ProviderError: {e}"
                     result.attempts.append(Attempt(step.provider, step.model, False, last_err, ms))

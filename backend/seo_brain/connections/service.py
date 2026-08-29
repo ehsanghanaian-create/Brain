@@ -430,10 +430,18 @@ class ConnectionsService:
             info = {}
             try:
                 j = rr.json() if rr is not None else {}
-                info = {"user_id": j.get("id"), "user_name": j.get("name"), "roles": (j.get("roles") or [])[:5], "capabilities_read": bool((j.get("capabilities") or {}).get("read", True))}
+                roles = (j.get("roles") or [])[:5]
+                caps = j.get("capabilities") or {}
+                # WordPress normally returns capabilities for context=edit.  Role inference is a compatibility
+                # fallback for installations that remove that field while still returning the authenticated role.
+                can_edit = bool(caps.get("edit_posts") or set(roles) & {"administrator", "editor", "author"})
+                can_publish = bool(caps.get("publish_posts") or set(roles) & {"administrator", "editor", "author"})
+                info = {"user_id": j.get("id"), "user_name": j.get("name"), "roles": roles,
+                        "capabilities_read": bool(caps.get("read", True)), "write_ready": can_edit,
+                        "publish_ready": can_publish}
             except ValueError:
                 pass
-            e3["ok"] = True; e3["hint"] = f"کاربر متصل شد: {info.get('user_name') or auth.username}" + (f" · نقش‌ها: {', '.join(info['roles'])}" if info.get("roles") else "")
+            e3["ok"] = True; e3["hint"] = f"کاربر متصل شد: {info.get('user_name') or auth.username}" + (f" · نقش‌ها: {', '.join(info['roles'])}" if info.get("roles") else "") + (" · آماده انتشار" if info.get("write_ready") else " · بدون مجوز ویرایش نوشته‌ها")
             st = {"configured": True, "status": "ok", "message": "احراز هویت تأیید شد", **info}
         elif code == 401:
             e3["ok"] = False; e3["hint"] = "۴۰۱ — نام‌کاربری یا Application Password اشتباه است (یا Application Passwords در وردپرس غیرفعال است)."

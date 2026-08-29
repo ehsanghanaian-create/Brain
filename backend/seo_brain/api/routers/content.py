@@ -1,4 +1,4 @@
-"""Content Brain endpoints (phase 6): /sites/{site_id}/content/*  — human approval workflow, no auto-publishing."""
+"""Content Brain endpoints: human approval plus explicit WordPress draft/publish/schedule actions."""
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
 
 from ...brain.content import ContentService, WorkflowError
 from ...brain.content.intelligence import ContentIntelligenceService
@@ -74,6 +74,11 @@ def intel(eng: Engine = Depends(engine), orch=Depends(orchestrator)) -> ContentI
     return ContentIntelligenceService(eng, orch)
 
 
+def publisher(eng: Engine = Depends(engine)):
+    from ...wordpress.publisher import ContentPublisher
+    return ContentPublisher(eng)
+
+
 class DraftCreate(BaseModel):
     body: str = Field(min_length=1)
     format: Literal["markdown", "html", "text"] = "markdown"
@@ -88,6 +93,13 @@ class DraftCreate(BaseModel):
 class ReviewRequest(BaseModel):
     draft_id: int | None = None
     use_ai: bool = False
+
+
+class PublishRequest(BaseModel):
+    action: Literal["draft", "publish", "future"] = "draft"
+    category_ids: list[int] = Field(default_factory=list, max_length=20)
+    scheduled_at: str | None = None
+    draft_id: int | None = None
 
 
 class InsightStatus(BaseModel):
@@ -208,6 +220,36 @@ def put_analytics_settings(site_id: str, body: dict, i: ContentIntelligenceServi
     return i.drafts.put_settings(site_id, "analytics", {**cur, **allowed})
 
 
+@router.get("/wordpress/categories")
+def wordpress_categories(site_id: str, eng: Engine = Depends(engine)) -> list[dict]:
+    """Real WordPress categories for the selected site; Brain/manual categories are deliberately excluded."""
+    with eng.connect() as cx:
+        rows = cx.execute(text("SELECT id, wordpress_category_id, parent_id, name, slug, post_count, synced_at "
+                               "FROM content_categories WHERE site_id=:s AND source='wordpress' "
+                               "ORDER BY parent_id IS NOT NULL, name"), {"s": site_id}).mappings().all()
+    return [dict(r) for r in rows]
+
+
+@router.post("/{cid}/wordpress/publish")
+def publish_wordpress(site_id: str, cid: int, body: PublishRequest, p=Depends(publisher)) -> dict:
+    """Create/update the real post. A future post is stored by WordPress and does not depend on the browser tab."""
+    from ...wordpress.publisher import PublishingError
+    try:
+        return p.publish(site_id, cid, body.action, body.category_ids, body.scheduled_at, body.draft_id)
+    except PublishingError as exc:
+        raise ApiError(exc.status, str(exc), code=exc.code, details=exc.detail) from exc
+
+
+@router.get("/{cid}/wordpress/publication")
+def wordpress_publication(site_id: str, cid: int, refresh: bool = True, p=Depends(publisher)) -> dict:
+    """Return stored state and, by default, verify it directly with WordPress."""
+    from ...wordpress.publisher import PublishingError
+    try:
+        return p.status(site_id, cid, refresh=refresh)
+    except PublishingError as exc:
+        raise ApiError(exc.status, str(exc), code=exc.code, details=exc.detail) from exc
+
+
 @router.get("/{cid}/metrics")
 def content_metrics_ep(site_id: str, cid: int, window: str = "28d", eng: Engine = Depends(engine)) -> list[dict]:
     return ContentAnalytics(eng).metrics(site_id, cid, window)
@@ -237,7 +279,7 @@ def update_content(site_id: str, cid: int, body: ContentUpdate, s: ContentServic
 
 @router.post("/{cid}/transition")
 def transition(site_id: str, cid: int, body: Transition, s: ContentService = Depends(svc)) -> dict:
-    """Human approval workflow. Forward one step or back; 'published' requires a URL. Never publishes anywhere."""
+    """Human approval workflow. Real WordPress publishing is a separate explicit action."""
     try:
         ContentIntelligenceService(s.engine, None).check_gate(site_id, cid, body.status)
         it = s.repo.transition(site_id, cid, body.status, actor="user", note=body.note)

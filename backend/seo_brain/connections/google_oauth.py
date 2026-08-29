@@ -26,7 +26,7 @@ log = logging.getLogger("google.oauth")
 
 WEB_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email", *SCOPES]
 _STATE_TTL = 600
-_states: dict[str, float] = {}
+_states: dict[str, dict[str, Any]] = {}
 
 
 def _states_path() -> Path:
@@ -38,8 +38,15 @@ def _load_states() -> None:
     try:
         if _states_path().exists():
             now = time.time()
-            _states.update({k: v for k, v in json.loads(_states_path().read_text(encoding="utf-8")).items() if v > now})
-    except ValueError:
+            loaded = json.loads(_states_path().read_text(encoding="utf-8"))
+            for key, value in loaded.items():
+                # Backward compatible with the original {state: expiry} file while
+                # persisting PKCE verifiers for all newly-issued web OAuth states.
+                record = ({"expires_at": float(value), "code_verifier": None}
+                          if isinstance(value, (int, float)) else value)
+                if isinstance(record, dict) and float(record.get("expires_at", 0)) > now:
+                    _states[key] = record
+    except (TypeError, ValueError):
         pass
 
 
@@ -76,21 +83,29 @@ def begin(redirect_uri: str | None = None) -> dict[str, Any]:
     state = _secrets.token_urlsafe(24)
     now = time.time()
     _load_states()
-    for k in [k for k, exp in _states.items() if exp < now]:
+    for k in [k for k, record in _states.items() if float(record.get("expires_at", 0)) < now]:
         _states.pop(k, None)
-    _states[state] = now + _STATE_TTL
-    _save_states()
     url, _ = flow.authorization_url(access_type="offline", prompt="consent", include_granted_scopes="true", state=state)
+    # google-auth-oauthlib generates a PKCE verifier during authorization_url().
+    # The callback creates a fresh Flow, so the verifier must survive that boundary;
+    # otherwise Google correctly rejects the code exchange with invalid_grant.
+    _states[state] = {"expires_at": now + _STATE_TTL,
+                      "code_verifier": getattr(flow, "code_verifier", None)}
+    _save_states()
     return {"url": url, "state": state, "redirect_uri": ru}
 
 
 def finish(code: str, state: str | None, redirect_uri: str | None = None) -> dict[str, Any]:
     """Exchange the callback code, store the token in the EXISTING file format, remember the account email."""
     _load_states()
-    if not state or _states.pop(state, 0) < time.time():
+    record = _states.pop(state, None) if state else None
+    if not record or float(record.get("expires_at", 0)) < time.time():
         raise GscAuthError("state نامعتبر یا منقضی است — دوباره «اتصال حساب گوگل» را بزنید")
     _save_states()
     flow = _flow(redirect_uri or default_redirect_uri())
+    verifier = record.get("code_verifier")
+    if verifier:
+        flow.code_verifier = verifier
     old_refresh = None
     try:                                                       # reconnect: remember the previous grant to revoke it
         old = json.loads(read_token_json() or "null")
@@ -137,6 +152,7 @@ def status() -> dict[str, Any]:
             "scopes": oauth_scopes, "expiry": tok.get("expiry"),
             "gsc_scope": any(s.endswith("webmasters.readonly") for s in oauth_scopes),
             "ga4_scope": GA4_SCOPE in oauth_scopes,
+            "ads_scope": "https://www.googleapis.com/auth/adwords" in oauth_scopes,
             "client_configured": _google_client_configured() or _has_store_client(),
             "client_id_hint": client_hint(),
             "connected_at": acct.get("connected_at")}

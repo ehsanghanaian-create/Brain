@@ -39,6 +39,7 @@ STEPS: list[tuple[str, str]] = [
     ("category_intelligence", "در حال تحلیل دسته‌بندی‌ها"),
     ("crawl", "در حال استخراج لینک‌ها"),
     ("build_graph", "در حال ساخت گراف"),
+    ("knowledge_pack", "در حال ساخت بسته دانشی محتوا"),
 ]
 STEP_FA = dict(STEPS)
 SOURCE = "wordpress_pipeline"
@@ -144,7 +145,7 @@ class WordPressSyncOrchestrator:
     # ------------------------------------------------------------------ public: create a queued state (called by the API before enqueueing)
     def create(self, site_id: str, stage: str = "full", job_id: str | None = None) -> PipelineState:
         st = PipelineState(run_id=new_run_id("wpsync"), site_id=site_id, stage=stage, status="queued", job_id=job_id, started_at=utcnow())
-        keys = [k for k, _ in STEPS] if stage == "full" else ["build_graph"]
+        keys = [k for k, _ in STEPS] if stage == "full" else ["build_graph", "knowledge_pack"]
         st.steps = [{"key": k, "fa": STEP_FA[k], "status": "pending", "started_at": None, "finished_at": None, "items": {}, "error": None} for k in keys]
         self._persist(st)
         return st
@@ -174,6 +175,7 @@ class WordPressSyncOrchestrator:
                 else:
                     self._mark(st, "crawl", "skipped", {"reason": "crawl disabled"})
             self._step(st, "build_graph", lambda: self._build_graph(site_id))
+            self._step(st, "knowledge_pack", lambda: self._knowledge_pack(site_id))
             st.items.update({k: v for k, v in self.counts(site_id).items() if k != "graph_by_type"})
             st.status = "completed_with_errors" if st.errors else "succeeded"
             st.step, st.finished_at = None, utcnow()
@@ -373,6 +375,12 @@ class WordPressSyncOrchestrator:
     def _sync_links(self, site_id: str) -> dict:
         from ..brain.linking import LinkEngine
         return LinkEngine(self.engine).analyze(site_id)
+
+    def _knowledge_pack(self, site_id: str) -> dict:
+        from ..brain.knowledge_pack import ContentKnowledgePackService
+        pack = ContentKnowledgePackService(self.engine).rebuild(site_id)
+        return {"knowledge_pack_id": pack["id"], "knowledge_pack_version": pack["version"],
+                "knowledge_sources": pack["source_counts"], "knowledge_warnings": len(pack["warnings"])}
 
 
 def _default_probe(url: str) -> int | None:

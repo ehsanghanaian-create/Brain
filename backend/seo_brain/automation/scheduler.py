@@ -205,9 +205,11 @@ def run_tick(engine: Engine, queue, max_sites: int = 2, stale_after_minutes: int
                 queued.append({"site_id": sid, "kind": kind, "status": r.get("status", "?")})
             except Exception as e:  # noqa: BLE001 — one failure must not stop the tick
                 log.error(f"scheduler: enqueue {kind} for {sid} failed: {e.__class__.__name__}: {e}")
-    if queued:
-        log.info(f"scheduler tick: recovered={recovered}, queued={queued}")
-    return {"recovered": recovered, "queued": queued, "sites_started": started_sites}
+    from .content import enqueue_due
+    content_queued = enqueue_due(engine, queue, limit=max(1, max_sites))
+    if queued or content_queued:
+        log.info(f"scheduler tick: recovered={recovered}, queued={queued}, content={content_queued}")
+    return {"recovered": recovered, "queued": queued, "content_queued": content_queued, "sites_started": started_sites}
 
 
 class SyncScheduler:

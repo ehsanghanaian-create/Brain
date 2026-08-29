@@ -19,19 +19,51 @@ log = logging.getLogger("ga4.sync")
 
 
 def store_rows(conn: sqlite3.Connection, site: SiteConfig, rows, source: str, run_id: str) -> int:
-    n = 0
+    grouped: dict[tuple[str, str], dict] = {}
     for r in rows:
+        path = unquote(r["path"] or "/")
+        key = (r["date"], path)
+        current = grouped.get(key)
+        if current is None:
+            grouped[key] = {**r, "path": path, "_row_count": 1}
+            continue
+
+        previous_sessions = int(current["sessions"] or 0)
+        incoming_sessions = int(r["sessions"] or 0)
+        total_sessions = previous_sessions + incoming_sessions
+        previous_count = int(current["_row_count"])
+        current["engagement_rate"] = _weighted_metric(
+            current["engagement_rate"], previous_sessions, r["engagement_rate"], incoming_sessions,
+            previous_count,
+        )
+        current["average_session_duration"] = _weighted_metric(
+            current["average_session_duration"], previous_sessions, r["average_session_duration"], incoming_sessions,
+            previous_count,
+        )
+        current["sessions"] = total_sessions
+        current["total_users"] = int(current["total_users"] or 0) + int(r["total_users"] or 0)
+        current["screen_page_views"] = int(current["screen_page_views"] or 0) + int(r["screen_page_views"] or 0)
+        current["conversions"] = float(current["conversions"] or 0) + float(r["conversions"] or 0)
+        current["_row_count"] = previous_count + 1
+
+    for n, r in enumerate(grouped.values(), start=1):
         upsert(conn, "ga4_daily", {
-            "site_id": site.site_id, "date": r["date"], "page_path": unquote(r["path"] or "/"),
+            "site_id": site.site_id, "date": r["date"], "page_path": r["path"],
             "sessions": r["sessions"], "total_users": r["total_users"], "screen_page_views": r["screen_page_views"],
             "engagement_rate": r["engagement_rate"], "average_session_duration": r["average_session_duration"],
             "conversions": r["conversions"], "source": source, "sync_run_id": run_id,
         }, ["site_id", "date", "page_path", "source"])
-        n += 1
         if n % 2000 == 0:
             conn.commit()
     conn.commit()
-    return n
+    return len(grouped)
+
+
+def _weighted_metric(previous, previous_weight: int, incoming, incoming_weight: int, previous_count: int) -> float:
+    total_weight = previous_weight + incoming_weight
+    if total_weight:
+        return ((float(previous or 0) * previous_weight) + (float(incoming or 0) * incoming_weight)) / total_weight
+    return ((float(previous or 0) * previous_count) + float(incoming or 0)) / (previous_count + 1)
 
 
 def sync_ga4(conn: sqlite3.Connection, site: SiteConfig, start: date, end: date, property_id: str | None = None,

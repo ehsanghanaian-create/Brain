@@ -1,6 +1,6 @@
 """PlannerService — orchestrates plans ↔ content items (1:1, on demand), status mirroring through the Phase-6 workflow,
 analysis (recommendation + category + existing pages + link prep + advanced fields), import/export (+Google Sheet source),
-calendar, brief hand-off, generation-job preparation (no AI run), publishing metadata (publishing itself disabled)."""
+calendar, brief hand-off, generation-job preparation, and publishing metadata linked to Content Brain's explicit WordPress publisher."""
 from __future__ import annotations
 
 from datetime import date, timedelta
@@ -51,8 +51,8 @@ class PlannerService:
                 "content_gaps": [{"key": k, "fa": GAP_FA[k]} for k in CONTENT_GAPS], "keyword_roles": [{"key": k, "fa": ROLE_FA[k]} for k in KEYWORD_ROLES],
                 "category_sources": [{"key": k, "fa": CATEGORY_SOURCE_FA[k]} for k in CATEGORY_SOURCES], "recommendation_kinds": [{"key": k, "fa": RECOMMENDATION_FA[k]} for k in RECOMMENDATION_KINDS],
                 "generation_job_kinds": list(GEN_JOB_KINDS), "columns": COLUMNS, "export_columns": EXPORT_COLUMNS, "views": ["table", "kanban", "graph"],
-                "publishing": {"enabled": True, "note": "انتشار وردپرس از طریق نویسنده فاز ۱۶: دکمه «انتشار» (اقدام انسانی) در هر حالتی مجاز است؛ انتشار زمان‌بندی‌شده تقویم فقط در حالت «خودکار» سایت اجرا می‌شود"},
-                "ai_generation": {"enabled": True, "note": "تولید پیش‌نویس با همان موتور «آزمایش تولید محتوا»: تایتل + کلمات کلیدی + پارامترهای metadata.ai (پرامپت دستی، لحن، طول، provider/model) → پیش‌نویس نسخه‌دار روی آیتم محتوا"}}
+                "publishing": {"enabled": True, "note": "انتشار واقعی از آیتم محتوای متصل و با تأیید انسانی انجام می‌شود؛ زمان‌بندی در خود وردپرس پایدار است"},
+                "ai_generation": {"enabled": True, "durable": True, "note": "تولید در صف پایدار پس‌زمینه اجرا می‌شود؛ تأیید انسانی پیش‌فرض است و انتشار خودکار فقط با quality gate صریح فعال می‌شود."}}
 
     # ------------------------------------------------------------------ enrichment
     def enrich(self, plans: list[ContentPlan], ctx: PlannerContext | None = None) -> list[dict[str, Any]]:
@@ -476,18 +476,38 @@ class PlannerService:
     def template() -> str:
         return template_csv()
 
-    # ------------------------------------------------------------------ generation jobs (prepared only) + publishing metadata
+    # ------------------------------------------------------------------ durable generation jobs + publishing metadata
     def prepare_generation(self, site_id: str, pid: int, kind: str = "article", params: dict[str, Any] | None = None, actor: str = "user") -> dict[str, Any]:
         if kind not in GEN_JOB_KINDS:
             raise PlannerError(f"نوع کار نامعتبر: {kind}")
         p = self.repo.get_plan(site_id, pid)
         if not p:
             raise PlannerError("plan not found")
+        from ...automation.content import normalize_time
+        values = dict(params or {})
+        with self.engine.connect() as cx:
+            timezone_name = cx.execute(text("SELECT timezone FROM sites WHERE site_id=:s"), {"s": site_id}).scalar() or "Asia/Tehran"
+        action = str(values.get("publish_action") or "none")
+        approval = str(values.get("approval_mode") or "human")
+        if action not in ("none", "draft", "future"):
+            raise PlannerError("روش انتشار باید none، draft یا future باشد")
+        if approval not in ("human", "score_gate"):
+            raise PlannerError("روش تأیید باید human یا score_gate باشد")
+        if action == "future" and not values.get("publish_at"):
+            raise PlannerError("برای انتشار زمان‌بندی‌شده، تاریخ و ساعت انتشار لازم است")
+        scheduled_at = normalize_time(values.get("scheduled_at"), timezone_name, default_now=True)
+        publish_at = normalize_time(values.get("publish_at"), timezone_name) if values.get("publish_at") else None
         cid = self.ensure_item(site_id, pid, actor)["content_id"]
-        job = self.repo.create_generation_job(site_id, pid, kind, cid, {**(params or {}), "mode": (params or {}).get("mode", "manual"), "prepared_by": actor}, actor)
+        runtime_params = {k: values[k] for k in ("models", "prompt_versions", "notes") if k in values}
+        runtime_params.update(mode="assisted", prepared_by=actor)
+        job = self.repo.create_generation_job(site_id, pid, kind, cid, runtime_params, actor,
+                                              scheduled_at=scheduled_at, publish_at=publish_at, publish_action=action,
+                                              approval_mode=approval, category_ids=[int(x) for x in (values.get("category_ids") or [])],
+                                              min_score=max(0, min(100, float(values.get("min_score") or 85))),
+                                              max_attempts=max(1, min(5, int(values.get("max_attempts") or 3))))
         self.repo.add_event(site_id, pid, "generation_prepared", actor, {"job_id": job["id"], "kind": kind, "content_id": cid})
         job["studio_url"] = f"/dashboard/ai-studio?site={site_id}&content={cid}"
-        job["note"] = "کار تولید فقط آماده شد — اجرا در استودیوی AI با تأیید انسانی؛ خروجی همیشه پیش‌نویس است"
+        job["note"] = "کار در صف پایدار ثبت شد؛ تولید در پس‌زمینه انجام می‌شود و انتشار فقط مطابق روش تأیید انتخاب‌شده پیش می‌رود."
         return job
 
     def attach_generation_run(self, site_id: str, jid: int, run_id: str, draft_id: int | None = None) -> dict[str, Any] | None:
@@ -498,7 +518,7 @@ class PlannerService:
         if not p:
             return None
         allowed = {k: meta[k] for k in ("target", "wp_status", "scheduled_at", "author", "checklist", "cta", "notes", "canonical", "og_title") if k in meta}
-        allowed["publishing_enabled"] = False
+        allowed["publishing_enabled"] = True
         allowed["updated_at"] = utcnow()
         self.repo.update_plan(site_id, pid, actor=actor, event="publishing_meta", publishing={**(p.publishing or {}), **allowed})
         return self.detail(site_id, pid)

@@ -8,6 +8,7 @@ import re
 import sys
 import uuid
 from datetime import datetime, timezone
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from .config import env, log_dir
@@ -43,7 +44,11 @@ class JsonFormatter(logging.Formatter):
             "run_id": getattr(record, "run_id", None) or CURRENT_RUN.get("run_id"),
             "msg": mask_secrets(record.getMessage()),
         }
-        for k in ("api", "endpoint", "status", "retry", "final_state", "url", "site_id", "count"):
+        for k in (
+            "api", "endpoint", "status", "retry", "final_state", "url", "site_id", "count",
+            "event_uuid", "event_type", "visitor_id", "session_id", "ip_hash", "attribution",
+            "accepted", "duplicate",
+        ):
             if hasattr(record, k):
                 payload[k] = getattr(record, k)
         if record.exc_info:
@@ -82,10 +87,32 @@ def setup_logging(name: str = "seo-kg", level: str | None = None, to_file: bool 
     if to_file:
         d: Path = log_dir()
         d.mkdir(parents=True, exist_ok=True)
-        fh = logging.FileHandler(d / f"{name}.jsonl", encoding="utf-8")
+        fh = TimedRotatingFileHandler(
+            d / f"{name}.jsonl", when="midnight", interval=1, backupCount=30,
+            encoding="utf-8", utc=True,
+        )
         fh.setFormatter(JsonFormatter())
         root.addHandler(fh)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.ERROR)
     return logging.getLogger(name)
+
+
+def jsonl_audit_logger(name: str, relative_path: str, *, backup_count: int = 30) -> logging.Logger:
+    """Dedicated daily-rotated JSONL audit stream without duplicating root logs."""
+    logger = logging.getLogger(name)
+    if any(getattr(handler, "_seo_brain_audit", False) for handler in logger.handlers):
+        return logger
+    path = log_dir() / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handler = TimedRotatingFileHandler(
+        path, when="midnight", interval=1, backupCount=max(1, backup_count),
+        encoding="utf-8", utc=True,
+    )
+    handler.setFormatter(JsonFormatter())
+    handler._seo_brain_audit = True  # type: ignore[attr-defined]
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    return logger

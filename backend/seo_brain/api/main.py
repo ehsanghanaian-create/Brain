@@ -15,7 +15,7 @@ from ..automation import get_job_queue
 from ..common.config import env
 from .deps import require_token
 from .errors import install_error_handlers
-from .routers import ads_data, ai, ai_config, ai_gateway, ai_workspace, content, content_plans, generation, graph, health, jobs, keywords, links, memory, portfolio, sites
+from .routers import ads_data, ai, ai_config, ai_gateway, ai_workspace, content, content_plans, generation, graph, health, jobs, keywords, knowledge, links, memory, portfolio, sites
 
 API_PREFIX = "/api/v1"
 
@@ -45,6 +45,9 @@ def _register_builtin_jobs() -> None:
             out["graph"] = GraphBuild(conn, site).build(limit_pages=payload.get("limit_pages"))
             if not payload.get("no_obsidian"):
                 out["obsidian"] = ObsidianWriter(conn, site, vault_path()).write()
+        from ..brain.knowledge_pack import ContentKnowledgePackService
+        from .deps import engine as _engine
+        out["knowledge_pack"] = ContentKnowledgePackService(_engine()).rebuild(payload["site_id"])
         return out
 
     def _noop(payload: dict):
@@ -65,6 +68,11 @@ def _register_builtin_jobs() -> None:
         from ..brain.generation import GenerationPipeline
         gw = _gateway()
         return GenerationPipeline(gw.engine, gw, get_event_bus()).execute(payload["run_id"])
+
+    def _run_content_automation(payload: dict):
+        from .deps import engine as _engine, gateway as _gateway
+        from ..automation.content import ContentAutomationService
+        return ContentAutomationService(_engine(), _gateway()).run(int(payload["generation_job_id"]))
 
     def _run_wordpress_pipeline(payload: dict):
         """WordPress → sync → (crawl) → graph, one job; progress persisted in sync_runs (see wordpress/orchestrator.py)."""
@@ -107,7 +115,7 @@ def _register_builtin_jobs() -> None:
                 return generate_for_plan(eng2, payload["site_id"], payload["plan_id"], then_publish=True, actor=payload.get("actor", "scheduler"))
         return WordPressWriter(eng2).publish_plan(payload["site_id"], payload["plan_id"], actor=payload.get("actor", "human"))
 
-    for name, fn in (("sync_wordpress", _run_sync_wordpress), ("build_graph", _run_build_graph), ("noop", _noop), ("links_analyze", _run_links_analyze), ("generation_run", _run_generation), ("planner_analyze", _run_planner_analyze),
+    for name, fn in (("sync_wordpress", _run_sync_wordpress), ("build_graph", _run_build_graph), ("noop", _noop), ("links_analyze", _run_links_analyze), ("generation_run", _run_generation), ("content_automation", _run_content_automation), ("planner_analyze", _run_planner_analyze),
                      ("wordpress_sync", _run_wordpress_pipeline), ("gsc_sync", _run_gsc_sync), ("ga4_sync", _run_ga4_sync),
                      ("plan_generate", _run_plan_generate), ("plan_publish", _run_plan_publish)):
         try:
@@ -142,7 +150,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix=API_PREFIX)
     from .routers import google as google_router_mod
     app.include_router(google_router_mod.callback_router, prefix=API_PREFIX)     # Google's browser redirect cannot send X-API-Token; guarded by the state nonce
-    for r in (portfolio.router, ads_data.router, sites.router, sites.gsc_router, google_router_mod.router, graph.router, memory.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router):
+    for r in (portfolio.router, ads_data.router, sites.router, sites.gsc_router, google_router_mod.router, graph.router, memory.router, knowledge.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router):
         app.include_router(r, prefix=API_PREFIX, dependencies=deps)
 
     # legacy dashboard (v0.1) mounted read-only until UI parity

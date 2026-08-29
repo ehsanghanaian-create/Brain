@@ -36,6 +36,8 @@ class MemoryPackBuilder:
         aud = mem.get("audience") or {}
         pats = mem.get("successful_patterns") or []
         linking = loads(lk[0], {}) if lk else {}
+        from ..brain.knowledge_pack import ContentKnowledgePackService
+        knowledge = ContentKnowledgePackService(self.engine).latest(site_id, rebuild_if_missing=True)
         pack = {
             "site_name": r[0] if r else site_id, "site_url": r[1] if r else "", "language": (r[2] if r else None) or "fa-IR", "country": (r[3] if r else None) or "IR",
             "tone": {k: v for k, v in tone.items()}, "audience": aud,
@@ -43,6 +45,9 @@ class MemoryPackBuilder:
             "successful_patterns": [p.get("pattern") if isinstance(p, dict) else str(p) for p in pats][-12:],
             "linking_rules": [f"انکرهای توصیفی و متنوع؛ حداقل {linking.get('min_internal_links', 3)} لینک داخلی؛ حرکت رو به جلو در سفر کاربر (اطلاعاتی → خدمت → تبدیل)",
                               "هرگز انکر عمومی مثل «اینجا/کلیک کنید» ننویس", *[f"الگوی پذیرفته‌شده: {p}" for p in accepted_link_patterns[:5]]],
+            "knowledge_pack_id": knowledge.get("id") if knowledge else None,
+            "knowledge_pack_version": knowledge.get("version") if knowledge else None,
+            "knowledge_pack": knowledge.get("pack") if knowledge else {},
         }
         return pack
 
@@ -52,9 +57,11 @@ class MemoryPackBuilder:
         tone_s = "؛ ".join(f"{k}: {_TONE_FA.get(str(v), v)}" for k, v in tone.items() if v) or "— (تعریف نشده؛ رسمی و محترمانه بنویس)"
         aud = pack.get("audience") or {}
         aud_s = "؛ ".join(x for x in [("بخش‌ها: " + "، ".join(map(str, aud.get("segments", []))) if aud.get("segments") else ""), ("دردها: " + "، ".join(map(str, aud.get("pains", []))) if aud.get("pains") else ""), (f"اینتنت: {aud.get('intent_notes')}" if aud.get("intent_notes") else "")] if x) or "— (تعریف نشده)"
-        return render(v["template"], {"site_name": pack.get("site_name"), "site_url": pack.get("site_url"), "tone": tone_s, "audience": aud_s, "business_rules": _lines(pack.get("business_rules")),
+        base = render(v["template"], {"site_name": pack.get("site_name"), "site_url": pack.get("site_url"), "tone": tone_s, "audience": aud_s, "business_rules": _lines(pack.get("business_rules")),
                                       "content_rules": _lines(pack.get("content_rules")), "cta_rules": _lines(pack.get("cta_rules")), "forbidden_claims": _lines(pack.get("forbidden_claims"), "— (هیچ)"),
                                       "successful_patterns": _lines(pack.get("successful_patterns"), "— (هنوز الگویی ثبت نشده)"), "linking_rules": _lines(pack.get("linking_rules"))})
+        from ..brain.knowledge_pack import ContentKnowledgePackService
+        return base.rstrip() + "\n\n" + ContentKnowledgePackService.render(pack.get("knowledge_pack") or {})
 
     def snapshot(self, site_id: str) -> dict[str, Any]:
         """Build + render + persist (dedupe by hash). Returns {id, hash, pack, rendered}."""

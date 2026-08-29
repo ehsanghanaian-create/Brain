@@ -1,6 +1,6 @@
 """Phase 8.5 — Content Strategy Planner endpoints: /sites/{id}/content-plans/* (plans CRUD/bulk/transition, analysis, import/export/sources,
 calendar/board, categories (WP sync read-only, brain, manual), keyword mapping, suggestions inbox, clusters, generation-job preparation,
-publishing metadata (publishing disabled), insights, graph)."""
+publishing metadata (real publishing is performed from the linked Content Brain item), insights, graph)."""
 from __future__ import annotations
 
 from typing import Any, Literal
@@ -14,6 +14,7 @@ from ...brain.content import ContentService, WorkflowError
 from ...brain.planner import PlannerError, PlannerLearning, PlannerService
 from ...brain.planner.repository import GEN_JOB_KINDS, KEYWORD_ROLES, PLAN_STATUSES
 from ...db.repositories.sites import SitesRepository
+from ...db.repositories.base import utcnow
 from ..deps import engine, job_queue, orchestrator, require_site, sites_repo
 from ..errors import ApiError
 
@@ -463,6 +464,43 @@ def generation_jobs(site_id: str, plan_id: int | None = None, s: PlannerService 
     return s.repo.list_generation_jobs(site_id, plan_id)
 
 
+@router.post("/generation-jobs/{jid}/run", status_code=202)
+def run_generation_job(site_id: str, jid: int, force: bool = False, s: PlannerService = Depends(svc), q: JobQueue = Depends(job_queue)) -> dict:
+    from ...automation.content import enqueue_one
+    job = s.repo.get_generation_job(site_id, jid)
+    if not job:
+        raise HTTPException(404, "generation job not found")
+    try:
+        return enqueue_one(s.engine, q, jid, force=force)
+    except ValueError as e:
+        raise ApiError(409, str(e), code="invalid_job_status") from e
+
+
+@router.post("/generation-jobs/{jid}/cancel")
+def cancel_generation_job(site_id: str, jid: int, s: PlannerService = Depends(svc)) -> dict:
+    job = s.repo.get_generation_job(site_id, jid)
+    if not job:
+        raise HTTPException(404, "generation job not found")
+    if job["status"] in {"running", "done", "scheduled", "wordpress_draft"}:
+        raise ApiError(409, "این کار در این وضعیت قابل لغو نیست", code="invalid_job_status")
+    return s.repo.update_generation_job(site_id, jid, status="cancelled", finished_at=utcnow())
+
+
+@router.post("/generation-jobs/{jid}/approve")
+def approve_generation_job(site_id: str, jid: int, s: PlannerService = Depends(svc)) -> dict:
+    from ...automation.content import ContentAutomationService
+    from ...wordpress.publisher import PublishingError
+    job = s.repo.get_generation_job(site_id, jid)
+    if not job:
+        raise HTTPException(404, "generation job not found")
+    try:
+        return ContentAutomationService(s.engine).approve(jid, actor="user")
+    except PublishingError as e:
+        raise ApiError(e.status, str(e), code=e.code, details=e.detail) from e
+    except ValueError as e:
+        raise ApiError(409, str(e), code="invalid_job_status") from e
+
+
 # ---------------------------------------------------------------------------- single plan (keep after static routes)
 @router.get("/{pid}")
 def get_plan(site_id: str, pid: int, s: PlannerService = Depends(svc)) -> dict:
@@ -570,20 +608,24 @@ def plan_recommendations(site_id: str, pid: int, s: PlannerService = Depends(svc
 
 
 @router.post("/{pid}/generation-jobs", status_code=201)
-def prepare_generation(site_id: str, pid: int, body: GenJobBody | None = None, s: PlannerService = Depends(svc)) -> dict:
-    """Prepare (not run) an AI generation job: plan → generation_job → content_item → draft. Execution stays in AI Studio with human approval."""
+def prepare_generation(site_id: str, pid: int, body: GenJobBody | None = None, s: PlannerService = Depends(svc), q: JobQueue = Depends(job_queue)) -> dict:
+    """Persist a generation job. Immediate jobs are handed to the durable background queue."""
     body = body or GenJobBody()
     if body.kind not in GEN_JOB_KINDS:
         raise ApiError(422, f"نوع کار نامعتبر: {body.kind}", code="validation_error", details={"allowed": list(GEN_JOB_KINDS)})
     try:
-        return s.prepare_generation(site_id, pid, body.kind, body.params)
+        out = s.prepare_generation(site_id, pid, body.kind, body.params)
+        if body.params.get("run_now"):
+            from ...automation.content import enqueue_one
+            out["queue"] = enqueue_one(s.engine, q, int(out["id"]))
+        return out
     except PlannerError as e:
         _err(e)
 
 
 @router.put("/{pid}/publishing-metadata")
 def publishing(site_id: str, pid: int, body: PublishingBody, s: PlannerService = Depends(svc)) -> dict:
-    """Publishing metadata only — publishing is disabled; nothing is sent to WordPress."""
+    """Store publishing choices; the linked Content Brain item performs the explicit WordPress write."""
     d = s.set_publishing(site_id, pid, {k: v for k, v in body.model_dump().items() if v is not None})
     if not d:
         raise HTTPException(404, "plan not found")

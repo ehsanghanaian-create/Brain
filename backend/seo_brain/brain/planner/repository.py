@@ -523,18 +523,27 @@ class PlannerRepository(Repository):
             r = cx.execute(delete(content_plan_sources).where(and_(content_plan_sources.c.site_id == site_id, content_plan_sources.c.id == sid)))
         return bool(r.rowcount)
 
-    # ------------------------------------------------------------------ generation jobs (prepared only)
-    def create_generation_job(self, site_id: str, plan_id: int, kind: str, content_item_id: int | None, params: dict[str, Any], requested_by: str | None) -> dict[str, Any]:
+    # ------------------------------------------------------------------ durable generation jobs
+    def create_generation_job(self, site_id: str, plan_id: int, kind: str, content_item_id: int | None, params: dict[str, Any], requested_by: str | None,
+                              **schedule: Any) -> dict[str, Any]:
         now = utcnow()
+        extra = {k: (dumps(v) if k == "category_ids" else v) for k, v in schedule.items()
+                 if k in content_plan_generation_jobs.c and k not in ("id", "site_id", "plan_id", "content_item_id", "params")}
         with self.engine.begin() as cx:
             jid = int(cx.execute(content_plan_generation_jobs.insert().values(site_id=site_id, plan_id=plan_id, content_item_id=content_item_id, kind=kind, status="prepared", params=dumps(params),
-                                                                              requested_by=requested_by, created_at=now, updated_at=now)).inserted_primary_key[0])
+                                                                              requested_by=requested_by, created_at=now, updated_at=now, **extra)).inserted_primary_key[0])
         return self.get_generation_job(site_id, jid)  # type: ignore[return-value]
 
     def get_generation_job(self, site_id: str, jid: int) -> dict[str, Any] | None:
         with self.engine.connect() as cx:
             r = cx.execute(select(content_plan_generation_jobs).where(and_(content_plan_generation_jobs.c.site_id == site_id, content_plan_generation_jobs.c.id == jid))).first()
-        return {**dict(r._mapping), "params": loads(r._mapping["params"], {})} if r else None
+        return self._generation_job(dict(r._mapping)) if r else None
+
+    @staticmethod
+    def _generation_job(value: dict[str, Any]) -> dict[str, Any]:
+        value["params"] = loads(value.get("params"), {})
+        value["category_ids"] = loads(value.get("category_ids"), [])
+        return value
 
     def list_generation_jobs(self, site_id: str, plan_id: int | None = None) -> list[dict[str, Any]]:
         conds = [content_plan_generation_jobs.c.site_id == site_id]
@@ -542,10 +551,10 @@ class PlannerRepository(Repository):
             conds.append(content_plan_generation_jobs.c.plan_id == plan_id)
         with self.engine.connect() as cx:
             rows = cx.execute(select(content_plan_generation_jobs).where(and_(*conds)).order_by(content_plan_generation_jobs.c.id.desc())).all()
-        return [{**dict(r._mapping), "params": loads(r._mapping["params"], {})} for r in rows]
+        return [self._generation_job(dict(r._mapping)) for r in rows]
 
     def update_generation_job(self, site_id: str, jid: int, **fields) -> dict[str, Any] | None:
-        vals = {k: (dumps(v) if k == "params" else v) for k, v in fields.items() if k in content_plan_generation_jobs.c and k not in ("id", "site_id")}
+        vals = {k: (dumps(v) if k in ("params", "category_ids") else v) for k, v in fields.items() if k in content_plan_generation_jobs.c and k not in ("id", "site_id")}
         if vals:
             vals["updated_at"] = utcnow()
             with self.engine.begin() as cx:

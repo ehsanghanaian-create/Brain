@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -23,6 +24,7 @@ import logging
 log = logging.getLogger("db.migrate")
 MIGRATIONS_DIR = PROJECT_ROOT / "database" / "migrations"
 _FILE_RE = re.compile(r"^(\d{4})_([A-Za-z0-9_\-]+)\.sql$")
+_MIGRATION_LOCK = threading.RLock()
 
 _DDL_TRACK = (
     "CREATE TABLE IF NOT EXISTS schema_migrations ("
@@ -100,23 +102,28 @@ def _applied_sqlite(conn: sqlite3.Connection) -> set[str]:
 
 def migrate_sqlite(conn: sqlite3.Connection, directory: Path | None = None) -> list[str]:
     """Apply pending migrations on a raw sqlite3 connection. Returns applied versions."""
-    applied = _applied_sqlite(conn)
-    done: list[str] = []
-    for m in discover(directory):
-        if m.version in applied:
-            continue
-        for stmt in _split_statements(m.sql):
-            try:
-                conn.execute(stmt) if not stmt.upper().lstrip().startswith("CREATE TRIGGER") else conn.executescript(stmt)
-            except sqlite3.OperationalError as e:
-                if _is_duplicate_column(e) and stmt.upper().lstrip().startswith("ALTER TABLE"):
-                    continue
-                raise RuntimeError(f"migration {m.version}_{m.name} failed at: {stmt[:80]}… ({e})") from e
-        conn.execute("INSERT INTO schema_migrations(version, name) VALUES (?, ?)", (m.version, m.name))
-        conn.commit()
-        done.append(m.version)
-        log.info(f"applied migration {m.version}_{m.name}")
-    return done
+    # FastAPI dependencies may initialize a dedicated SQLite database from several worker threads at once.
+    # Serialize discovery + DDL + version registration inside this process so a second request cannot race the
+    # first and insert the same schema_migrations.version (or observe a half-applied ALTER sequence).
+    with _MIGRATION_LOCK:
+        applied = _applied_sqlite(conn)
+        done: list[str] = []
+        for m in discover(directory):
+            if m.version in applied:
+                continue
+            for stmt in _split_statements(m.sql):
+                try:
+                    conn.execute(stmt) if not stmt.upper().lstrip().startswith("CREATE TRIGGER") else conn.executescript(stmt)
+                except sqlite3.OperationalError as e:
+                    if _is_duplicate_column(e) and stmt.upper().lstrip().startswith("ALTER TABLE"):
+                        continue
+                    raise RuntimeError(f"migration {m.version}_{m.name} failed at: {stmt[:80]}… ({e})") from e
+            conn.execute("INSERT INTO schema_migrations(version, name) VALUES (?, ?)", (m.version, m.name))
+            conn.commit()
+            done.append(m.version)
+            applied.add(m.version)
+            log.info(f"applied migration {m.version}_{m.name}")
+        return done
 
 
 # --------------------------------------------------------------------------- SQLAlchemy path

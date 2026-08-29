@@ -32,9 +32,18 @@ class JsonKeysValidator:
             return response
         text = response.text.strip()
         if text.startswith("```"):
-            text = text.strip("`")
-            if text.lower().startswith("json"):
-                text = text[4:]
+            lines = text.splitlines()
+            if lines and lines[0].strip().lower() in ("```", "```json"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+        # Some providers wrap an otherwise valid object in a short explanation.  Extract only a balanced outer
+        # object; truncated JSON still fails and is retried/falls back instead of being guessed or repaired.
+        if not text.startswith("{"):
+            start, end = text.find("{"), text.rfind("}")
+            if start >= 0 and end > start:
+                text = text[start:end + 1]
         try:
             data: Any = json.loads(text)
         except ValueError as e:

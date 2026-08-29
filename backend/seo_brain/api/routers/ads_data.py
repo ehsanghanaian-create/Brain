@@ -13,6 +13,8 @@ import hmac
 import io
 import ipaddress
 import json
+import math
+import re
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any
@@ -23,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import Engine, text
 
 from ...common.config import env
+from ...common.logging_setup import jsonl_audit_logger
 from ...db.engine import make_engine
 from ...db.migrate import migrate
 from ..deps import engine
@@ -32,6 +35,20 @@ router = APIRouter(prefix="/ads-data", tags=["ads-data"])
 EVENT_TYPES = {
     "landing", "page_view", "heartbeat", "scroll", "tel_click",
     "whatsapp_click", "form_start", "form_submit", "page_exit",
+    "click", "section_view", "article_cta_click",
+    "view_item_list", "select_item", "view_item", "add_to_cart",
+    "remove_from_cart", "view_cart", "begin_checkout", "add_shipping_info",
+    "add_payment_info", "purchase",
+    "auth_otp_requested", "auth_otp_request_failed",
+    "auth_otp_verified", "auth_otp_verify_failed",
+    "auth_login_success", "auth_login_failed",
+    "auth_registration_complete", "auth_password_recovery_requested",
+    "auth_password_recovery_failed", "auth_logout",
+    "checkout_auth_required", "payment_gateway_redirect",
+    "payment_gateway_error", "payment_return_invalid",
+    "payment_status_paid", "payment_status_pending", "payment_status_failed",
+    "style_builder_entry", "stylist_start", "stylist_results_view",
+    "stylist_apply", "stylist_feedback", "stylist_add_to_cart",
 }
 
 
@@ -89,8 +106,55 @@ class AdsEventIn(BaseModel):
         return value
 
 
+class CustomerLinkIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    site_id: str = Field(min_length=3, max_length=120)
+    customer_key: str = Field(pattern=r"^[a-f0-9]{64}$")
+    visitor_id: str = Field(min_length=8, max_length=100, pattern=r"^[A-Za-z0-9._~-]+$")
+    session_id: str = Field(min_length=8, max_length=100, pattern=r"^[A-Za-z0-9._~-]+$")
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+@lru_cache(maxsize=1)
+def _audit_loggers() -> tuple[Any, Any, Any]:
+    return (
+        jsonl_audit_logger("telemetry.behavior", "behavior/behavior.jsonl", backup_count=30),
+        jsonl_audit_logger("telemetry.security", "security/security.jsonl", backup_count=30),
+        jsonl_audit_logger("telemetry.payment", "payment/payment.jsonl", backup_count=90),
+    )
+
+
+_SECURITY_EVENTS = {event for event in EVENT_TYPES if event.startswith("auth_")}
+_PAYMENT_EVENTS = {
+    "begin_checkout", "add_shipping_info", "add_payment_info", "purchase",
+    "checkout_auth_required", "payment_gateway_redirect", "payment_gateway_error",
+    "payment_return_invalid", "payment_status_paid", "payment_status_pending",
+    "payment_status_failed",
+}
+
+
+def _audit_event(row: dict[str, Any], *, accepted: bool, duplicate: bool = False) -> None:
+    behavior, security, payment = _audit_loggers()
+    attribution = _ads_attribution(row)
+    extra = {
+        "site_id": row.get("site_id"),
+        "event_uuid": row.get("event_uuid"),
+        "event_type": row.get("event_type"),
+        "visitor_id": row.get("visitor_id"),
+        "session_id": row.get("session_id"),
+        "ip_hash": row.get("ip_hash"),
+        "attribution": attribution,
+        "accepted": accepted,
+        "duplicate": duplicate,
+    }
+    behavior.info("collector_event", extra=extra)
+    if row.get("event_type") in _SECURITY_EVENTS:
+        security.info("security_journey_event", extra=extra)
+    if row.get("event_type") in _PAYMENT_EVENTS:
+        payment.info("payment_journey_event", extra=extra)
 
 
 def _iso(value: datetime) -> str:
@@ -102,16 +166,19 @@ def _allowed_sites() -> set[str]:
     return {item.strip().lower() for item in raw.split(",") if item.strip()}
 
 
-def _ip_parts(raw: str) -> tuple[str, str]:
+def _ip_parts(raw: str) -> tuple[str, str, str]:
     try:
         parsed = ipaddress.ip_address(raw.strip())
     except ValueError as exc:
         raise HTTPException(422, "invalid server_ip") from exc
     if parsed.version == 4:
-        prefix = str(ipaddress.ip_network(f"{parsed}/24", strict=False))
+        network = ipaddress.ip_network(f"{parsed}/24", strict=False)
     else:
-        prefix = str(ipaddress.ip_network(f"{parsed}/48", strict=False))
-    return str(parsed), prefix
+        network = ipaddress.ip_network(f"{parsed}/56", strict=False)
+    # The dashboard must show the exact address observed by the trusted proxy;
+    # the network prefix remains separate for grouping and legacy comparison.
+    # Retention is bounded by ADS_RETENTION_DAYS.
+    return str(parsed), str(network), _ip_hash(str(parsed))
 
 
 def _ip_hash(ip: str) -> str:
@@ -119,8 +186,119 @@ def _ip_hash(ip: str) -> str:
     return hmac.new(secret.encode("utf-8"), ip.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
+def _minimal_user_agent(value: str | None) -> str | None:
+    """Keep coarse browser/OS classes, never the full fingerprintable UA."""
+    raw = (value or "").lower()
+    if not raw:
+        return None
+    browser = next((name for token, name in (
+        ("edg/", "Edge"), ("opr/", "Opera"), ("firefox/", "Firefox"),
+        ("chrome/", "Chrome"), ("safari/", "Safari"),
+    ) if token in raw), "Other")
+    os_name = next((name for token, name in (
+        ("android", "Android"), ("iphone", "iOS"), ("ipad", "iPadOS"),
+        ("windows", "Windows"), ("mac os", "macOS"), ("linux", "Linux"),
+    ) if token in raw), "Other")
+    return f"browser={browser}; os={os_name}"
+
+
+def _retention_days() -> int:
+    try:
+        return max(1, min(90, int(env("ADS_RETENTION_DAYS", "90") or "90")))
+    except ValueError:
+        return 90
+
+
+_METADATA_STRING_LIMITS = {
+    "collector_version": 40,
+    "navigation_type": 30,
+    "visibility": 20,
+    "signal": 30,
+    "element_tag": 30,
+    "element_id": 80,
+    "section": 100,
+    "element_role": 40,
+    "target_kind": 30,
+    "source": 30,
+    "form_method": 10,
+    "form_kind": 80,
+    "currency": 8,
+    "section_ids": 1500,
+    "unseen_sections": 1500,
+    "previous_path": 1500,
+    "destination_path": 1500,
+    "item_ids": 500,
+    "transaction_id": 100,
+    "method": 40,
+    "purpose": 40,
+    "reason": 60,
+    "payment_status": 40,
+    "entry_source": 80,
+    "entry_point": 80,
+    "input_mode": 40,
+    "result_status": 40,
+    "look_tier": 40,
+    "feedback_reason": 80,
+    "offer": 40,
+    "availability_check": 40,
+    "action": 80,
+    "option_value": 100,
+}
+_METADATA_NUMBER_LIMITS = {
+    "section_count": (0, 500),
+    "dwell_seconds": (0, 86_400),
+    "depth_pct": (0, 100),
+    "viewport_x_pct": (0, 100),
+    "viewport_y_pct": (0, 100),
+    "page_y_pct": (0, 100),
+    "top_pct": (0, 100),
+    "value": (0, 10**15),
+    "item_count": (0, 100),
+    "dwell_ms": (0, 86_400_000),
+    "max_scroll_pct": (0, 100),
+    "seen_section_count": (0, 500),
+    "unseen_section_count": (0, 500),
+    "suggestion_count": (0, 20),
+    "response_time_ms": (0, 120_000),
+}
+_METADATA_BOOLEAN_KEYS = {"route_change", "is_new", "onboarding_required", "selected"}
+_METADATA_ID_RE = re.compile(r"^[a-z0-9._~|-]+$", re.IGNORECASE)
+_METADATA_PII_RE = re.compile(
+    r"[\w.+-]+@[\w.-]+\.[a-z]{2,}|(?:\+?98|0)?9\d{9}|\d{8,}",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_metadata(value: dict[str, Any]) -> dict[str, Any]:
+    """Allow only telemetry fields generated by our collector; drop PII/text."""
+    clean: dict[str, Any] = {}
+    for key, item in value.items():
+        if key in _METADATA_BOOLEAN_KEYS and isinstance(item, bool):
+            clean[key] = item
+            continue
+        if key in _METADATA_NUMBER_LIMITS and isinstance(item, (int, float)) and not isinstance(item, bool):
+            number = float(item)
+            low, high = _METADATA_NUMBER_LIMITS[key]
+            if math.isfinite(number) and low <= number <= high:
+                clean[key] = int(number) if number.is_integer() else number
+            continue
+        limit = _METADATA_STRING_LIMITS.get(key)
+        if limit is None or not isinstance(item, str):
+            continue
+        normalized = item.strip()[:limit]
+        if not normalized or _METADATA_PII_RE.search(normalized):
+            continue
+        if key in {"item_ids", "transaction_id"} and not _METADATA_ID_RE.fullmatch(normalized):
+            continue
+        if key in {"previous_path", "destination_path"} and (
+            not normalized.startswith("/") or "?" in normalized or "#" in normalized
+        ):
+            continue
+        clean[key] = normalized.casefold() if key == "transaction_id" else normalized
+    return clean
+
+
 def _safe_metadata(value: dict[str, Any]) -> str:
-    # Values only; arbitrary nested structures are retained but bounded by the model.
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -133,6 +311,25 @@ def _ads_attribution(row: dict[str, Any]) -> str:
     if medium in {"cpc", "ppc", "paid", "paidsearch", "paid_search"}:
         return "paid_traffic_likely"
     return "unattributed"
+
+
+def _safe_matched_keyword(value: str | None, row: dict[str, Any]) -> str | None:
+    """Retain advertiser keywords only when the event has paid-traffic evidence.
+
+    Google ValueTrack's ``{keyword}`` is the matched account keyword, not the
+    visitor's raw search query. Keeping that distinction prevents the dashboard
+    from presenting inferred or arbitrary URL text as a Google search term.
+    """
+    if not value or _ads_attribution(row) == "unattributed":
+        return None
+    normalized = " ".join(value.split()).strip()[:200]
+    if not normalized or normalized.casefold() in {
+        "{keyword}", "(not set)", "not set", "undefined", "null",
+    }:
+        return None
+    if _METADATA_PII_RE.search(normalized):
+        return None
+    return normalized
 
 
 # SQL fragments mirroring _ads_attribution, so the /events filter matches the
@@ -305,24 +502,48 @@ def ads_engine(default: Engine = Depends(engine)) -> Engine:
 
 @router.post("/events", status_code=202)
 def collect_event(payload: AdsEventIn, eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
-    if payload.site_id.lower() not in _allowed_sites():
+    site_id = payload.site_id.strip().lower()
+    if site_id not in _allowed_sites():
         raise HTTPException(403, "site_id is not allowed")
-    ip, prefix = _ip_parts(payload.server_ip)
+    ip, prefix, ip_hash = _ip_parts(payload.server_ip)
     received = _iso(_utcnow())
     cutoff = _iso(_utcnow() - timedelta(minutes=1))
+    retention_cutoff = _iso(_utcnow() - timedelta(days=_retention_days()))
+
+    metadata = _sanitize_metadata(payload.metadata)
+    transaction_id = metadata.get("transaction_id") if payload.event_type == "purchase" else None
+    if payload.event_type == "purchase" and (
+        not isinstance(transaction_id, str)
+        or not transaction_id.strip()
+        or len(transaction_id.strip()) > 100
+    ):
+        raise HTTPException(422, "purchase transaction_id is required")
 
     row = payload.model_dump()
+    row["site_id"] = site_id
+    proxy_ip = None
+    if payload.server_proxy_ip:
+        try:
+            proxy_ip = _ip_parts(payload.server_proxy_ip)[0]
+        except HTTPException:
+            proxy_ip = None
     row.update({
         "received_at": received,
         "ip_address": ip,
-        "ip_hash": _ip_hash(ip),
+        "ip_hash": ip_hash,
         "ip_prefix": prefix,
         "ip_source": payload.server_ip_source,
-        "proxy_ip": payload.server_proxy_ip,
+        "proxy_ip": proxy_ip,
         "ip_confidence": payload.server_ip_confidence,
-        "ip_resolution_version": payload.server_ip_resolution_version,
-        "user_agent": payload.server_user_agent,
-        "metadata_json": _safe_metadata(payload.metadata),
+        # v3 stores the exact trusted-proxy address; v1/v2 rows contain only
+        # the network base and must not be presented as exact historical IPs.
+        "ip_resolution_version": "3",
+        "user_agent": _minimal_user_agent(payload.server_user_agent),
+        "metadata_json": _safe_metadata(metadata),
+        # These are advertiser-defined ValueTrack/UTM keywords, never a raw
+        # Google search query. Unattributed arbitrary query text is discarded.
+        "keyword": _safe_matched_keyword(payload.keyword, row),
+        "utm_term": _safe_matched_keyword(payload.utm_term or payload.keyword, row),
     })
     row.pop("metadata", None)
     row.pop("server_ip", None)
@@ -335,21 +556,72 @@ def collect_event(payload: AdsEventIn, eng: Engine = Depends(ads_engine)) -> dic
     columns = list(row)
     params = ",".join(f":{column}" for column in columns)
     with eng.begin() as cx:
+        cx.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_ads_purchase_transaction "
+            "ON ads_click_events(site_id, json_extract(metadata_json,'$.transaction_id')) "
+            "WHERE event_type='purchase' AND json_extract(metadata_json,'$.transaction_id') IS NOT NULL"
+        ))
+        cx.execute(text("DELETE FROM ads_click_events WHERE received_at<:retention_cutoff"), {
+            "retention_cutoff": retention_cutoff,
+        })
         recent = int(cx.execute(text(
             "SELECT COUNT(*) FROM ads_click_events WHERE ip_hash=:ip_hash AND received_at>=:cutoff"
         ), {"ip_hash": row["ip_hash"], "cutoff": cutoff}).scalar_one())
         if recent >= 180:
+            _audit_event(row, accepted=False)
             raise HTTPException(429, "collector rate limit exceeded")
+        if transaction_id:
+            duplicate_purchase = cx.execute(text(
+                "SELECT 1 FROM ads_click_events "
+                "WHERE site_id=:site_id AND event_type='purchase' "
+                "AND json_extract(metadata_json,'$.transaction_id')=:transaction_id LIMIT 1"
+            ), {
+                "site_id": site_id,
+                "transaction_id": transaction_id,
+            }).first()
+            if duplicate_purchase:
+                _audit_event(row, accepted=False, duplicate=True)
+                return {"accepted": False, "duplicate": True, "received_at": received}
         result = cx.execute(text(
             f"INSERT OR IGNORE INTO ads_click_events ({','.join(columns)}) VALUES ({params})"
         ), row)
-    return {"accepted": bool(result.rowcount), "duplicate": not bool(result.rowcount), "received_at": received}
+    accepted = bool(result.rowcount)
+    _audit_event(row, accepted=accepted, duplicate=not accepted)
+    return {"accepted": accepted, "duplicate": not accepted, "received_at": received}
+
+
+@router.post("/customer-links", status_code=202)
+def link_customer(payload: CustomerLinkIn, eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
+    """Link an authenticated Woo customer to anonymous telemetry IDs.
+
+    The storefront derives customer_key with a server-only HMAC secret. Raw
+    WordPress user IDs, names, phones and emails never enter this service.
+    """
+    site_id = payload.site_id.strip().lower()
+    if site_id not in _allowed_sites():
+        raise HTTPException(403, "site_id is not allowed")
+    now = _iso(_utcnow())
+    with eng.begin() as cx:
+        cx.execute(text("""
+            INSERT INTO ads_customer_links(site_id, customer_key, visitor_id, session_id, first_seen, last_seen)
+            VALUES(:site_id, :customer_key, :visitor_id, :session_id, :now, :now)
+            ON CONFLICT(site_id, customer_key, visitor_id, session_id)
+            DO UPDATE SET last_seen=excluded.last_seen
+        """), {
+            "site_id": site_id,
+            "customer_key": payload.customer_key,
+            "visitor_id": payload.visitor_id,
+            "session_id": payload.session_id,
+            "now": now,
+        })
+    return {"linked": True, "received_at": now}
 
 
 def _cutoff(hours: int) -> str:
+    retention_cutoff = _utcnow() - timedelta(days=_retention_days())
     if hours == 0:
-        return "1970-01-01T00:00:00.000Z"
-    return _iso(_utcnow() - timedelta(hours=hours))
+        return _iso(retention_cutoff)
+    return _iso(max(retention_cutoff, _utcnow() - timedelta(hours=hours)))
 
 
 @router.get("/sites")
@@ -361,7 +633,7 @@ def collector_sites(eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
 
 
 @router.get("/summary")
-def summary(hours: int = Query(default=24, ge=0, le=87_600), site_id: str = "modirankhodro-emdad.com",
+def summary(hours: int = Query(default=24, ge=0, le=87_600), site_id: str = Query(min_length=3, max_length=120),
             eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
     since = _cutoff(hours)
     five_minutes = _iso(_utcnow() - timedelta(minutes=5))
@@ -375,8 +647,32 @@ def summary(hours: int = Query(default=24, ge=0, le=87_600), site_id: str = "mod
                    SUM(CASE WHEN event_type='landing' THEN 1 ELSE 0 END) AS landings,
                    SUM(CASE WHEN event_type='tel_click' THEN 1 ELSE 0 END) AS tel_clicks,
                    SUM(CASE WHEN event_type='form_submit' THEN 1 ELSE 0 END) AS form_submits,
+                   COUNT(DISTINCT CASE WHEN event_type='view_item' THEN COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash) END) AS product_view_sessions,
+                   COUNT(DISTINCT CASE WHEN event_type='add_to_cart' THEN COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash) END) AS add_to_cart_sessions,
+                   COUNT(DISTINCT CASE WHEN event_type='view_cart' THEN COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash) END) AS view_cart_sessions,
+                   COUNT(DISTINCT CASE WHEN event_type IN ('auth_otp_requested','auth_password_recovery_requested') THEN COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash) END) AS auth_started_sessions,
+                   COUNT(DISTINCT CASE WHEN event_type IN ('auth_otp_verified','auth_login_success') THEN COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash) END) AS auth_success_sessions,
+                   COUNT(DISTINCT CASE WHEN event_type='auth_registration_complete' THEN COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash) END) AS account_created_sessions,
+                   COUNT(DISTINCT CASE WHEN event_type='begin_checkout' THEN COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash) END) AS checkout_sessions,
+                   COUNT(DISTINCT CASE WHEN event_type='payment_gateway_redirect' THEN COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash) END) AS gateway_redirect_sessions,
+                   COUNT(DISTINCT CASE WHEN event_type IN ('purchase','payment_status_paid') THEN COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash) END) AS purchase_sessions,
+                   SUM(CASE WHEN event_type IN ('auth_otp_verified','auth_login_success') THEN 1 ELSE 0 END) AS auth_successes,
+                   SUM(CASE WHEN event_type='auth_registration_complete' THEN 1 ELSE 0 END) AS account_creations,
+                   SUM(CASE WHEN event_type='begin_checkout' THEN 1 ELSE 0 END) AS checkout_starts,
+                   SUM(CASE WHEN event_type='payment_gateway_redirect' THEN 1 ELSE 0 END) AS gateway_redirects,
+                   SUM(CASE WHEN event_type='purchase' THEN 1 ELSE 0 END) AS purchases,
+                   SUM(CASE WHEN event_type IN ('payment_gateway_error','payment_return_invalid','payment_status_failed') THEN 1 ELSE 0 END) AS payment_failures,
                    SUM(CASE WHEN COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>'' THEN 1 ELSE 0 END) AS google_ads_confirmed_events,
-                   SUM(CASE WHEN COALESCE(campaign_id,'')<>'' OR COALESCE(ad_group_id,'')<>'' OR COALESCE(creative_id,'')<>'' THEN 1 ELSE 0 END) AS google_ads_likely_events
+                   SUM(CASE WHEN COALESCE(campaign_id,'')<>'' OR COALESCE(ad_group_id,'')<>'' OR COALESCE(creative_id,'')<>'' THEN 1 ELSE 0 END) AS google_ads_likely_events,
+                   COUNT(DISTINCT CASE
+                       WHEN COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>''
+                       THEN COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash)
+                   END) AS google_ads_sessions,
+                   COUNT(DISTINCT CASE
+                       WHEN COALESCE(gclid,'')<>'' THEN 'g:' || gclid
+                       WHEN COALESCE(gbraid,'')<>'' THEN 'b:' || gbraid
+                       WHEN COALESCE(wbraid,'')<>'' THEN 'w:' || wbraid
+                   END) AS google_ads_click_ids
             FROM ads_click_events WHERE site_id=:site_id AND received_at>=:since
         """), {"site_id": site_id, "since": since}).mappings().one())
         recent = dict(cx.execute(text("""
@@ -386,6 +682,11 @@ def summary(hours: int = Query(default=24, ge=0, le=87_600), site_id: str = "mod
                    COUNT(DISTINCT CASE WHEN received_at>=:sixty THEN ip_hash END) AS ips_60m
             FROM ads_click_events WHERE site_id=:site_id
         """), {"site_id": site_id, "five": five_minutes, "sixty": sixty_minutes}).mappings().one())
+        linked_customers = int(cx.execute(text("""
+            SELECT COUNT(DISTINCT customer_key)
+            FROM ads_customer_links
+            WHERE site_id=:site_id AND last_seen>=:since
+        """), {"site_id": site_id, "since": since}).scalar_one() or 0)
         hourly = [dict(row) for row in cx.execute(text("""
             SELECT strftime('%Y-%m-%dT%H:00:00Z', received_at) AS hour,
                    COUNT(*) AS events,
@@ -413,12 +714,68 @@ def summary(hours: int = Query(default=24, ge=0, le=87_600), site_id: str = "mod
         """), {"site_id": site_id, "since": since}).mappings()]
 
     normalized_totals = {key: int(value or 0) for key, value in totals.items()}
+    normalized_totals["linked_customers"] = linked_customers
     normalized_recent = {key: int(value or 0) for key, value in recent.items()}
     return {
         "generated_at": _iso(_utcnow()), "site_id": site_id, "hours": hours,
         "totals": normalized_totals, "recent": normalized_recent,
         "hourly": hourly, "event_types": event_types, "campaigns": campaigns,
         "mode": "shadow", "blocking_enabled": False,
+    }
+
+
+@router.get("/pages")
+def page_insights(hours: int = Query(default=24, ge=0, le=87_600),
+                  site_id: str = Query(min_length=3, max_length=120),
+                  limit: int = Query(default=50, ge=1, le=200),
+                  eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
+    """Aggregate page and scroll behavior without returning visitor identifiers."""
+    since = _cutoff(hours)
+    with eng.connect() as cx:
+        pages = [dict(row) for row in cx.execute(text("""
+            SELECT page_path,
+                   COUNT(*) AS events,
+                   COUNT(DISTINCT COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash)) AS sessions,
+                   SUM(CASE WHEN event_type='page_view' THEN 1 ELSE 0 END) AS page_views,
+                   SUM(CASE WHEN event_type IN ('click','article_cta_click') THEN 1 ELSE 0 END) AS clicks,
+                   COUNT(DISTINCT CASE WHEN event_type='scroll' AND CAST(json_extract(metadata_json,'$.depth_pct') AS REAL)>=25 THEN COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash) END) AS scroll_25_sessions,
+                   COUNT(DISTINCT CASE WHEN event_type='scroll' AND CAST(json_extract(metadata_json,'$.depth_pct') AS REAL)>=50 THEN COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash) END) AS scroll_50_sessions,
+                   COUNT(DISTINCT CASE WHEN event_type='scroll' AND CAST(json_extract(metadata_json,'$.depth_pct') AS REAL)>=75 THEN COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash) END) AS scroll_75_sessions,
+                   COUNT(DISTINCT CASE WHEN event_type='scroll' AND CAST(json_extract(metadata_json,'$.depth_pct') AS REAL)>=90 THEN COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash) END) AS scroll_90_sessions,
+                   ROUND(AVG(CASE WHEN event_type='page_exit' THEN CAST(json_extract(metadata_json,'$.dwell_ms') AS REAL) END)) AS avg_dwell_ms,
+                   SUM(CASE WHEN event_type='view_item' THEN 1 ELSE 0 END) AS product_views,
+                   SUM(CASE WHEN event_type='add_to_cart' THEN 1 ELSE 0 END) AS add_to_carts,
+                   SUM(CASE WHEN event_type IN ('auth_otp_requested','auth_password_recovery_requested') THEN 1 ELSE 0 END) AS auth_starts,
+                   SUM(CASE WHEN event_type IN ('auth_otp_verified','auth_login_success') THEN 1 ELSE 0 END) AS auth_successes,
+                   SUM(CASE WHEN event_type='auth_registration_complete' THEN 1 ELSE 0 END) AS account_creations,
+                   SUM(CASE WHEN event_type='begin_checkout' THEN 1 ELSE 0 END) AS checkout_starts,
+                   SUM(CASE WHEN event_type='payment_gateway_redirect' THEN 1 ELSE 0 END) AS gateway_redirects,
+                   SUM(CASE WHEN event_type IN ('purchase','payment_status_paid') THEN 1 ELSE 0 END) AS purchases
+            FROM ads_click_events
+            WHERE site_id=:site_id AND received_at>=:since AND COALESCE(page_path,'')<>''
+            GROUP BY page_path
+            ORDER BY sessions DESC, events DESC
+            LIMIT :limit
+        """), {"site_id": site_id, "since": since, "limit": limit}).mappings()]
+        entries = [dict(row) for row in cx.execute(text("""
+            SELECT landing_path AS page_path,
+                   COUNT(DISTINCT COALESCE(NULLIF(session_id,''), NULLIF(visitor_id,''), ip_hash)) AS sessions
+            FROM ads_click_events
+            WHERE site_id=:site_id AND received_at>=:since AND event_type='landing' AND COALESCE(landing_path,'')<>''
+            GROUP BY landing_path ORDER BY sessions DESC LIMIT :limit
+        """), {"site_id": site_id, "since": since, "limit": limit}).mappings()]
+        actions = [dict(row) for row in cx.execute(text("""
+            SELECT page_path, json_extract(metadata_json,'$.action') AS action, COUNT(*) AS count
+            FROM ads_click_events
+            WHERE site_id=:site_id AND received_at>=:since
+              AND event_type IN ('click','article_cta_click')
+              AND COALESCE(json_extract(metadata_json,'$.action'),'')<>''
+            GROUP BY page_path, action ORDER BY count DESC LIMIT 100
+        """), {"site_id": site_id, "since": since}).mappings()]
+    return {
+        "generated_at": _iso(_utcnow()), "site_id": site_id, "hours": hours,
+        "pages": pages, "entries": entries, "actions": actions,
+        "privacy": "aggregate_no_visitor_identifiers",
     }
 
 
@@ -441,7 +798,11 @@ def _risk_score(row: dict[str, Any]) -> tuple[int, list[str]]:
 
 def _ip_rows(cx, site_id: str, since: str, limit: int) -> list[dict[str, Any]]:
     rows = [dict(row) for row in cx.execute(text("""
-        SELECT ip_address, ip_hash, ip_prefix, MAX(ip_source) AS ip_source,
+        SELECT COALESCE(
+                   MAX(CASE WHEN CAST(ip_resolution_version AS INTEGER)>=3 THEN ip_address END),
+                   MAX(ip_address)
+               ) AS ip_address,
+               ip_hash, MAX(ip_prefix) AS ip_prefix, MAX(ip_source) AS ip_source,
                MAX(proxy_ip) AS proxy_ip, MAX(ip_confidence) AS ip_confidence,
                MAX(ip_resolution_version) AS ip_resolution_version,
                MIN(received_at) AS first_seen, MAX(received_at) AS last_seen,
@@ -453,13 +814,15 @@ def _ip_rows(cx, site_id: str, since: str, limit: int) -> list[dict[str, Any]]:
                SUM(CASE WHEN event_type='landing' THEN 1 ELSE 0 END) AS landings,
                SUM(CASE WHEN event_type='tel_click' THEN 1 ELSE 0 END) AS tel_clicks,
                SUM(CASE WHEN event_type='form_submit' THEN 1 ELSE 0 END) AS form_submits,
-               SUM(CASE WHEN received_at>=:five THEN 1 ELSE 0 END) AS events_5m,
+               SUM(CASE WHEN received_at>=:five AND event_type NOT IN
+                   ('heartbeat','scroll','page_exit','page_view','section_view')
+                   THEN 1 ELSE 0 END) AS events_5m,
                MAX(user_agent) AS latest_user_agent,
                MAX(page_path) AS latest_page_path,
                MAX(referrer) AS latest_referrer
         FROM ads_click_events
         WHERE site_id=:site_id AND received_at>=:since
-        GROUP BY ip_address, ip_hash, ip_prefix
+        GROUP BY ip_hash
         ORDER BY last_seen DESC LIMIT :limit
     """), {"site_id": site_id, "since": since, "five": _iso(_utcnow() - timedelta(minutes=5)), "limit": limit}).mappings()]
     for row in rows:
@@ -469,7 +832,7 @@ def _ip_rows(cx, site_id: str, since: str, limit: int) -> list[dict[str, Any]]:
 
 @router.get("/ips")
 def ips(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query(default=200, ge=1, le=10_000),
-        site_id: str = "modirankhodro-emdad.com", eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
+        site_id: str = Query(min_length=3, max_length=120), eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
     with eng.connect() as cx:
         items = _ip_rows(cx, site_id, _cutoff(hours), limit)
     items = _attach_geo(items)
@@ -478,7 +841,7 @@ def ips(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query(defa
 
 @router.get("/ips.csv")
 def ips_csv(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query(default=10000, ge=1, le=100_000),
-            site_id: str = "modirankhodro-emdad.com", eng: Engine = Depends(ads_engine)) -> Response:
+            site_id: str = Query(min_length=3, max_length=120), eng: Engine = Depends(ads_engine)) -> Response:
     with eng.connect() as cx:
         items = _ip_rows(cx, site_id, _cutoff(hours), limit)
     items = _attach_geo(items)
@@ -548,7 +911,7 @@ def _event_rows(cx, site_id: str, hours: int, limit: int, offset: int = 0,
 @router.get("/events")
 def events(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query(default=100, ge=1, le=1000),
            offset: int = Query(default=0, ge=0, le=10_000_000),
-           site_id: str = "modirankhodro-emdad.com", event_type: str | None = None,
+           site_id: str = Query(min_length=3, max_length=120), event_type: str | None = None,
            q: str | None = Query(default=None, max_length=500),
            attribution: str | None = Query(default=None, max_length=20),
            eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
@@ -598,14 +961,44 @@ def _session_rows(cx, site_id: str, since: str) -> list[dict[str, Any]]:
                 "utm_medium": r.get("utm_medium"), "utm_term": r.get("utm_term"), "utm_content": r.get("utm_content"),
                 "campaign_id": r.get("campaign_id"), "gclid": r.get("gclid"),
                 "gbraid": r.get("gbraid"), "wbraid": r.get("wbraid"), "events": 0, "landings": 0, "page_views": 0,
-                "scrolls": 0, "heartbeats": 0, "tel_clicks": 0, "form_submits": 0, "whatsapp_clicks": 0, "_pages": set(),
+                "scrolls": 0, "heartbeats": 0, "tel_clicks": 0, "form_submits": 0, "whatsapp_clicks": 0,
+                "clicks": 0, "section_views": 0, "article_cta_clicks": 0, "_pages": set(),
+                "view_items": 0, "add_to_carts": 0, "remove_from_carts": 0, "view_carts": 0,
+                "begin_checkouts": 0, "add_shipping_infos": 0, "add_payment_infos": 0, "purchases": 0,
+                "auth_requests": 0, "auth_successes": 0, "auth_failures": 0,
+                "account_creations": 0, "auth_logouts": 0,
+                "checkout_auth_requireds": 0, "gateway_redirects": 0,
+                "payment_paid": 0, "payment_pending": 0, "payment_failures": 0,
             }
         s["events"] += 1
         s["first_seen"] = r["received_at"]  # DESC scan → last write is the earliest event
         et = r.get("event_type")
         counter = {"landing": "landings", "page_view": "page_views", "scroll": "scrolls",
                    "heartbeat": "heartbeats", "tel_click": "tel_clicks", "form_submit": "form_submits",
-                   "whatsapp_click": "whatsapp_clicks"}.get(et)
+                   "whatsapp_click": "whatsapp_clicks", "click": "clicks",
+                   "section_view": "section_views", "article_cta_click": "article_cta_clicks",
+                   "view_item": "view_items", "add_to_cart": "add_to_carts",
+                   "remove_from_cart": "remove_from_carts", "view_cart": "view_carts",
+                   "begin_checkout": "begin_checkouts", "add_shipping_info": "add_shipping_infos",
+                   "add_payment_info": "add_payment_infos",
+                   "purchase": "purchases",
+                   "auth_otp_requested": "auth_requests",
+                   "auth_password_recovery_requested": "auth_requests",
+                   "auth_otp_verified": "auth_successes",
+                   "auth_login_success": "auth_successes",
+                   "auth_registration_complete": "account_creations",
+                   "auth_otp_request_failed": "auth_failures",
+                   "auth_otp_verify_failed": "auth_failures",
+                   "auth_login_failed": "auth_failures",
+                   "auth_password_recovery_failed": "auth_failures",
+                   "auth_logout": "auth_logouts",
+                   "checkout_auth_required": "checkout_auth_requireds",
+                   "payment_gateway_redirect": "gateway_redirects",
+                   "payment_status_paid": "payment_paid",
+                   "payment_status_pending": "payment_pending",
+                   "payment_gateway_error": "payment_failures",
+                   "payment_return_invalid": "payment_failures",
+                   "payment_status_failed": "payment_failures"}.get(et)
         if counter:
             s[counter] += 1
         if r.get("page_path"):
@@ -636,45 +1029,77 @@ def _session_rows(cx, site_id: str, since: str) -> list[dict[str, Any]]:
     return items
 
 
+def _ip_is_flagged(ip: str) -> bool:
+    """True when an IP is a datacenter/proxy or non-Iran address. Iranian mobile
+    carriers (MCI/IranCell) legitimately rotate IPs via CGNAT for REAL users, so
+    those must NOT count as rotation — only genuinely off-network IPs do."""
+    g = _geo_lookup(ip)
+    if g.get("geo_hosting") or g.get("geo_proxy"):
+        return True
+    cc = g.get("geo_country_code")
+    return bool(cc) and cc.upper() != "IR"
+
+
 def _visitor_stats(cx, site_id: str, since: str) -> dict[str, dict[str, Any]]:
     """Per-visitor_id totals over the window. visitor_id is a per-browser UUID
-    that survives IP changes, so it exposes one identity hopping many IPs."""
+    that survives IP changes, so it exposes one identity hopping many IPs. We
+    also count how many of those IPs are 'flagged' (datacenter/proxy/foreign) so
+    normal Iranian-mobile IP rotation is not mistaken for a bot."""
     rows = cx.execute(text("""
-        SELECT visitor_id,
-               COUNT(*) AS events,
-               COUNT(DISTINCT ip_address) AS ips,
-               COUNT(DISTINCT session_id) AS sessions,
-               SUM(CASE WHEN event_type='landing' THEN 1 ELSE 0 END) AS landings,
-               SUM(CASE WHEN event_type='tel_click' THEN 1 ELSE 0 END) AS tel_clicks
+        SELECT visitor_id, ip_hash, ip_address, ip_resolution_version, session_id, event_type
         FROM ads_click_events
         WHERE site_id=:s AND received_at>=:since AND COALESCE(visitor_id,'')<>''
-        GROUP BY visitor_id
     """), {"s": site_id, "since": since}).mappings()
-    return {r["visitor_id"]: dict(r) for r in rows}
+    acc: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        vid = r["visitor_id"]
+        st = acc.get(vid)
+        if st is None:
+            st = acc[vid] = {"events": 0, "landings": 0, "tel_clicks": 0,
+                             "_ips": {}, "_sessions": set()}
+        st["events"] += 1
+        et = r["event_type"]
+        if et == "landing":
+            st["landings"] += 1
+        elif et == "tel_click":
+            st["tel_clicks"] += 1
+        existing_ip = st["_ips"].get(r["ip_hash"])
+        if existing_ip is None or int(r.get("ip_resolution_version") or 0) >= 3:
+            st["_ips"][r["ip_hash"]] = r["ip_address"]
+        if r.get("session_id"):
+            st["_sessions"].add(r["session_id"])
+    out: dict[str, dict[str, Any]] = {}
+    for vid, st in acc.items():
+        flagged = sum(1 for ip in st["_ips"].values() if _ip_is_flagged(ip))
+        out[vid] = {"events": st["events"], "landings": st["landings"], "tel_clicks": st["tel_clicks"],
+                    "ips": len(st["_ips"]), "sessions": len(st["_sessions"]), "flagged_ips": flagged}
+    return out
 
 
 def _visitor_risk(stat: dict[str, Any] | None) -> tuple[int, list[str]]:
-    """Risk from one browser identity: rotating across IPs, or clicking the ads
-    repeatedly, are both strong invalid-traffic signals."""
+    """Risk from one browser identity. IP rotation counts ONLY across flagged
+    (datacenter/proxy/foreign) IPs — plain Iranian-mobile rotation is normal for
+    real users. Repeated ad clicks by one identity remain a softer signal."""
     if not stat:
         return 0, []
     boost, reasons = 0, []
+    flagged = int(stat.get("flagged_ips") or 0)
     ips = int(stat.get("ips") or 0)
     landings = int(stat.get("landings") or 0)
-    if ips >= 3:
+    if flagged >= 2:
         boost += 40; reasons.append("visitor_ip_rotation")
-    elif ips == 2:
+    elif flagged == 1 and ips >= 2:
         boost += 15; reasons.append("visitor_multi_ip")
-    if landings >= 5:
-        boost += 30; reasons.append("visitor_repeat_clicks")
-    elif landings >= 3:
-        boost += 12; reasons.append("visitor_repeat_clicks")
+    if landings >= 6:
+        boost += 25; reasons.append("visitor_repeat_clicks")
+    elif landings >= 4:
+        boost += 10; reasons.append("visitor_repeat_clicks")
     return boost, reasons
 
 
 @router.get("/sessions")
 def sessions(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query(default=500, ge=1, le=5000),
-             site_id: str = "modirankhodro-emdad.com", eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
+             site_id: str = Query(min_length=3, max_length=120), eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
     since = _cutoff(hours)
     with eng.connect() as cx:
         items = _session_rows(cx, site_id, since)
@@ -696,8 +1121,8 @@ def sessions(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query
 
 @router.get("/keywords")
 def keywords(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query(default=300, ge=1, le=2000),
-             site_id: str = "modirankhodro-emdad.com", eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
-    """Per-keyword (utm_term) performance with a fraud rate derived from the
+             site_id: str = Query(min_length=3, max_length=120), eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
+    """Per matched-keyword performance with a fraud rate derived from the
     per-IP risk score: fraud_rate = share of a keyword's events coming from
     high-risk (>=70) IPs; suspicious = the softer >=35 tier."""
     since = _cutoff(hours)
@@ -709,9 +1134,12 @@ def keywords(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query
     suspicious_visitors = {vid for vid, st in vstats.items() if _visitor_risk(st)[0] >= 40}
     with eng.connect() as cx:
         rows = cx.execute(text("""
-            SELECT TRIM(utm_term) AS keyword, ip_address, visitor_id, event_type, session_id, received_at
+            SELECT TRIM(COALESCE(NULLIF(keyword,''), NULLIF(utm_term,''))) AS keyword,
+                   CASE WHEN COALESCE(keyword,'')<>'' THEN 'valuetrack_keyword' ELSE 'utm_term' END AS keyword_source,
+                   ip_address, visitor_id, event_type, session_id, received_at
             FROM ads_click_events
-            WHERE site_id=:s AND received_at>=:since AND COALESCE(TRIM(utm_term),'')<>''
+            WHERE site_id=:s AND received_at>=:since
+              AND COALESCE(TRIM(keyword), TRIM(utm_term), '')<>''
         """), {"s": site_id, "since": since}).mappings().all()
     agg: dict[str, dict[str, Any]] = {}
     for r in rows:
@@ -721,7 +1149,8 @@ def keywords(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query
             a = agg[key] = {"keyword": key, "events": 0, "landings": 0, "tel_clicks": 0,
                             "fraud_events": 0, "last_seen": r["received_at"],
                             "_ips": set(), "_sessions": set(), "_susp_ips": set(), "_high_ips": set(),
-                            "_visitors": set(), "_bot_visitors": set()}
+                            "_visitors": set(), "_bot_visitors": set(), "_sources": set()}
+        a["_sources"].add(r["keyword_source"])
         a["events"] += 1
         if r["event_type"] == "landing":
             a["landings"] += 1
@@ -756,7 +1185,7 @@ def keywords(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query
             "high_risk_ips": len(a["_high_ips"]), "unique_visitors": len(a["_visitors"]),
             "bot_visitors": len(a["_bot_visitors"]), "fraud_events": a["fraud_events"],
             "fraud_rate": round(100 * a["fraud_events"] / events) if events else 0,
-            "last_seen": a["last_seen"],
+            "last_seen": a["last_seen"], "sources": sorted(a["_sources"]),
         })
     items.sort(key=lambda z: (z["fraud_rate"], z["events"]), reverse=True)
     return {"generated_at": _iso(_utcnow()), "site_id": site_id, "hours": hours, "items": items[:limit], "count": len(items)}
@@ -765,7 +1194,7 @@ def keywords(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query
 @router.get("/events.csv")
 def events_csv(hours: int = Query(default=0, ge=0, le=87_600),
                limit: int = Query(default=500_000, ge=1, le=500_000),
-               site_id: str = "modirankhodro-emdad.com", event_type: str | None = None,
+               site_id: str = Query(min_length=3, max_length=120), event_type: str | None = None,
                q: str | None = Query(default=None, max_length=500),
                attribution: str | None = Query(default=None, max_length=20),
                eng: Engine = Depends(ads_engine)) -> Response:

@@ -490,6 +490,21 @@ memory_snapshots = Table(
     Column("created_at", String, nullable=False),
 )
 
+content_knowledge_packs = Table(
+    "content_knowledge_packs", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("hash", String, nullable=False),
+    Column("status", String, nullable=False, server_default="ready"),
+    Column("pack", Text, nullable=False, server_default="{}"),
+    Column("rendered", Text, nullable=False),
+    Column("source_counts", Text, nullable=False, server_default="{}"),
+    Column("warnings", Text, nullable=False, server_default="[]"),
+    Column("created_at", String, nullable=False),
+    Column("updated_at", String, nullable=False),
+)
+
 prompts = Table(
     "prompts", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
@@ -807,6 +822,18 @@ content_plan_generation_jobs = Table(
     Column("status", String, nullable=False, server_default='prepared'),
     Column("params", Text, nullable=False, server_default='{}'),
     Column("requested_by", String),
+    Column("scheduled_at", String),
+    Column("publish_at", String),
+    Column("publish_action", String, nullable=False, server_default="none"),
+    Column("approval_mode", String, nullable=False, server_default="human"),
+    Column("category_ids", Text, nullable=False, server_default="[]"),
+    Column("min_score", Float, nullable=False, server_default="85"),
+    Column("attempts", Integer, nullable=False, server_default="0"),
+    Column("max_attempts", Integer, nullable=False, server_default="3"),
+    Column("queue_run_id", String),
+    Column("last_error", Text),
+    Column("started_at", String),
+    Column("finished_at", String),
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
 )

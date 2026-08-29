@@ -25,9 +25,16 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
       cache: 'no-store'
     });
     const body = await res.text();
+    const responseHeaders: Record<string, string> = {
+      'Content-Type': res.headers.get('content-type') ?? 'application/json',
+      'X-Request-ID': res.headers.get('x-request-id') ?? requestId,
+      'Cache-Control': res.headers.get('cache-control') ?? 'no-store'
+    };
+    const disposition = res.headers.get('content-disposition');
+    if (disposition) responseHeaders['Content-Disposition'] = disposition;
     return new NextResponse(body, {
       status: res.status,
-      headers: { 'Content-Type': res.headers.get('content-type') ?? 'application/json', 'X-Request-ID': res.headers.get('x-request-id') ?? requestId }
+      headers: responseHeaders
     });
   } catch (e) {
     // backend unreachable → same envelope shape as the backend would send

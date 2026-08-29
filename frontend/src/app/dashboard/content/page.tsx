@@ -15,7 +15,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ s
   const parsedContent = Number(content);
   const initialContentId = Number.isInteger(parsedContent) && parsedContent > 0 ? parsedContent : null;
   return (
-    <PageContainer pageTitle='مغز محتوا' pageDescription='خط لوله محتوا با تأیید انسانی: برنامه‌ریزی → بریف → نگارش → بازبینی → تأیید → انتشار. بریف‌ها از کلمه کلیدی، خوشه، Search Console و گراف ساخته می‌شوند. انتشار خودکار غیرفعال است.'>
+    <PageContainer pageTitle='مغز محتوا' pageDescription='خط لوله محتوا با تأیید انسانی: برنامه‌ریزی → بریف → نگارش → بازبینی → تأیید → انتشار واقعی در وردپرس. دسته‌ها از همان سایت خوانده می‌شوند و زمان‌بندی در خود وردپرس ذخیره می‌شود.'>
       {!initial ? <p className='text-muted-foreground text-sm'>ابتدا یک سایت بسازید.</p> : <ContentBrainPage sites={list} initialSiteId={initial} initialContentId={initialContentId} />}
     </PageContainer>
   );

@@ -73,7 +73,7 @@ export function ContentBrainPage({ sites, initialSiteId, initialContentId = null
         <KpiCard label='کل محتوا' value={board?.counts.total ?? null} />
         <KpiCard label='زمان‌بندی‌شده' value={board?.counts.scheduled ?? null} />
         <KpiCard label='در جریان' value={board ? board.counts.by_status.brief_ready + board.counts.by_status.writing + board.counts.by_status.review : null} hint='بریف آماده + نگارش + بازبینی' />
-        <KpiCard label='منتشرشده' value={board?.counts.by_status.published ?? null} hint='انتشار خودکار غیرفعال است' />
+        <KpiCard label='منتشرشده' value={board?.counts.by_status.published ?? null} hint='تأییدشده در WordPress' />
       </div>
       <Tabs defaultValue={initialContentId ? 'list' : 'board'}>
         <TabsList><TabsTrigger value='board'>کانبان</TabsTrigger><TabsTrigger value='list'>فهرست</TabsTrigger><TabsTrigger value='analytics'>تحلیل و یادگیری</TabsTrigger></TabsList>

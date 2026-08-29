@@ -142,7 +142,7 @@ def test_manual_sync_status_rebuild_and_guards(env):
     assert st["status"] == "succeeded" and next(s for s in st["steps"] if s["key"] == "crawl")["status"] == "skipped" and env["state"]["crawl_calls"] == 0
     r2 = c.post(f"/api/v1/sites/{SID}/graph/rebuild"); assert r2.status_code == 202 and r2.json()["stage"] == "graph_only"
     st2 = c.get(f"/api/v1/sites/{SID}/wordpress/sync/status").json()
-    assert st2["stage"] == "graph_only" and [s["key"] for s in st2["steps"]] == ["build_graph"] and st2["status"] == "succeeded" and st2["counts"]["graph_by_type"].get("PAGE") == 1
+    assert st2["stage"] == "graph_only" and [s["key"] for s in st2["steps"]] == ["build_graph", "knowledge_pack"] and st2["status"] == "succeeded" and st2["counts"]["graph_by_type"].get("PAGE") == 1
     # already-running guard (simulate a running state)
     orch = WordPressSyncOrchestrator(env["eng"]); stq = orch.create(SID); stq.status = "running"; orch._persist(stq)
     r3 = c.post(f"/api/v1/sites/{SID}/wordpress/sync", json={}).json(); assert r3["status"] == "already_running" and r3["run_id"] == stq.run_id

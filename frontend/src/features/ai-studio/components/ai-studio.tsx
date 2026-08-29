@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from '@/components/ui/native-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ApiError, endpoints, type AiModel, type Budget, type ContentItem, type GenEstimate, type GenerationRun, type Site } from '@/lib/api/client';
+import { ApiError, endpoints, type AiModel, type Budget, type ContentItem, type GenEstimate, type GenerationRun, type Site, type WordPressCategory } from '@/lib/api/client';
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -25,6 +25,7 @@ export function AiStudio({ sites, initialSiteId, initialContentId }: { sites: Si
   const [siteId, setSiteId] = useState(initialSiteId);
   const [site, setSite] = useState<Site | undefined>(sites.find((s) => s.site_id === initialSiteId));
   const [items, setItems] = useState<ContentItem[]>([]);
+  const [categories, setCategories] = useState<WordPressCategory[]>([]);
   const [cid, setCid] = useState<number | null>(initialContentId ?? null);
   const [mode, setMode] = useState<'manual' | 'assisted'>('assisted');
   const [models, setModels] = useState<AiModel[]>([]);
@@ -43,8 +44,8 @@ export function AiStudio({ sites, initialSiteId, initialContentId }: { sites: Si
   useEffect(() => { setSite(sites.find((s) => s.site_id === siteId)); setMode(sites.find((s) => s.site_id === siteId)?.mode === 'manual' ? 'manual' : 'assisted'); }, [siteId, sites]);
   const load = useCallback(async () => {
     try {
-      const [c, m, mem, b, r] = await Promise.all([endpoints.contentList(siteId, { limit: 200 }), endpoints.aiModels(), endpoints.genMemoryPreview(siteId), endpoints.aiBudget(siteId), endpoints.genRuns(siteId)]);
-      setItems(c.items); setModels(m.filter((x) => x.enabled)); setMemory(mem); setBudget(b); setRuns(r);
+      const [c, m, mem, b, r, cats] = await Promise.all([endpoints.contentList(siteId, { limit: 200 }), endpoints.aiModels(), endpoints.genMemoryPreview(siteId), endpoints.aiBudget(siteId), endpoints.genRuns(siteId), endpoints.wordpressCategories(siteId).catch(() => [])]);
+      setItems(c.items); setModels(m.filter((x) => x.enabled)); setMemory(mem); setBudget(b); setRuns(r); setCategories(cats);
       if (!cid && c.items.length) setCid(initialContentId ?? c.items[0].id);
     } catch (e) { toast.error(e instanceof ApiError ? e.message : String(e)); }
   }, [siteId, cid, initialContentId]);
@@ -100,6 +101,7 @@ export function AiStudio({ sites, initialSiteId, initialContentId }: { sites: Si
             <div className='grid gap-1'><Label>سایت</Label><NativeSelect value={siteId} onChange={(e) => { setSiteId(e.target.value); setCid(null); }}>{sites.map((s) => <NativeSelectOption key={s.site_id} value={s.site_id}>{s.name}</NativeSelectOption>)}</NativeSelect></div>
             <div className='grid gap-1'><Label>محتوا (کلمه کلیدی هدف · وضعیت)</Label><NativeSelect value={cid ?? ''} onChange={(e) => setCid(Number(e.target.value))}>{items.map((i) => <NativeSelectOption key={i.id} value={i.id}>{i.title} · {i.target_keyword ?? '—'} · {i.status_fa}{i.has_brief ? ' · بریف✓' : ' · بدون بریف'}</NativeSelectOption>)}</NativeSelect>
               {item && !item.has_brief && <span className='text-destructive text-xs'>این محتوا بریف ندارد — ابتدا در مغز محتوا بریف بسازید (ساختار از بریف گرفته می‌شود).</span>}</div>
+            <div className='grid gap-1'><Label>دسته‌بندی وردپرس همین سایت</Label><NativeSelect value={String((Array.isArray(item?.metadata?.wordpress_category_ids) ? item?.metadata?.wordpress_category_ids?.[0] : '') ?? '')} disabled={!item} onChange={async (e) => { if (!item) return; const ids = e.target.value ? [Number(e.target.value)] : []; try { const updated = await endpoints.updateContent(siteId, item.id, { metadata: { ...item.metadata, wordpress_category_ids: ids } }); setItems((all) => all.map((x) => x.id === updated.id ? updated : x)); toast.success('دسته مقاله ذخیره شد'); } catch (err) { toast.error(err instanceof ApiError ? err.message : String(err)); } }}><NativeSelectOption value=''>بدون دسته مشخص</NativeSelectOption>{categories.map((c) => <NativeSelectOption key={c.wordpress_category_id} value={c.wordpress_category_id}>{c.name} · {c.post_count} نوشته</NativeSelectOption>)}</NativeSelect>{categories.length === 0 && <span className='text-muted-foreground text-[11px]'>دسته‌های واقعی WordPress هنوز همگام نشده‌اند؛ از مدیریت سایت یا مغز محتوا آن‌ها را به‌روزرسانی کنید.</span>}</div>
             <div className='grid gap-1'><Label>حالت کنترل انسانی</Label>
               <NativeSelect value={mode} onChange={(e) => setMode(e.target.value as 'manual' | 'assisted')}><NativeSelectOption value='manual'>دستی — AI فقط پیشنهاد می‌دهد (پیش‌نویس با کلیک شما)</NativeSelectOption><NativeSelectOption value='assisted'>نیمه‌خودکار — پیش‌نویس ساخته و امتیاز/بازبینی می‌شود</NativeSelectOption></NativeSelect>
               <span className='text-muted-foreground text-[11px]'>خودکار (autopilot): رزروشده — غیرفعال. هیچ انتشاری انجام نمی‌شود.</span></div>

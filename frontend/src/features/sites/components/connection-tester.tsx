@@ -85,7 +85,7 @@ export function ConnectionTester({
       }
       if (kind === 'wordpress') {
         const a = r.detail?.auth as { configured?: boolean; status?: string; username?: string; key_hint?: string; source?: WpAuthStatus['source'] } | undefined;
-        if (a?.configured) setAuthInfo({ configured: true, username: a.username ?? wpUser, key_hint: a.key_hint ?? null, source: a.source ?? 'site' });
+        if (a?.configured && a.status === 'ok') setAuthInfo({ configured: true, username: a.username ?? wpUser, key_hint: a.key_hint ?? null, source: a.source ?? 'site' });
         setWpPass(''); // never keep the password in component state after the request
         const sj = r.detail?.sync_job as { status?: string; job_id?: string | null; error?: string | null } | undefined;
         if (sj) { const m = queueMessage(sj); (m.ok ? toast.success : toast.error)(`همگام‌سازی وردپرس → گراف: ${m.text}`); }
@@ -102,7 +102,7 @@ export function ConnectionTester({
     <div className='rounded-md border p-3'>
       <div className='mb-2 flex items-center justify-between gap-2'>
         <Label className='font-medium'>{label}</Label>
-        <StatusBadge status={result?.status} />
+        <StatusBadge status={kind === 'wordpress' && (result?.detail?.auth as { configured?: boolean; status?: string } | undefined)?.configured && (result?.detail?.auth as { status?: string }).status !== 'ok' ? 'not_authorized' : result?.status} />
       </div>
       <div className='flex flex-col gap-2 md:flex-row'>
         {kind === 'gsc' && gscProps?.status === 'ok' && gscProps.properties.length > 0 ? (
@@ -142,7 +142,7 @@ export function ConnectionTester({
       {kind === 'wordpress' && (mode === 'full' || advOpen) && (
         <div className='mt-2 rounded-md border border-dashed p-2'>
           <div className='mb-1 flex flex-wrap items-center justify-between gap-2 text-xs'>
-            <span className='font-medium'>احراز هویت با Application Password (اختیاری — فقط‌خواندنی)</span>
+            <span className='font-medium'>احراز هویت با Application Password (برای انتشار الزامی)</span>
             {authInfo?.configured ? <Badge variant='default' dir='ltr'>{authInfo.username} · ••••{authInfo.key_hint}{authInfo.source === 'env' ? ' · .env' : ''}</Badge> : <Badge variant='outline'>تنظیم نشده</Badge>}
           </div>
           <div className='flex flex-col gap-2 md:flex-row'>
@@ -152,7 +152,7 @@ export function ConnectionTester({
               <Button type='button' variant='ghost' size='sm' disabled={busy} onClick={async () => { setBusy(true); try { const r = await endpoints.testConnection(siteId, kind, value || null, { clear_wp_credentials: true }); setResult(r); setAuthInfo({ configured: false, username: null, key_hint: null, source: null }); setWpUser(''); } catch (e) { setError(String(e)); } finally { setBusy(false); } }}>حذف اعتبارنامه</Button>
             )}
           </div>
-          <p className='text-muted-foreground mt-1 text-[11px]'>وردپرس → کاربران → پروفایل → Application Passwords → یک رمز بسازید و اینجا وارد کنید. فقط برای «تست دسترسی» ارسال می‌شود؛ با SecretStore رمزنگاری شده ذخیره می‌شود و هرگز در لاگ/پاسخ ظاهر نمی‌شود. انتشار فقط از مسیر نویسندهٔ فاز ۱۶ (دکمه انتشار در تقویم/برنامه یا حالت «خودکار») انجام می‌شود.</p>
+          <p className='text-muted-foreground mt-1 text-[11px]'>وردپرس → کاربران → پروفایل → Application Passwords → یک رمز بسازید و اینجا وارد کنید. رمز با SecretStore رمزنگاری‌شده ذخیره می‌شود و هرگز در لاگ/پاسخ ظاهر نمی‌شود. همگام‌سازی عمومی بدون رمز ممکن است، اما ساخت پیش‌نویس و انتشار فقط با اقدام صریح شما و همین اتصال انجام می‌شود.</p>
           <div className='mt-2 flex flex-wrap items-center gap-2'>
             <Button type='button' variant='outline' size='sm' disabled={busy || capBusy} onClick={async () => { setCapBusy(true); setCap(null); try { setCap(await endpoints.wpPublishCapability(siteId)); } catch (e) { setError(String(e)); } finally { setCapBusy(false); } }} data-testid='wp-publish-capability'>
               {capBusy ? '…' : 'بررسی دسترسی انتشار'}
@@ -168,7 +168,7 @@ export function ConnectionTester({
         <p className='text-muted-foreground mt-1 text-xs'>{gscProps.message ?? 'فهرست property های Google در دسترس نیست'} — می‌توانید property را دستی وارد کنید.</p>
       )}
       {result && (
-        <p className={`mt-2 text-sm ${result.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
+        <p className={`mt-2 text-sm ${result.ok && !(kind === 'wordpress' && (result.detail?.auth as { configured?: boolean; status?: string } | undefined)?.configured && (result.detail?.auth as { status?: string }).status !== 'ok') ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}`}>
           {result.message}
           {result.detail?.permission ? <span dir='ltr'> · {String(result.detail.permission)}</span> : null}
         </p>
@@ -195,11 +195,11 @@ function DiagnosticsLog({ kind, result, errorDetail }: { kind: ConnectionKind; r
     <details className='mt-2 rounded border text-xs'>
       <summary className='cursor-pointer px-2 py-1 font-medium'>جزئیات فنی / لاگ اتصال {trace.length ? `(${trace.length} مرحله)` : ''}</summary>
       <div className='space-y-2 p-2'>
-        {kind === 'wordpress' && diags.length > 0 && (() => { const pub = diags.filter((d) => d.stage === 'public'); const au = diags.find((d) => d.stage === 'auth'); const a = (detail.auth ?? {}) as { status?: string; message?: string; user_name?: string; roles?: string[] };
+        {kind === 'wordpress' && diags.length > 0 && (() => { const pub = diags.filter((d) => d.stage === 'public'); const au = diags.find((d) => d.stage === 'auth'); const a = (detail.auth ?? {}) as { status?: string; message?: string; user_name?: string; roles?: string[]; write_ready?: boolean };
           return (
             <div className='grid gap-1 sm:grid-cols-2'>
               <div className='rounded border p-2'><div className='text-muted-foreground mb-1'>مرحله ۱ — REST API عمومی</div><div className='flex items-center gap-1'><span className={`inline-block h-2.5 w-2.5 rounded-full ${pub.every((d) => d.ok) ? 'bg-emerald-500' : 'bg-red-500'}`} />{pub.every((d) => d.ok) ? 'OK — وردپرس شناسایی شد' : 'ناموفق'}</div></div>
-              <div className='rounded border p-2'><div className='text-muted-foreground mb-1'>مرحله ۲ — احراز هویت (Application Password)</div><div className='flex items-center gap-1'><span className={`inline-block h-2.5 w-2.5 rounded-full ${au?.skipped ? 'bg-slate-400' : au?.ok ? 'bg-emerald-500' : 'bg-red-500'}`} />{au?.skipped ? 'اجرا نشد (اعتبارنامه وارد نشده)' : `${AUTH_FA[a.status ?? ''] ?? a.message ?? '—'}${a.user_name ? ` · ${a.user_name}` : ''}${a.roles?.length ? ` (${a.roles.join(', ')})` : ''}`}</div></div>
+              <div className='rounded border p-2'><div className='text-muted-foreground mb-1'>مرحله ۲ — احراز هویت (Application Password)</div><div className='flex items-center gap-1'><span className={`inline-block h-2.5 w-2.5 rounded-full ${au?.skipped ? 'bg-slate-400' : au?.ok && a.write_ready !== false ? 'bg-emerald-500' : 'bg-red-500'}`} />{au?.skipped ? 'اجرا نشد (برای انتشار لازم است)' : `${AUTH_FA[a.status ?? ''] ?? a.message ?? '—'}${a.write_ready === false ? ' · بدون مجوز ویرایش نوشته' : a.status === 'ok' ? ' · آماده انتشار' : ''}${a.user_name ? ` · ${a.user_name}` : ''}${a.roles?.length ? ` (${a.roles.join(', ')})` : ''}`}</div></div>
             </div>
           ); })()}
         {diags.length > 0 && (

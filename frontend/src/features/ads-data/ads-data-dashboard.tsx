@@ -150,6 +150,12 @@ type Session = {
   tel_clicks: number;
   form_submits: number;
   whatsapp_clicks: number;
+  clicks: number;
+  section_views: number;
+  article_cta_clicks: number;
+  add_to_carts: number;
+  begin_checkouts: number;
+  purchases: number;
   distinct_pages: number;
   risk_score: number;
   risk_reasons: string[];
@@ -207,7 +213,20 @@ const EVENT_FA: Record<string, string> = {
   whatsapp_click: 'کلیک واتساپ',
   form_start: 'شروع فرم',
   form_submit: 'ارسال فرم',
-  page_exit: 'خروج از صفحه'
+  page_exit: 'خروج از صفحه',
+  click: 'کلیک عمومی',
+  section_view: 'مشاهده بخش صفحه',
+  article_cta_click: 'کلیک محصول از مقاله',
+  view_item_list: 'نمایش فهرست محصول',
+  select_item: 'انتخاب محصول',
+  view_item: 'مشاهده محصول',
+  add_to_cart: 'افزودن به سبد',
+  remove_from_cart: 'حذف از سبد',
+  view_cart: 'مشاهده سبد',
+  begin_checkout: 'شروع تسویه‌حساب',
+  add_shipping_info: 'ثبت روش ارسال',
+  add_payment_info: 'ثبت روش پرداخت',
+  purchase: 'خرید تأییدشده'
 };
 const RISK_FA: Record<string, string> = {
   landing_velocity: 'تعداد ورود غیرعادی',
@@ -219,8 +238,8 @@ const RISK_FA: Record<string, string> = {
   proxy_ip: 'IP پروکسی یا VPN است',
   session_flood: 'تعداد رویداد بسیار زیاد در یک نشست (الگوی ربات)',
   tz_country_mismatch: 'ناهماهنگی منطقهٔ زمانی مرورگر با کشور IP (نشانهٔ VPN/تقلب)',
-  visitor_ip_rotation: 'یک کاربر (visitor_id ثابت) از ۳ IP یا بیشتر — چرخش IP، الگوی ربات',
-  visitor_multi_ip: 'یک کاربر (visitor_id ثابت) از ۲ IP مختلف',
+  visitor_ip_rotation: 'یک کاربر از ۲ IP دیتاسنتر/پروکسی/خارجی یا بیشتر — چرخش IP مشکوک (موبایل عادی ایران حساب نمی‌شود)',
+  visitor_multi_ip: 'یک کاربر با حداقل یک IP مشکوک (دیتاسنتر/خارجی) در کنار IPهای دیگر',
   visitor_repeat_clicks: 'یک کاربر بارها روی تبلیغ کلیک/وارد شده (کلیک تکراری)',
   ip_not_reliable: 'این رکورد قبل از اصلاح مسیر CDN ثبت شده و IP آن قابل اتکا نیست'
 };
@@ -296,8 +315,8 @@ function parseUserAgent(ua: string | null): { browser: string; os: string } {
   return { browser, os };
 }
 
-// Google sometimes passes an un-substituted ValueTrack placeholder like
-// "{modirankhodro}" literally; strip the braces so the campaign reads cleanly.
+// Campaign templates can contain brace-wrapped placeholders; strip the braces
+// so the campaign reads cleanly without exposing template syntax.
 function cleanCampaign(value: string | null): string | null {
   if (!value) return null;
   const cleaned = value.replace(/[{}]/g, '').trim();
@@ -355,10 +374,11 @@ function EmptyState({ title, description }: { title: string; description: string
   );
 }
 
-export function AdsDataDashboard() {
+export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLabel: string }) {
   const [hours, setHours] = useState(24);
-  const [site, setSite] = useState('modirankhodro-emdad.com');
-  const [sites, setSites] = useState<{ site_id: string; events: number }[]>([{ site_id: 'modirankhodro-emdad.com', events: 0 }]);
+  const [site, setSite] = useState(siteId || 'modirankhodro-emdad.com');
+  const [sites, setSites] = useState<{ site_id: string; events: number }[]>([{ site_id: siteId || 'modirankhodro-emdad.com', events: 0 }]);
+  const siteQuery = encodeURIComponent(site);
   useEffect(() => {
     api<{ sites: { site_id: string; events: number }[] }>('/ads-data/sites')
       .then((r) => { if (r.sites.length) { setSites(r.sites); if (!r.sites.some((s) => s.site_id === site)) setSite(r.sites[0].site_id); } })
@@ -484,16 +504,16 @@ export function AdsDataDashboard() {
     try {
       const siteQ = `&site_id=${encodeURIComponent(site)}`;
       const [nextSummary, nextIps, nextEvents, nextSessions, nextKeywords] = await Promise.all([
-        api<Summary>(`/ads-data/summary?hours=${hours}${siteQ}`),
-        api<{ items: IpRow[] }>(`/ads-data/ips?hours=${hours}&limit=10000${siteQ}`),
+        api<Summary>(`/ads-data/summary?site_id=${siteQuery}&hours=${hours}`),
+        api<{ items: IpRow[] }>(`/ads-data/ips?site_id=${siteQuery}&hours=${hours}&limit=10000`),
         api<{ items: EventRow[]; total: number }>(
-          `/ads-data/events?hours=${hours}&limit=${EVENT_PAGE_SIZE}&offset=${eventPage * EVENT_PAGE_SIZE}${siteQ}` +
+          `/ads-data/events?site_id=${siteQuery}&hours=${hours}&limit=${EVENT_PAGE_SIZE}&offset=${eventPage * EVENT_PAGE_SIZE}` +
           `${eventFilter !== 'all' ? `&event_type=${encodeURIComponent(eventFilter)}` : ''}` +
           `${adsFilter !== 'all' ? `&attribution=${adsFilter}` : ''}` +
           `${logQuery ? `&q=${encodeURIComponent(logQuery)}` : ''}`
         ),
-        api<{ items: Session[] }>(`/ads-data/sessions?hours=${hours}&limit=1000${siteQ}`),
-        api<{ items: Keyword[] }>(`/ads-data/keywords?hours=${hours}&limit=500${siteQ}`)
+        api<{ items: Session[] }>(`/ads-data/sessions?site_id=${siteQuery}&hours=${hours}&limit=1000`),
+        api<{ items: Keyword[] }>(`/ads-data/keywords?site_id=${siteQuery}&hours=${hours}&limit=500`)
       ]);
       setSummary(nextSummary);
       setIps(nextIps.items);
@@ -508,7 +528,7 @@ export function AdsDataDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [adsFilter, eventFilter, eventPage, hours, logQuery, site]);
+  }, [adsFilter, eventFilter, eventPage, hours, logQuery, siteQuery]);
 
   useEffect(() => {
     void load();
@@ -549,12 +569,12 @@ export function AdsDataDashboard() {
     let cancelled = false;
     const key = selectedSession.session_id || selectedSession.visitor_id || selectedSession.ip_address;
     setSessionEventsLoading(true);
-    api<{ items: EventRow[] }>(`/ads-data/events?hours=0&limit=500&site_id=${encodeURIComponent(site)}&q=${encodeURIComponent(key)}`)
+    api<{ items: EventRow[] }>(`/ads-data/events?site_id=${siteQuery}&hours=0&limit=500&q=${encodeURIComponent(key)}`)
       .then((res) => { if (!cancelled) setSessionEvents(res.items); })
       .catch(() => { if (!cancelled) setSessionEvents([]); })
       .finally(() => { if (!cancelled) setSessionEventsLoading(false); });
     return () => { cancelled = true; };
-  }, [selectedSession, site]);
+  }, [selectedSession, siteQuery]);
 
   const suspicious = useMemo(() => ips.filter((row) => row.risk_score >= 35), [ips]);
   const highRisk = useMemo(() => ips.filter((row) => row.risk_score >= 70), [ips]);
@@ -583,6 +603,24 @@ export function AdsDataDashboard() {
     [events, selectedIp]
   );
 
+  const sessionSectionCoverage = useMemo(() => {
+    const seen = new Set<string>();
+    const unseen = new Set<string>();
+    for (const row of sessionEvents) {
+      const page = row.page_path ?? 'صفحه نامشخص';
+      const seenSection = row.metadata.section;
+      const unseenSections = row.metadata.unseen_sections;
+      if (row.event_type === 'section_view' && typeof seenSection === 'string') {
+        seen.add(`${page} · ${seenSection}`);
+      }
+      if (row.event_type === 'page_exit' && typeof unseenSections === 'string') {
+        unseenSections.split('|').filter(Boolean).forEach((section) => unseen.add(`${page} · ${section}`));
+      }
+    }
+    seen.forEach((section) => unseen.delete(section));
+    return { seen: [...seen], unseen: [...unseen] };
+  }, [sessionEvents]);
+
   const copyIp = async () => {
     if (!selectedIp) return;
     try {
@@ -607,7 +645,7 @@ export function AdsDataDashboard() {
   const eventPageCount = Math.max(1, Math.ceil(eventTotal / EVENT_PAGE_SIZE));
   const eventStart = eventTotal ? eventPage * EVENT_PAGE_SIZE + 1 : 0;
   const eventEnd = Math.min(eventTotal, (eventPage + 1) * EVENT_PAGE_SIZE);
-  const logCsvUrl = `/api/backend/ads-data/events.csv?hours=${hours}&site_id=${encodeURIComponent(site)}` +
+  const logCsvUrl = `/api/backend/ads-data/events.csv?site_id=${siteQuery}&hours=${hours}` +
     `${eventFilter !== 'all' ? `&event_type=${encodeURIComponent(eventFilter)}` : ''}` +
     `${adsFilter !== 'all' ? `&attribution=${adsFilter}` : ''}` +
     `${logQuery ? `&q=${encodeURIComponent(logQuery)}` : ''}`;
@@ -654,7 +692,7 @@ export function AdsDataDashboard() {
                 <Button className='flex-1' size='sm' variant='outline' onClick={() => void load()} disabled={loading}>
                   <IconRefresh className={loading ? 'animate-spin' : ''} />تازه‌سازی
                 </Button>
-                <Button className='flex-1' size='sm' nativeButton={false} render={<a href={`/api/backend/ads-data/events.csv?hours=0&site_id=${encodeURIComponent(site)}`} />}>
+                <Button className='flex-1' size='sm' nativeButton={false} render={<a href={`/api/backend/ads-data/events.csv?site_id=${siteQuery}&hours=0`} />}>
                   <IconDownload />CSV تمام تاریخچه
                 </Button>
               </div>
@@ -743,7 +781,7 @@ export function AdsDataDashboard() {
                                 </div>
                                 <p className='mt-0.5 truncate text-[11px]'><span aria-hidden='true'>{flagEmoji(s.geo_country_code)} </span>{place || 'موقعیت نامشخص'}{s.geo_asname ? <span className='text-muted-foreground'> · {s.geo_asname}</span> : null}</p>
                                 {s.utm_term && <p className='text-primary mt-0.5 truncate text-[11px]' title={s.utm_term}><span className='text-muted-foreground'>کلمهٔ کلیدی: </span>{s.utm_term}</p>}
-                                {(s.visitor_ips > 1 || s.visitor_sessions > 1) && <p className={`mt-0.5 text-[10px] ${s.visitor_ips >= 3 ? 'text-rose-600 dark:text-rose-400' : 'text-muted-foreground'}`}>این کاربر: {fa.format(s.visitor_sessions)} نشست · {fa.format(s.visitor_ips)} آی‌پی · {fa.format(s.visitor_events)} رویداد</p>}
+                                {(s.visitor_ips > 1 || s.visitor_sessions > 1) && <p className={`mt-0.5 text-[10px] ${s.risk_reasons.includes('visitor_ip_rotation') ? 'text-rose-600 dark:text-rose-400' : 'text-muted-foreground'}`}>این کاربر: {fa.format(s.visitor_sessions)} نشست · {fa.format(s.visitor_ips)} آی‌پی · {fa.format(s.visitor_events)} رویداد</p>}
                               </div>
                             </div>
 
@@ -753,9 +791,9 @@ export function AdsDataDashboard() {
                               {s.device && <Badge variant='outline' className='text-[10px]'>{s.device}</Badge>}
                               {s.geo_hosting && <Badge variant='outline' className='border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300 text-[10px]'>دیتاسنتر</Badge>}
                               {s.geo_tz_mismatch && <Badge variant='outline' className='border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300 text-[10px]'>ناهماهنگی زمان/کشور</Badge>}
-                              {s.visitor_ips >= 3 && <Badge variant='outline' className='border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300 text-[10px]'>چرخش IP ({fa.format(s.visitor_ips)})</Badge>}
-                              {s.visitor_ips === 2 && <Badge variant='outline' className='border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-[10px]'>۲ آی‌پی</Badge>}
-                              {s.visitor_landings >= 3 && <Badge variant='outline' className='border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-[10px]'>کلیک تکراری ({fa.format(s.visitor_landings)})</Badge>}
+                              {s.risk_reasons.includes('visitor_ip_rotation') && <Badge variant='outline' className='border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300 text-[10px]'>چرخش IP مشکوک ({fa.format(s.visitor_ips)})</Badge>}
+                              {s.risk_reasons.includes('visitor_multi_ip') && <Badge variant='outline' className='border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-[10px]'>چند IP مشکوک</Badge>}
+                              {s.risk_reasons.includes('visitor_repeat_clicks') && <Badge variant='outline' className='border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-[10px]'>کلیک تکراری ({fa.format(s.visitor_landings)})</Badge>}
                               {s.geo_mobile && <Badge variant='outline' className='text-[10px]'>موبایل</Badge>}
                             </div>
 
@@ -912,7 +950,7 @@ export function AdsDataDashboard() {
                       <IconSearch className='text-muted-foreground pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2' />
                       <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder='جست‌وجوی IP، صفحه یا مرورگر…' className='h-10 pr-9' aria-label='جست‌وجوی IPها' />
                     </div>
-                    <Button size='sm' className='h-10 shrink-0' nativeButton={false} render={<a href={`/api/backend/ads-data/ips.csv?hours=${hours}&site_id=${encodeURIComponent(site)}`} />}><IconDownload />CSV همه IPها</Button>
+                    <Button size='sm' className='h-10 shrink-0' nativeButton={false} render={<a href={`/api/backend/ads-data/ips.csv?site_id=${siteQuery}&hours=${hours}`} />}><IconDownload />CSV همه IPها</Button>
                   </div>
                 </div>
                 <div className='flex gap-2 overflow-x-auto pb-1' role='group' aria-label='فیلتر ریسک'>
@@ -1194,9 +1232,24 @@ export function AdsDataDashboard() {
                 )}
 
                 <section className='space-y-2 text-xs'>
-                  {([['نوع رفتار', `${fa.format(selectedSession.page_views)} مشاهده · ${fa.format(selectedSession.scrolls)} اسکرول · ${fa.format(selectedSession.heartbeats)} حضور · ${fa.format(selectedSession.form_submits)} فرم`], ['مرورگر', `${parseUserAgent(selectedSession.user_agent).browser} · ${parseUserAgent(selectedSession.user_agent).os}`], ['دستگاه', selectedSession.device], ['زبان مرورگر', selectedSession.browser_language], ['منطقهٔ زمانی', selectedSession.browser_timezone ? `${selectedSession.browser_timezone}${selectedSession.geo_tz_mismatch ? '  ⚠ ناهماهنگ با کشور IP' : ''}` : null], ['اندازهٔ نمایشگر', selectedSession.screen_size], ['ردپای این کاربر (visitor_id)', `${fa.format(selectedSession.visitor_sessions)} نشست · ${fa.format(selectedSession.visitor_ips)} آی‌پی · ${fa.format(selectedSession.visitor_landings)} ورود · ${fa.format(selectedSession.visitor_events)} رویداد`], ['کلمهٔ کلیدی', selectedSession.utm_term], ['آگهی (creative)', selectedSession.utm_content], ['کمپین', cleanCampaign(selectedSession.utm_campaign) ?? selectedSession.campaign_id], ['شناسه نشست', selectedSession.session_id], ['شناسه بازدیدکننده', selectedSession.visitor_id], ['GCLID', selectedSession.gclid], ['صفحهٔ ورود', selectedSession.landing_path], ['ارجاع‌دهنده', selectedSession.referrer], ['User-Agent کامل', selectedSession.user_agent]] as [string, string | null][]).map(([label, value]) => (
+                  {([['نوع رفتار', `${fa.format(selectedSession.page_views)} مشاهده · ${fa.format(selectedSession.scrolls)} اسکرول · ${fa.format(selectedSession.clicks)} کلیک · ${fa.format(selectedSession.section_views)} بخش دیده‌شده · ${fa.format(selectedSession.article_cta_clicks)} کلیک محصول از مقاله · ${fa.format(selectedSession.add_to_carts)} افزودن به سبد · ${fa.format(selectedSession.begin_checkouts)} شروع تسویه · ${fa.format(selectedSession.purchases)} خرید · ${fa.format(selectedSession.heartbeats)} حضور · ${fa.format(selectedSession.form_submits)} فرم`], ['مرورگر', `${parseUserAgent(selectedSession.user_agent).browser} · ${parseUserAgent(selectedSession.user_agent).os}`], ['دستگاه', selectedSession.device], ['زبان مرورگر', selectedSession.browser_language], ['منطقهٔ زمانی', selectedSession.browser_timezone ? `${selectedSession.browser_timezone}${selectedSession.geo_tz_mismatch ? '  ⚠ ناهماهنگ با کشور IP' : ''}` : null], ['اندازهٔ نمایشگر', selectedSession.screen_size], ['ردپای این کاربر (visitor_id)', `${fa.format(selectedSession.visitor_sessions)} نشست · ${fa.format(selectedSession.visitor_ips)} شبکه · ${fa.format(selectedSession.visitor_landings)} ورود · ${fa.format(selectedSession.visitor_events)} رویداد`], ['آگهی (creative)', selectedSession.utm_content], ['کمپین', cleanCampaign(selectedSession.utm_campaign) ?? selectedSession.campaign_id], ['شناسه نشست', selectedSession.session_id], ['شناسه بازدیدکننده', selectedSession.visitor_id], ['GCLID', selectedSession.gclid], ['صفحهٔ ورود', selectedSession.landing_path], ['ارجاع‌دهنده', selectedSession.referrer], ['مرورگر و سیستم‌عامل', selectedSession.user_agent]] as [string, string | null][]).map(([label, value]) => (
                     <div key={label} className='grid grid-cols-[110px_minmax(0,1fr)] gap-2 border-b pb-2 last:border-0'><span className='text-muted-foreground'>{label}</span><span className='min-w-0 break-all font-mono text-[11px]' dir='ltr'>{value || '—'}</span></div>
                   ))}
+                </section>
+
+                <section className='rounded-xl border p-4'>
+                  <h3 className='text-sm font-semibold'>پوشش بخش‌های صفحه</h3>
+                  <p className='text-muted-foreground mt-1 text-[11px] leading-5'>بر اساس دیده‌شدن حداقل ۵۰٪ هر بخش؛ بدون ثبت متن صفحه یا ورودی فرم.</p>
+                  <p className='mt-4 text-xs font-medium text-emerald-700 dark:text-emerald-300'>دیده‌شده</p>
+                  <div className='mt-2 flex flex-wrap gap-1.5'>
+                    {sessionSectionCoverage.seen.map((section) => <Badge key={section} variant='outline' className='max-w-full truncate text-[10px]'>{section}</Badge>)}
+                    {!sessionSectionCoverage.seen.length && <span className='text-muted-foreground text-[11px]'>هنوز بخشی ثبت نشده است.</span>}
+                  </div>
+                  <p className='mt-4 text-xs font-medium text-amber-700 dark:text-amber-300'>دیده‌نشده هنگام خروج</p>
+                  <div className='mt-2 flex flex-wrap gap-1.5'>
+                    {sessionSectionCoverage.unseen.map((section) => <Badge key={section} variant='outline' className='max-w-full truncate border-amber-500/30 text-[10px]'>{section}</Badge>)}
+                    {!sessionSectionCoverage.unseen.length && <span className='text-muted-foreground text-[11px]'>بخش جامانده‌ای در دادهٔ فعلی ثبت نشده است.</span>}
+                  </div>
                 </section>
 
                 <section>

@@ -7,8 +7,9 @@ export const dynamic = 'force-dynamic';
 const BASE = (process.env.SEO_BRAIN_API_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
 const TOKEN = process.env.SEO_BRAIN_API_TOKEN ?? '';
 const ALLOWED_ORIGINS = new Set(
-  (process.env.ADS_COLLECTOR_ORIGINS ??
-    'https://modirankhodro-emdad.com,https://www.modirankhodro-emdad.com,http://localhost:3000')
+  // Fail closed when a deployment has not explicitly declared its collector
+  // origins. This keeps one tenant's domain from leaking into another build.
+  (process.env.ADS_COLLECTOR_ORIGINS ?? '')
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean)

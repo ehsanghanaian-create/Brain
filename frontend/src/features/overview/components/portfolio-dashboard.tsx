@@ -5,14 +5,16 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
-import type { Health, PortfolioOverview, PortfolioSite, PortfolioSiteState } from '@/lib/api/client';
+import { endpoints, type Health, type PortfolioOverview, type PortfolioSite, type PortfolioSiteState } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 import {
   IconAlertTriangle, IconArrowLeft, IconBolt, IconBrandWordpress, IconChartDots3, IconCircleCheck,
   IconClock, IconDatabase, IconFileText, IconLink, IconNetwork, IconPlus, IconSearch, IconSparkles, IconWorld
 } from '@tabler/icons-react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
+import { toast } from 'sonner';
 
 const fa = new Intl.NumberFormat('fa-IR');
 const TYPE_FA: Record<string, string> = {
@@ -138,18 +140,43 @@ function AttentionPanel({ data }: { data: PortfolioOverview }) {
 }
 
 export function PortfolioDashboard({ data, health }: { data: PortfolioOverview; health: Health | null }) {
+  const router = useRouter();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'all' | PortfolioSiteState>('all');
+  const [bulkGraphBusy, setBulkGraphBusy] = useState(false);
   const filteredSites = useMemo(() => { const normalized = query.trim().toLocaleLowerCase('fa'); return data.sites.filter((site) => (filter === 'all' || site.state === filter) && (!normalized || `${site.name} ${site.site_id} ${site.canonical_url}`.toLocaleLowerCase('fa').includes(normalized))); }, [data.sites, filter, query]);
+  const graphCandidates = useMemo(() => data.sites.filter((site) => site.state === 'partial' && (site.next_action === 'ساخت گراف دانش' || (site.counts.content > 0 && site.counts.graph_nodes === 0))), [data.sites]);
   const readiness = data.totals.sites ? Math.round((data.totals.ready_sites / data.totals.sites) * 100) : 0;
   const maxType = Math.max(...Object.values(data.by_node_type), 1);
   const typeEntries = Object.entries(data.by_node_type).slice(0, 8);
+
+  async function rebuildMissingGraphs() {
+    if (!graphCandidates.length || bulkGraphBusy) return;
+    setBulkGraphBusy(true);
+    const queued: string[] = [];
+    const failed: string[] = [];
+    for (const site of graphCandidates) {
+      try {
+        const result = await endpoints.graphRebuild(site.site_id);
+        if (result.status === 'queued' || result.status === 'already_running') queued.push(site.name);
+        else failed.push(site.name);
+      } catch {
+        failed.push(site.name);
+      }
+    }
+    if (queued.length) toast.success(`ساخت گراف ${fa.format(queued.length)} سایت در پس‌زمینه شروع شد؛ جابه‌جایی بین صفحات آن را متوقف نمی‌کند.`);
+    if (failed.length) toast.error(`شروع گراف برای ${fa.format(failed.length)} سایت انجام نشد: ${failed.join('، ')}`);
+    if (!queued.length && !failed.length) toast.info('همه گراف‌های قابل اجرا از قبل در صف هستند.');
+    router.refresh();
+    setBulkGraphBusy(false);
+  }
 
   return (
     <div className='flex flex-col gap-5'>
       <section className='relative overflow-hidden rounded-2xl border border-sky-500/15 bg-gradient-to-l from-sky-500/[0.08] via-background to-violet-500/[0.05] p-4 shadow-sm sm:p-5'>
         <div className='absolute -top-16 -left-10 size-44 rounded-full bg-sky-500/10 blur-3xl' aria-hidden='true' />
-        <div className='relative flex flex-col justify-between gap-4 lg:flex-row lg:items-center'><div className='space-y-2'><div className='flex flex-wrap items-center gap-2'><Badge variant='outline' className='border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'><span className='size-1.5 rounded-full bg-emerald-500' /> بک‌اند متصل</Badge><span className='text-muted-foreground text-xs'>به‌روزرسانی {formatDate(data.generated_at)}</span></div><div><h2 className='text-xl font-bold tracking-tight sm:text-2xl'>نمای فرماندهی سبد سایت‌ها</h2><p className='text-muted-foreground mt-1 max-w-2xl text-sm leading-6'>وضعیت داده، گراف دانش و فرصت‌های عملیاتی همه سایت‌ها در یک نگاه؛ از اینجا مشخص است قدم بعدی روی کدام سایت باید انجام شود.</p></div></div><div className='flex flex-wrap items-center gap-2'><Link href='/dashboard/sites' className={buttonVariants({ variant: 'outline' })}><IconWorld /> مدیریت سایت‌ها</Link><Link href='/dashboard/sites/new' className={buttonVariants()}><IconPlus /> افزودن سایت</Link></div></div>
+        <div className='relative flex flex-col justify-between gap-4 lg:flex-row lg:items-center'><div className='space-y-2'><div className='flex flex-wrap items-center gap-2'><Badge variant='outline' className='border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'><span className='size-1.5 rounded-full bg-emerald-500' /> بک‌اند متصل</Badge><span className='text-muted-foreground text-xs'>به‌روزرسانی {formatDate(data.generated_at)}</span></div><div><h2 className='text-xl font-bold tracking-tight sm:text-2xl'>نمای فرماندهی سبد سایت‌ها</h2><p className='text-muted-foreground mt-1 max-w-2xl text-sm leading-6'>وضعیت داده، گراف دانش و فرصت‌های عملیاتی همه سایت‌ها در یک نگاه؛ از اینجا مشخص است قدم بعدی روی کدام سایت باید انجام شود.</p></div></div><div className='flex flex-wrap items-center gap-2'>{graphCandidates.length > 0 && <Button onClick={rebuildMissingGraphs} disabled={bulkGraphBusy}><IconNetwork className={cn(bulkGraphBusy && 'animate-pulse')} />{bulkGraphBusy ? 'در حال صف‌گذاری…' : `ساخت گراف ${fa.format(graphCandidates.length)} سایت سالم`}</Button>}<Link href='/dashboard/sites' className={buttonVariants({ variant: 'outline' })}><IconWorld /> مدیریت سایت‌ها</Link><Link href='/dashboard/sites/new' className={buttonVariants({ variant: graphCandidates.length ? 'outline' : 'default' })}><IconPlus /> افزودن سایت</Link></div></div>
+        {graphCandidates.length > 0 && <div className='relative mt-4 flex flex-col gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-xs sm:flex-row sm:items-center sm:justify-between'><span><strong>{fa.format(graphCandidates.length)} سایت سالم فقط گراف ندارند.</strong> اجرای گروهی از محتوای موجود استفاده می‌کند و سایت‌های خطادار را وارد صف نمی‌کند.</span><span className='text-muted-foreground'>{graphCandidates.map((site) => site.name).join('، ')}</span></div>}
       </section>
 
       <section aria-label='شاخص‌های کلیدی' className='grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4'>

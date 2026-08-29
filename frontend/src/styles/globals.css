@@ -640,41 +640,11 @@
   }
 }
 
-/* SEO Brain: Persian-first typography — self-hosted Vazirmatn (SIL OFL), served
-   from /public/fonts so neither the build nor runtime depends on Google Fonts. */
-@font-face {
-  font-family: 'Vazirmatn';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/Vazirmatn-Regular.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Vazirmatn';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('/fonts/Vazirmatn-Medium.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Vazirmatn';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('/fonts/Vazirmatn-SemiBold.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Vazirmatn';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/Vazirmatn-Bold.woff2') format('woff2');
-}
-
+/* SEO Brain: Persian-first typography. next/font exposes --font-vazirmatn on <body>; the theme files
+   reference it through --font-sans, and this rule guarantees the fallback chain everywhere. */
 :root,
 [data-theme] body {
-  --font-vazirmatn: 'Vazirmatn';
-  --font-sans: 'Vazirmatn', 'Segoe UI', Tahoma, system-ui, sans-serif;
+  --font-sans: var(--font-vazirmatn), Vazirmatn, 'Segoe UI', Tahoma, system-ui, sans-serif;
   font-family: var(--font-sans);
 }
 

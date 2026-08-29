@@ -304,7 +304,8 @@ def test_pipeline_echo_manual_and_real_assisted_with_sse_feedback_learning(c):
     # meta / publishing endpoints: phase 16 allows ONLY the mode-gated writer paths (plan publish + capability probe)
     meta = c.get(f"/api/v1/sites/{SID}/generation/meta").json()
     assert meta["modes"] == ["manual", "assisted"] and meta["reserved_modes"] == ["autopilot"] and "fact_check" in [a["agent"] for a in meta["agents"]]
-    allowed_publish = {"/api/v1/sites/{site_id}/content-plans/{plan_id}/publish", "/api/v1/sites/{site_id}/wordpress/publish-capability"}
+    allowed_publish = {"/api/v1/sites/{site_id}/content-plans/{plan_id}/publish", "/api/v1/sites/{site_id}/wordpress/publish-capability",
+                       "/api/v1/sites/{site_id}/content/{cid}/wordpress/publish"}  # Content Brain explicit human publish (production)
     extra = {p_ for p_ in c.get("/api/openapi.json").json()["paths"] if "publish" in p_ and "metadata" not in p_} - allowed_publish
     assert not extra, f"unexpected publish endpoints: {extra}"
 

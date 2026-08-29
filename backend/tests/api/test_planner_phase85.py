@@ -139,7 +139,7 @@ def test_plan_crud_mirroring_gate_and_generation_prep(c):
     assert c.post(f"/api/v1/sites/{SID}/content-plans/{pid}/generation-jobs", json={"kind": "publish"}).status_code == 422
     assert c.get(f"/api/v1/sites/{SID}/generation/runs").json() == []
     pub = c.put(f"/api/v1/sites/{SID}/content-plans/{pid}/publishing-metadata", json={"target": "wordpress", "wp_status": "draft", "scheduled_at": "2026-09-05T09:00"}).json()
-    assert pub["publishing"]["publishing_enabled"] is False and pub["publishing"]["wp_status"] == "draft"
+    assert pub["publishing"]["publishing_enabled"] is True and pub["publishing"]["wp_status"] == "draft"  # explicit human publishing enabled in production
     ev = c.get(f"/api/v1/sites/{SID}/content-plans/{pid}/events").json()
     assert {e["event"] for e in ev} >= {"created", "status_changed", "linked_content", "generation_prepared", "publishing_meta"}
     # bulk + delete keeps item unless with_item

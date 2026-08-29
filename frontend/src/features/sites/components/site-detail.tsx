@@ -6,9 +6,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ApiError, endpoints, type ConnectionsStatus, type GraphSummary, type InitializeResult, type JobRun, type Site, type SiteMemory } from '@/lib/api/client';
+import { ApiError, endpoints, type ConnectionsStatus, type ContentKnowledgePack, type GraphSummary, type InitializeResult, type JobRun, type Site, type SiteMemory } from '@/lib/api/client';
 import { useQuery } from '@tanstack/react-query';
-import { IconActivity, IconAdjustments, IconBrain, IconCheck, IconClock, IconExternalLink, IconPlugConnected, IconSettings, IconWorld } from '@tabler/icons-react';
+import { IconActivity, IconAdjustments, IconBrain, IconCheck, IconClock, IconExternalLink, IconPlugConnected, IconRefresh, IconSettings, IconWorld } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -162,7 +162,10 @@ export function SiteDetail({ site, connections, memory, graph, initialTab }: {
         <SiteJobs siteId={site.site_id} />
       </TabsContent>
 
-      <TabsContent value='brain'><SiteBrainForm siteId={site.site_id} initial={memory} /></TabsContent>
+      <TabsContent value='brain' className='grid items-start gap-4 xl:grid-cols-[1.25fr_1fr]'>
+        <SiteBrainForm siteId={site.site_id} initial={memory} />
+        <KnowledgePackCard siteId={site.site_id} />
+      </TabsContent>
 
       <TabsContent value='settings' className='grid gap-4 xl:grid-cols-[1.4fr_1fr]'>
         <Card>
@@ -213,8 +216,69 @@ function SiteJobs({ siteId }: { siteId: string }) {
   return <Card><CardHeader><CardTitle className='text-base'>تاریخچه عملیات</CardTitle><CardDescription>این وضعیت روی سرور ذخیره می‌شود و با خروج از صفحه از بین نمی‌رود.</CardDescription></CardHeader><CardContent className='space-y-2'>{jobs.length === 0 && <p className='rounded-xl border border-dashed py-10 text-center text-sm text-muted-foreground'>هنوز عملیات پس‌زمینه‌ای برای این سایت ثبت نشده است.</p>}{jobs.map((job) => <SiteJobRow key={job.run_id} job={job} />)}</CardContent></Card>;
 }
 
+function KnowledgePackCard({ siteId }: { siteId: string }) {
+  const [rebuilding, setRebuilding] = useState(false);
+  const query = useQuery({ queryKey: ['knowledge-pack', siteId], queryFn: () => endpoints.knowledgePack(siteId), staleTime: 30_000 });
+  const pack = query.data as ContentKnowledgePack | undefined;
+  async function rebuild() {
+    setRebuilding(true);
+    try {
+      await endpoints.rebuildKnowledgePack(siteId);
+      await query.refetch();
+      toast.success('بسته دانشی از آخرین گراف بازسازی شد');
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : String(e));
+    } finally {
+      setRebuilding(false);
+    }
+  }
+  const data = pack?.pack;
+  return <Card>
+    <CardHeader>
+      <div className='flex items-start justify-between gap-3'>
+        <div><CardTitle className='text-base'>Content Knowledge Pack</CardTitle><CardDescription>زمینه واقعی تولید محتوا؛ نسخه‌گذاری‌شده و استخراج‌شده از گراف، وردپرس و داده‌های گوگل</CardDescription></div>
+        <Button size='sm' variant='outline' onClick={rebuild} disabled={rebuilding || query.isLoading}><IconRefresh className={rebuilding ? 'animate-spin' : ''} />بازسازی</Button>
+      </div>
+    </CardHeader>
+    <CardContent className='space-y-3 text-sm'>
+      {query.isLoading && <p className='text-muted-foreground'>در حال خواندن بسته دانشی…</p>}
+      {query.isError && <p className='text-destructive'>بسته دانشی دریافت نشد.</p>}
+      {pack && <>
+        <div className='grid grid-cols-3 gap-2 text-center'>
+          <MiniMetric label='نسخه' value={fa.format(pack.version)} />
+          <MiniMetric label='گره شاهد' value={fa.format(data?.summary.nodes ?? 0)} />
+          <MiniMetric label='یال' value={fa.format(data?.summary.edges ?? 0)} />
+        </div>
+        <div className='grid gap-2 sm:grid-cols-2'>
+          <PackMetric label='دسته‌ها' value={data?.taxonomy.categories.length ?? 0} />
+          <PackMetric label='موجودیت و خدمت' value={data?.taxonomy.entities.length ?? 0} />
+          <PackMetric label='کوئری واقعی' value={data?.search_demand.queries.length ?? 0} />
+          <PackMetric label='صفحه مرجع' value={data?.content_inventory.authoritative_pages.length ?? 0} />
+        </div>
+        {pack.warnings.length > 0 && <div className='rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-6 text-amber-700 dark:text-amber-300'>{pack.warnings.map((w) => <p key={w}>• {w}</p>)}</div>}
+        <details className='rounded-xl border p-3 text-xs'><summary className='cursor-pointer font-medium'>مشاهده شواهد کلیدی</summary>
+          <div className='mt-3 space-y-3'>
+            <PackEvidence title='صفحات مرجع' items={data?.content_inventory.authoritative_pages ?? []} />
+            <PackEvidence title='موجودیت‌ها' items={data?.taxonomy.entities ?? []} />
+            <PackEvidence title='کوئری‌ها' items={data?.search_demand.queries ?? []} />
+          </div>
+        </details>
+        <p className='text-xs text-muted-foreground'>نسخه {fa.format(pack.version)} · هش <span dir='ltr'>{pack.hash}</span> · این بسته به‌طور خودکار داخل Memory Snapshot هر اجرای AI قرار می‌گیرد.</p>
+      </>}
+    </CardContent>
+  </Card>;
+}
+
+function PackMetric({ label, value }: { label: string; value: number }) {
+  return <div className='flex items-center justify-between rounded-xl border px-3 py-2'><span className='text-muted-foreground'>{label}</span><b>{fa.format(value)}</b></div>;
+}
+
+function PackEvidence({ title, items }: { title: string; items: ContentKnowledgePack['pack']['internal_link_targets'] }) {
+  return <div><p className='mb-1 font-medium'>{title}</p><ul className='space-y-1 text-muted-foreground'>{items.slice(0, 6).map((item) => <li key={item.node_id} className='truncate' dir='auto'>• {item.label} <span dir='ltr'>[{item.url || item.node_id}]</span></li>)}{items.length === 0 && <li>داده‌ای موجود نیست</li>}</ul></div>;
+}
+
 function SiteJobRow({ job }: { job: JobRun }) {
-  const label: Record<string, string> = { wordpress_sync: 'همگام‌سازی وردپرس', gsc_sync: 'دریافت Search Console', ga4_sync: 'دریافت GA4', links_analyze: 'تحلیل لینک‌های داخلی', planner_analyze: 'تحلیل برنامه محتوا', generation_run: 'تولید محتوا', build_graph: 'ساخت گراف' };
+  const label: Record<string, string> = { wordpress_sync: 'همگام‌سازی وردپرس', gsc_sync: 'دریافت Search Console', ga4_sync: 'دریافت GA4', links_analyze: 'تحلیل لینک‌های داخلی', planner_analyze: 'تحلیل برنامه محتوا', generation_run: 'تولید محتوا', content_automation: 'تولید زمان‌بندی‌شده محتوا', build_graph: 'ساخت گراف' };
   return <div className='flex flex-wrap items-center gap-3 rounded-xl border p-3'><span className={job.status === 'failed' ? 'size-2 rounded-full bg-destructive' : job.status === 'succeeded' ? 'size-2 rounded-full bg-emerald-500' : 'size-2 animate-pulse rounded-full bg-sky-500'} /><div className='min-w-0 flex-1'><p className='font-medium'>{label[job.type] ?? job.type}</p><p className='mt-0.5 text-xs text-muted-foreground' dir='ltr'>{job.run_id}</p></div><Badge variant={job.status === 'failed' ? 'destructive' : 'secondary'}>{job.status === 'queued' ? 'در صف' : job.status === 'running' ? 'در حال اجرا' : job.status === 'succeeded' ? 'انجام شد' : 'ناموفق'}</Badge></div>;
 }
 

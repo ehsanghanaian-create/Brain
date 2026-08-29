@@ -101,6 +101,15 @@ export type SiteMemory = {
   successful_patterns: Record<string, unknown>[];
   updated_at: string | null;
 };
+export type KnowledgeEvidence = { node_id: string; type: string; label: string; url: string | null; pagerank: number; community: number | null; facts: Record<string, unknown>; connections?: number };
+export type ContentKnowledgePack = {
+  id: number; site_id: string; version: number; hash: string; status: string; rendered: string;
+  source_counts: { nodes?: number; edges?: number; types?: Record<string, number> }; warnings: string[]; created_at: string; updated_at: string;
+  pack: { source: string; source_policy: string; summary: { nodes: number; edges: number; types: Record<string, number> };
+    taxonomy: { categories: KnowledgeEvidence[]; entities: KnowledgeEvidence[]; schemas: KnowledgeEvidence[] };
+    search_demand: { queries: KnowledgeEvidence[] }; content_inventory: { authoritative_pages: KnowledgeEvidence[] };
+    seo_signals: { problems: KnowledgeEvidence[]; opportunities: KnowledgeEvidence[] }; internal_link_targets: KnowledgeEvidence[]; warnings: string[] };
+};
 export type ConnectionKind = 'gsc' | 'ga4' | 'wordpress';
 export type ConnectionResult = {
   kind: ConnectionKind;
@@ -202,6 +211,8 @@ export type ContentBrief = {
   internal_links: { url: string; anchor: string; reason: string; node_id: string | null }[]; sources: Record<string, unknown>; markdown: string | null; provenance: Record<string, unknown>; created_at: string;
 };
 export type ContentDetail = ContentItem & { brief: ContentBrief | null; briefs: { id: number; version: number; created_at: string; provenance: Record<string, unknown> }[]; events: { id: number; from_status: string | null; to_status: string | null; actor: string; note: string | null; created_at: string }[]; keyword?: KeywordRow & { gsc: KeywordGsc } };
+export type WordPressCategory = { id: number; wordpress_category_id: number; parent_id: number | null; name: string; slug: string | null; post_count: number; synced_at: string | null };
+export type WordPressPublication = { wp_post_id: number | null; status: string | null; url: string | null; date?: string | null; date_gmt?: string | null; categories?: number[]; scheduled_at?: string | null; scheduled_at_utc?: string | null; timezone?: string | null; action?: string; checked_at?: string };
 export type ContentCounts = { total: number; by_status: Record<ContentStatus, number>; scheduled: number };
 export type ContentBoard = { columns: { status: ContentStatus; status_fa: string; items: ContentItem[] }[]; counts: ContentCounts };
 export type ContentCalendar = { from: string; to: string; days: Record<string, ContentItem[]>; unscheduled: ContentItem[]; counts: ContentCounts };
@@ -382,6 +393,10 @@ export const endpoints = {
   analyticsSettings: (id: string) => api<AnalyticsSettings>(`/sites/${encodeURIComponent(id)}/content/analytics/settings`),
   putAnalyticsSettings: (id: string, body: Partial<AnalyticsSettings>) => api<AnalyticsSettings>(`/sites/${encodeURIComponent(id)}/content/analytics/settings`, { method: 'PUT', json: body }),
   contentMetrics: (id: string, cid: number, window = '28d') => api<Record<string, unknown>[]>(`/sites/${encodeURIComponent(id)}/content/${cid}/metrics?window=${window}`),
+  wordpressCategories: (id: string) => api<WordPressCategory[]>(`/sites/${encodeURIComponent(id)}/content/wordpress/categories`),
+  publishContent: (id: string, cid: number, body: { action: 'draft' | 'publish' | 'future'; category_ids?: number[]; scheduled_at?: string | null; draft_id?: number | null }) =>
+    api<WordPressPublication & { content_id: number; draft_id: number; action: string }>(`/sites/${encodeURIComponent(id)}/content/${cid}/wordpress/publish`, { method: 'POST', json: body }),
+  contentPublication: (id: string, cid: number, refresh = true) => api<{ configured: boolean; wp_post_id: number | null; publication: WordPressPublication | null }>(`/sites/${encodeURIComponent(id)}/content/${cid}/wordpress/publication?refresh=${refresh}`),
   // phase 8 — internal linking
   linksAnalyze: (id: string) => api<LinkAnalyzeResult>(`/sites/${encodeURIComponent(id)}/links/analyze`, { method: 'POST' }),
   linksSummary: (id: string) => api<LinkSummary>(`/sites/${encodeURIComponent(id)}/links/summary`),
@@ -418,6 +433,10 @@ export const endpoints = {
   planAnalyzeAll: (id: string, ids?: number[]) => api<Record<string, any>>(`/sites/${encodeURIComponent(id)}/content-plans/analyze`, { method: 'POST', json: { ids } }),
   planLinkPrep: (id: string, pid: number) => api<{ inbound: any[]; outbound: any[]; count: number }>(`/sites/${encodeURIComponent(id)}/content-plans/${pid}/link-prep`, { method: 'POST' }),
   planGenPrepare: (id: string, pid: number, kind = 'article', params: Record<string, unknown> = {}) => api<Record<string, any>>(`/sites/${encodeURIComponent(id)}/content-plans/${pid}/generation-jobs`, { method: 'POST', json: { kind, params } }),
+  planGenJobs: (id: string, planId?: number) => api<Record<string, any>[]>(`/sites/${encodeURIComponent(id)}/content-plans/generation-jobs${planId ? `?plan_id=${planId}` : ''}`),
+  planGenRun: (id: string, jid: number, force = false) => api<Record<string, any>>(`/sites/${encodeURIComponent(id)}/content-plans/generation-jobs/${jid}/run?force=${force}`, { method: 'POST' }),
+  planGenCancel: (id: string, jid: number) => api<Record<string, any>>(`/sites/${encodeURIComponent(id)}/content-plans/generation-jobs/${jid}/cancel`, { method: 'POST' }),
+  planGenApprove: (id: string, jid: number) => api<Record<string, any>>(`/sites/${encodeURIComponent(id)}/content-plans/generation-jobs/${jid}/approve`, { method: 'POST' }),
   planPublishing: (id: string, pid: number, body: Record<string, unknown>) => api<ContentPlan>(`/sites/${encodeURIComponent(id)}/content-plans/${pid}/publishing-metadata`, { method: 'PUT', json: body }),
   planGenerate: (id: string, pid: number, thenPublish = false) => api<{ status: string; job_id: string; then_publish: boolean }>(`/sites/${encodeURIComponent(id)}/content-plans/${pid}/generate${thenPublish ? '?then_publish=true' : ''}`, { method: 'POST' }),
   planPublish: (id: string, pid: number) => api<{ status: string; job_id: string }>(`/sites/${encodeURIComponent(id)}/content-plans/${pid}/publish`, { method: 'POST' }),
@@ -453,6 +472,9 @@ export const endpoints = {
   planInsightStatus: (id: string, iid: number, status: 'accepted' | 'dismissed') => api<Record<string, any>>(`/sites/${encodeURIComponent(id)}/content-plans/insights/${iid}`, { method: 'PATCH', json: { status } }),
   planBackfill: (id: string) => api<{ created: number }>(`/sites/${encodeURIComponent(id)}/content-plans/backfill`, { method: 'POST' }),
   planSyncGraph: (id: string) => api<Record<string, any>>(`/sites/${encodeURIComponent(id)}/content-plans/sync-graph`, { method: 'POST' }),
+  knowledgePack: (id: string) => api<ContentKnowledgePack>(`/sites/${encodeURIComponent(id)}/knowledge-pack`),
+  rebuildKnowledgePack: (id: string) => api<ContentKnowledgePack>(`/sites/${encodeURIComponent(id)}/knowledge-pack/rebuild`, { method: 'POST' }),
+  knowledgePackHistory: (id: string) => api<ContentKnowledgePack[]>(`/sites/${encodeURIComponent(id)}/knowledge-pack/history`),
   // ai content test workspace
   wsOptions: (id: string) => api<WsOptions>(`/sites/${encodeURIComponent(id)}/ai-workspace/options`),
   wsEstimate: (id: string, body: WsSpec) => api<WsEstimate>(`/sites/${encodeURIComponent(id)}/ai-workspace/estimate`, { method: 'POST', json: body }),

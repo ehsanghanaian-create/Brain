@@ -8,7 +8,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
-import { ApiError, endpoints, type ContentBrief, type ContentDetail, type ContentStatus, type KeywordRow } from '@/lib/api/client';
+import { ApiError, endpoints, type ContentBrief, type ContentDetail, type ContentStatus, type KeywordRow, type WordPressCategory, type WordPressPublication } from '@/lib/api/client';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -22,7 +22,10 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
   const [busy, setBusy] = useState<string | null>(null);
   const [kwQuery, setKwQuery] = useState('');
   const [kwOptions, setKwOptions] = useState<KeywordRow[]>([]);
-  const [tab, setTab] = useState<'fields' | 'brief' | 'draft' | 'history'>('fields');
+  const [categories, setCategories] = useState<WordPressCategory[]>([]);
+  const [publication, setPublication] = useState<WordPressPublication | null>(null);
+  const [publishAction, setPublishAction] = useState<'draft' | 'publish' | 'future'>('draft');
+  const [tab, setTab] = useState<'fields' | 'brief' | 'draft' | 'publish' | 'history'>('fields');
   const open = cid !== null;
 
   const load = () => {
@@ -30,14 +33,17 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
     endpoints.content(siteId, cid).then((x) => {
       setD(x);
       setTab(x.current_draft_id ? 'draft' : 'fields');
-      setF({ title: x.title, target_keyword: x.target_keyword ?? '', topic: x.topic ?? '', intent: x.intent ?? '', priority: x.priority ?? '', publish_date: x.publish_date ?? '', publish_time: x.publish_time ?? '',
+      const wpCats = Array.isArray(x.metadata?.wordpress_category_ids) ? x.metadata.wordpress_category_ids : [];
+      setF({ title: x.title, target_keyword: x.target_keyword ?? '', topic: x.topic ?? '', intent: x.intent ?? '', priority: x.priority ?? '', publish_date: x.publish_date ?? '', publish_time: x.publish_time ?? '', wordpress_category_id: String(wpCats[0] ?? ''),
              url: x.url ?? '', ai_provider: x.ai_provider ?? '', ai_model: x.ai_model ?? '', notes: x.notes ?? '' });
+      endpoints.contentPublication(siteId, cid, false).then((r) => setPublication(r.publication)).catch(() => setPublication(null));
     }).catch((e) => toast.error(e instanceof ApiError ? e.message : String(e)));
   };
   useEffect(() => {
     if (cid === null) return;
     setTab('fields');
-    if (cid === 'new') { setD(null); setF({ title: '', target_keyword: '', topic: '', intent: '', priority: '', publish_date: '', publish_time: '', url: '', ai_provider: '', ai_model: '', notes: '' }); return; }
+    endpoints.wordpressCategories(siteId).then(setCategories).catch(() => setCategories([]));
+    if (cid === 'new') { setD(null); setPublication(null); setF({ title: '', target_keyword: '', topic: '', intent: '', priority: '', publish_date: '', publish_time: '', wordpress_category_id: '', url: '', ai_provider: '', ai_model: '', notes: '' }); return; }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId, cid]);
@@ -52,7 +58,8 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
   async function save() {
     setBusy('save');
     try {
-      const body: Record<string, unknown> = { title: f.title.trim(), target_keyword: f.target_keyword || undefined, topic: f.topic || undefined, intent: f.intent || undefined, priority: f.priority || undefined,
+      const metadata = { ...(d?.metadata ?? {}), wordpress_category_ids: f.wordpress_category_id ? [Number(f.wordpress_category_id)] : [] };
+      const body: Record<string, unknown> = { title: f.title.trim(), target_keyword: f.target_keyword || undefined, topic: f.topic || undefined, intent: f.intent || undefined, priority: f.priority || undefined, metadata,
         publish_date: f.publish_date || undefined, publish_time: f.publish_time || undefined, url: f.url || undefined, ai_provider: f.ai_provider || undefined, ai_model: f.ai_model || undefined, notes: f.notes || undefined };
       if (cid === 'new') { const it = await endpoints.createContent(siteId, body); toast.success('محتوا ایجاد شد'); onChanged(); onClose(); return void it; }
       if (typeof cid === 'number') { await endpoints.updateContent(siteId, cid, { ...body, clear_date: !f.publish_date }); toast.success('ذخیره شد'); onChanged(); load(); }
@@ -73,6 +80,19 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
   async function remove() {
     if (typeof cid !== 'number' || !confirm('این محتوا با بریف‌ها و تاریخچه حذف شود؟')) return;
     await endpoints.deleteContent(siteId, cid); toast.success('حذف شد'); onChanged(); onClose();
+  }
+
+  async function sendToWordPress() {
+    if (typeof cid !== 'number') return;
+    setBusy('publish');
+    try {
+      const scheduledAt = publishAction === 'future' ? `${f.publish_date ?? ''}T${f.publish_time ?? ''}` : null;
+      if (publishAction === 'future' && (!(f.publish_date ?? '') || !(f.publish_time ?? ''))) throw new Error('برای زمان‌بندی، تاریخ و ساعت را کامل کنید.');
+      const result = await endpoints.publishContent(siteId, cid, { action: publishAction, category_ids: f.wordpress_category_id ? [Number(f.wordpress_category_id)] : [], scheduled_at: scheduledAt });
+      setPublication(result);
+      toast.success(publishAction === 'future' ? `در وردپرس برای ${result.scheduled_at} زمان‌بندی شد` : publishAction === 'publish' ? 'مقاله در وردپرس منتشر شد' : 'پیش‌نویس در وردپرس ذخیره شد');
+      onChanged(); load();
+    } catch (e) { toast.error(e instanceof ApiError ? `${e.message} (${e.code})` : String(e)); } finally { setBusy(null); }
   }
 
   return (
@@ -100,7 +120,7 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
         )}
         {d && (
           <div className='mt-3 flex gap-1 border-b text-sm'>
-            {(['fields', 'brief', 'draft', 'history'] as const).map((t) => <button key={t} className={`px-3 py-1 ${tab === t ? 'border-primary border-b-2 font-medium' : 'text-muted-foreground'}`} onClick={() => setTab(t)}>{t === 'fields' ? 'مشخصات' : t === 'brief' ? `بریف${d.brief ? ` (v${d.brief.version})` : ''}` : t === 'draft' ? `پیش‌نویس و امتیاز${d.latest_score != null ? ` (${d.latest_score})` : ''}` : `تاریخچه (${d.events.length})`}</button>)}
+            {(['fields', 'brief', 'draft', 'publish', 'history'] as const).map((t) => <button key={t} className={`px-3 py-1 ${tab === t ? 'border-primary border-b-2 font-medium' : 'text-muted-foreground'}`} onClick={() => setTab(t)}>{t === 'fields' ? 'مشخصات' : t === 'brief' ? `بریف${d.brief ? ` (v${d.brief.version})` : ''}` : t === 'draft' ? `پیش‌نویس و امتیاز${d.latest_score != null ? ` (${d.latest_score})` : ''}` : t === 'publish' ? `انتشار وردپرس${d.wp_post_id ? ` (#${d.wp_post_id})` : ''}` : `تاریخچه (${d.events.length})`}</button>)}
           </div>
         )}
         {(tab === 'fields' || !d) && (
@@ -121,6 +141,7 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
               <div className='grid gap-1.5'><Label>اولویت</Label><NativeSelect value={f.priority ?? ''} onChange={set('priority')}><NativeSelectOption value=''>—</NativeSelectOption>{Object.entries(PRIORITY_FA).map(([k, v]) => <NativeSelectOption key={k} value={k}>{v}</NativeSelectOption>)}</NativeSelect></div>
               <div className='grid gap-1.5'><Label>تاریخ انتشار (شمسی)</Label><JalaliDateInput value={f.publish_date || null} onChange={(d) => setF((s: any) => ({ ...s, publish_date: d ?? '' }))} /></div>
               <div className='grid gap-1.5'><Label>ساعت</Label><Input type='time' value={f.publish_time ?? ''} onChange={set('publish_time')} dir='ltr' /></div>
+              <div className='grid gap-1.5'><Label>دسته‌بندی واقعی وردپرس</Label><NativeSelect value={f.wordpress_category_id ?? ''} onChange={set('wordpress_category_id')}><NativeSelectOption value=''>بدون دسته مشخص</NativeSelectOption>{categories.map((c) => <NativeSelectOption key={c.wordpress_category_id} value={c.wordpress_category_id}>{c.name} ({c.post_count})</NativeSelectOption>)}</NativeSelect>{categories.length === 0 && <span className='text-muted-foreground text-[11px]'>دسته‌ای همگام نشده؛ از تب انتشار همگام‌سازی کنید.</span>}</div>
               <div className='grid gap-1.5'><Label>ارائه‌دهنده AI</Label><Input value={f.ai_provider ?? ''} onChange={set('ai_provider')} placeholder='مثلاً Claude' /></div>
               <div className='grid gap-1.5'><Label>مدل</Label><Input value={f.ai_model ?? ''} onChange={set('ai_model')} dir='ltr' /></div>
             </div>
@@ -149,6 +170,27 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
           </div>
         )}
         {tab === 'draft' && d && typeof cid === 'number' && <DraftPanel siteId={siteId} cid={cid} onChanged={() => { onChanged(); load(); }} />}
+        {tab === 'publish' && d && typeof cid === 'number' && (
+          <div className='grid gap-3 py-3 text-sm'>
+            <div className='rounded-md border p-3'>
+              <div className='flex flex-wrap items-center gap-2'><b>اتصال انتشار وردپرس</b>{publication?.status && <Badge variant={publication.status === 'publish' ? 'default' : 'secondary'}>{publication.status === 'future' ? 'زمان‌بندی‌شده' : publication.status === 'publish' ? 'منتشرشده' : 'پیش‌نویس'}</Badge>}{publication?.url && <a href={publication.url} target='_blank' rel='noreferrer' className='ms-auto underline' dir='ltr'>مشاهده نوشته ↗</a>}</div>
+              <p className='text-muted-foreground mt-1 text-xs'>انتشار با Application Password انجام می‌شود. زمان‌بندی داخل خود WordPress ذخیره می‌شود و با بستن تب یا جابه‌جایی بین صفحات لغو نمی‌شود.</p>
+              {publication?.scheduled_at && <p className='mt-1 text-xs' dir='ltr'>Local: {publication.scheduled_at} · UTC: {publication.scheduled_at_utc}</p>}
+            </div>
+            <div className='grid gap-2 rounded-md border p-3 md:grid-cols-2'>
+              <div className='grid gap-1.5'><Label>دسته‌بندی سایت</Label><NativeSelect value={f.wordpress_category_id ?? ''} onChange={set('wordpress_category_id')}><NativeSelectOption value=''>بدون دسته مشخص</NativeSelectOption>{categories.map((c) => <NativeSelectOption key={c.wordpress_category_id} value={c.wordpress_category_id}>{c.name} · {c.post_count} نوشته</NativeSelectOption>)}</NativeSelect></div>
+              <div className='grid gap-1.5'><Label>عملیات</Label><NativeSelect value={publishAction} onChange={(e) => setPublishAction(e.target.value as typeof publishAction)}><NativeSelectOption value='draft'>ارسال به‌عنوان پیش‌نویس</NativeSelectOption><NativeSelectOption value='future'>زمان‌بندی انتشار</NativeSelectOption><NativeSelectOption value='publish'>انتشار فوری</NativeSelectOption></NativeSelect></div>
+              {publishAction === 'future' && <><div className='grid gap-1.5'><Label>تاریخ سایت</Label><Input type='date' value={f.publish_date ?? ''} onChange={set('publish_date')} dir='ltr' /></div><div className='grid gap-1.5'><Label>ساعت سایت</Label><Input type='time' value={f.publish_time ?? ''} onChange={set('publish_time')} dir='ltr' /></div></>}
+              <div className='flex flex-wrap gap-2 md:col-span-2'>
+                <Button disabled={!!busy || !d.current_draft_id || (publishAction !== 'draft' && !['approved', 'published'].includes(d.status))} onClick={sendToWordPress}>{busy === 'publish' ? 'در حال ارسال…' : publishAction === 'future' ? 'ثبت زمان‌بندی واقعی' : publishAction === 'publish' ? 'انتشار فوری مقاله' : 'ساخت/به‌روزرسانی پیش‌نویس وردپرس'}</Button>
+                <Button variant='outline' disabled={!!busy} onClick={async () => { try { await endpoints.planCategoriesSync(siteId); setCategories(await endpoints.wordpressCategories(siteId)); toast.success('دسته‌های وردپرس به‌روز شد'); } catch (e) { toast.error(e instanceof ApiError ? e.message : String(e)); } }}>به‌روزرسانی دسته‌ها</Button>
+                {d.wp_post_id && <Button variant='ghost' disabled={!!busy} onClick={async () => { try { const r = await endpoints.contentPublication(siteId, cid, true); setPublication(r.publication); toast.success('وضعیت از وردپرس بررسی شد'); load(); } catch (e) { toast.error(e instanceof ApiError ? e.message : String(e)); } }}>بررسی وضعیت واقعی</Button>}
+              </div>
+              {!d.current_draft_id && <p className='text-destructive text-xs md:col-span-2'>هنوز پیش‌نویسی برای ارسال وجود ندارد.</p>}
+              {publishAction !== 'draft' && !['approved', 'published'].includes(d.status) && <p className='text-destructive text-xs md:col-span-2'>برای انتشار فوری یا زمان‌بندی، محتوا باید ابتدا از مرحله بازبینی تأیید شود. ارسال پیش‌نویس محدودیت ندارد.</p>}
+            </div>
+          </div>
+        )}
         {tab === 'history' && d && (
           <ul className='space-y-1 py-3 text-xs'>
             {d.events.map((e) => (

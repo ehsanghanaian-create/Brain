@@ -98,7 +98,7 @@ def _iso(value: datetime) -> str:
 
 
 def _allowed_sites() -> set[str]:
-    raw = env("ADS_COLLECTOR_SITES", "modirankhodro-emdad.com") or ""
+    raw = env("ADS_COLLECTOR_SITES", "modirankhodro-emdad.com,renaultemdad.com") or ""
     return {item.strip().lower() for item in raw.split(",") if item.strip()}
 
 
@@ -350,6 +350,14 @@ def _cutoff(hours: int) -> str:
     if hours == 0:
         return "1970-01-01T00:00:00.000Z"
     return _iso(_utcnow() - timedelta(hours=hours))
+
+
+@router.get("/sites")
+def collector_sites(eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
+    """Allowed collector sites + per-site event counts — drives the dashboard's site selector."""
+    with eng.connect() as cx:
+        counts = dict(cx.execute(text("SELECT site_id, COUNT(*) FROM ads_click_events GROUP BY site_id")).all())
+    return {"sites": [{"site_id": s, "events": int(counts.get(s, 0))} for s in sorted(_allowed_sites())]}
 
 
 @router.get("/summary")

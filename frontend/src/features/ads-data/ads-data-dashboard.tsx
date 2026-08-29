@@ -357,6 +357,14 @@ function EmptyState({ title, description }: { title: string; description: string
 
 export function AdsDataDashboard() {
   const [hours, setHours] = useState(24);
+  const [site, setSite] = useState('modirankhodro-emdad.com');
+  const [sites, setSites] = useState<{ site_id: string; events: number }[]>([{ site_id: 'modirankhodro-emdad.com', events: 0 }]);
+  useEffect(() => {
+    api<{ sites: { site_id: string; events: number }[] }>('/ads-data/sites')
+      .then((r) => { if (r.sites.length) { setSites(r.sites); if (!r.sites.some((s) => s.site_id === site)) setSite(r.sites[0].site_id); } })
+      .catch(() => null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- فقط یک‌بار هنگام باز شدن صفحه
+  }, []);
   const [tab, setTab] = useState<DashboardTab>('sessions');
   const [summary, setSummary] = useState<Summary | null>(null);
   const [ips, setIps] = useState<IpRow[]>([]);
@@ -474,17 +482,18 @@ export function AdsDataDashboard() {
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
+      const siteQ = `&site_id=${encodeURIComponent(site)}`;
       const [nextSummary, nextIps, nextEvents, nextSessions, nextKeywords] = await Promise.all([
-        api<Summary>(`/ads-data/summary?hours=${hours}`),
-        api<{ items: IpRow[] }>(`/ads-data/ips?hours=${hours}&limit=10000`),
+        api<Summary>(`/ads-data/summary?hours=${hours}${siteQ}`),
+        api<{ items: IpRow[] }>(`/ads-data/ips?hours=${hours}&limit=10000${siteQ}`),
         api<{ items: EventRow[]; total: number }>(
-          `/ads-data/events?hours=${hours}&limit=${EVENT_PAGE_SIZE}&offset=${eventPage * EVENT_PAGE_SIZE}` +
+          `/ads-data/events?hours=${hours}&limit=${EVENT_PAGE_SIZE}&offset=${eventPage * EVENT_PAGE_SIZE}${siteQ}` +
           `${eventFilter !== 'all' ? `&event_type=${encodeURIComponent(eventFilter)}` : ''}` +
           `${adsFilter !== 'all' ? `&attribution=${adsFilter}` : ''}` +
           `${logQuery ? `&q=${encodeURIComponent(logQuery)}` : ''}`
         ),
-        api<{ items: Session[] }>(`/ads-data/sessions?hours=${hours}&limit=1000`),
-        api<{ items: Keyword[] }>(`/ads-data/keywords?hours=${hours}&limit=500`)
+        api<{ items: Session[] }>(`/ads-data/sessions?hours=${hours}&limit=1000${siteQ}`),
+        api<{ items: Keyword[] }>(`/ads-data/keywords?hours=${hours}&limit=500${siteQ}`)
       ]);
       setSummary(nextSummary);
       setIps(nextIps.items);
@@ -499,7 +508,7 @@ export function AdsDataDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [adsFilter, eventFilter, eventPage, hours, logQuery]);
+  }, [adsFilter, eventFilter, eventPage, hours, logQuery, site]);
 
   useEffect(() => {
     void load();
@@ -540,12 +549,12 @@ export function AdsDataDashboard() {
     let cancelled = false;
     const key = selectedSession.session_id || selectedSession.visitor_id || selectedSession.ip_address;
     setSessionEventsLoading(true);
-    api<{ items: EventRow[] }>(`/ads-data/events?hours=0&limit=500&q=${encodeURIComponent(key)}`)
+    api<{ items: EventRow[] }>(`/ads-data/events?hours=0&limit=500&site_id=${encodeURIComponent(site)}&q=${encodeURIComponent(key)}`)
       .then((res) => { if (!cancelled) setSessionEvents(res.items); })
       .catch(() => { if (!cancelled) setSessionEvents([]); })
       .finally(() => { if (!cancelled) setSessionEventsLoading(false); });
     return () => { cancelled = true; };
-  }, [selectedSession]);
+  }, [selectedSession, site]);
 
   const suspicious = useMemo(() => ips.filter((row) => row.risk_score >= 35), [ips]);
   const highRisk = useMemo(() => ips.filter((row) => row.risk_score >= 70), [ips]);
@@ -598,7 +607,7 @@ export function AdsDataDashboard() {
   const eventPageCount = Math.max(1, Math.ceil(eventTotal / EVENT_PAGE_SIZE));
   const eventStart = eventTotal ? eventPage * EVENT_PAGE_SIZE + 1 : 0;
   const eventEnd = Math.min(eventTotal, (eventPage + 1) * EVENT_PAGE_SIZE);
-  const logCsvUrl = `/api/backend/ads-data/events.csv?hours=${hours}` +
+  const logCsvUrl = `/api/backend/ads-data/events.csv?hours=${hours}&site_id=${encodeURIComponent(site)}` +
     `${eventFilter !== 'all' ? `&event_type=${encodeURIComponent(eventFilter)}` : ''}` +
     `${adsFilter !== 'all' ? `&attribution=${adsFilter}` : ''}` +
     `${logQuery ? `&q=${encodeURIComponent(logQuery)}` : ''}`;
@@ -617,7 +626,12 @@ export function AdsDataDashboard() {
               </div>
               <h1 className='text-2xl font-bold tracking-tight sm:text-3xl'>پایش کلیک و رفتار ورودی‌ها</h1>
               <div className='text-muted-foreground mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:text-sm'>
-                <span className='flex items-center gap-1.5' dir='ltr'><IconWorld className='size-4' />modirankhodro-emdad.com</span>
+                <span className='flex items-center gap-1.5'><IconWorld className='size-4' />
+                  <select value={site} onChange={(e) => { setSite(e.target.value); setEventPage(0); }} dir='ltr'
+                    className='bg-transparent text-xs outline-none' aria-label='انتخاب سایت'>
+                    {sites.map((s) => <option key={s.site_id} value={s.site_id}>{s.site_id}{s.events ? ` (${fa.format(s.events)})` : ''}</option>)}
+                  </select>
+                </span>
                 <span className='flex items-center gap-1.5'><IconClock className='size-4' />آخرین به‌روزرسانی: {lastUpdated ? time.format(lastUpdated) : loading ? 'در حال دریافت…' : '—'}</span>
               </div>
             </div>
@@ -640,7 +654,7 @@ export function AdsDataDashboard() {
                 <Button className='flex-1' size='sm' variant='outline' onClick={() => void load()} disabled={loading}>
                   <IconRefresh className={loading ? 'animate-spin' : ''} />تازه‌سازی
                 </Button>
-                <Button className='flex-1' size='sm' nativeButton={false} render={<a href='/api/backend/ads-data/events.csv?hours=0' />}>
+                <Button className='flex-1' size='sm' nativeButton={false} render={<a href={`/api/backend/ads-data/events.csv?hours=0&site_id=${encodeURIComponent(site)}`} />}>
                   <IconDownload />CSV تمام تاریخچه
                 </Button>
               </div>
@@ -898,7 +912,7 @@ export function AdsDataDashboard() {
                       <IconSearch className='text-muted-foreground pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2' />
                       <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder='جست‌وجوی IP، صفحه یا مرورگر…' className='h-10 pr-9' aria-label='جست‌وجوی IPها' />
                     </div>
-                    <Button size='sm' className='h-10 shrink-0' nativeButton={false} render={<a href={`/api/backend/ads-data/ips.csv?hours=${hours}`} />}><IconDownload />CSV همه IPها</Button>
+                    <Button size='sm' className='h-10 shrink-0' nativeButton={false} render={<a href={`/api/backend/ads-data/ips.csv?hours=${hours}&site_id=${encodeURIComponent(site)}`} />}><IconDownload />CSV همه IPها</Button>
                   </div>
                 </div>
                 <div className='flex gap-2 overflow-x-auto pb-1' role='group' aria-label='فیلتر ریسک'>

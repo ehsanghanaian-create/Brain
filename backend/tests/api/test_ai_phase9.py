@@ -485,6 +485,10 @@ def test_gemini_provider_setup_routes_env_fallback_and_workspace(c, monkeypatch)
     g = kinds["google"]
     assert g["models"][0] == "gemini-3.6-flash" and g["setup"]["console_url"].startswith("https://aistudio.google.com")
     assert "content_generation" in g["capabilities"] and g["env_key"] == "GEMINI_API_KEY"
+    # registry drives the UI: Gemini needs NO base URL from the user; only Cloudflare/custom truly do
+    assert g["requires_base_url"] is False and g["supports_model_discovery"] is True and g["auth_type"] == "api_key"
+    assert kinds["cloudflare"]["requires_base_url"] is True and kinds["custom"]["requires_base_url"] is True
+    assert kinds["ollama"]["auth_type"] == "optional_api_key"
     p = _add_provider(c, "gemini", "google", "AIzaTestKey12345678")
     assert p["has_key"] and p["default_model"] == "gemini-3.6-flash" and "api_key" not in json.dumps(p) and "secret_ref" not in p
     models = {m["model_id"]: m for m in c.get(f"/api/v1/ai/models?provider_id={p['id']}").json()}

@@ -43,7 +43,12 @@ class HttpAdapter:
         self.models: tuple[str, ...] = tuple(models or [])
         self.prices = prices or {}
         to = httpx.Timeout(timeout, connect=20.0)   # read timeout is per-chunk when streaming
-        self._client = httpx.Client(timeout=to, transport=transport) if transport is not None else httpx.Client(timeout=to)
+        if transport is not None:
+            self._client = httpx.Client(timeout=to, transport=transport)
+        else:
+            from ...common.http import ai_proxy
+            local = any(h in self.base_url for h in ("127.0.0.1", "localhost"))
+            self._client = httpx.Client(timeout=to, proxy=None if local else ai_proxy())
 
     def default_base_url(self) -> str:
         return ""

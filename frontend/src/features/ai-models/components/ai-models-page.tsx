@@ -24,6 +24,7 @@ export function AiModelsPage({ sites = [] }: { sites?: Site[] }) {
   const [editing, setEditing] = useState<ProviderConfig | null>(null);
   const [f, setF] = useState({ name: '', kind: 'anthropic', api_key: '', base_url: '', default_model: '' });
   const [busy, setBusy] = useState<string | null>(null);
+  const [adv, setAdv] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -42,10 +43,18 @@ export function AiModelsPage({ sites = [] }: { sites?: Site[] }) {
   async function save() {
     setBusy('save');
     try {
-      const body: Record<string, unknown> = { name: f.name.trim(), base_url: f.base_url || undefined, default_model: f.default_model || undefined };
-      if (f.api_key) body.api_key = f.api_key;
-      if (editing) await endpoints.updateProvider(editing.id, body); else await endpoints.createProvider({ ...body, kind: f.kind });
-      toast.success('ذخیره شد — کلید به‌صورت رمزنگاری‌شده روی همین دستگاه نگهداری می‌شود'); setOpen(false); load();
+      // Base URL فقط وقتی ارسال می‌شود که واقعاً لازم/بازشده باشد — وگرنه endpoint رسمی از registry بک‌اند می‌آید
+      const sendBase = (kind?.requires_base_url || adv) && f.base_url.trim() ? f.base_url.trim() : undefined;
+      const body: Record<string, unknown> = { name: f.name.trim(), base_url: sendBase, default_model: f.default_model || undefined };
+      if (f.api_key.trim()) body.api_key = f.api_key.trim();
+      const saved = editing ? await endpoints.updateProvider(editing.id, body) : await endpoints.createProvider({ ...body, kind: f.kind });
+      toast.success('ذخیره شد — کلید به‌صورت رمزنگاری‌شده روی همین دستگاه نگهداری می‌شود'); setOpen(false);
+      if (saved?.id && (f.api_key.trim() || editing?.has_key)) {                        // تست اتصال خودکار بعد از ذخیره
+        const t = await endpoints.testProvider(saved.id).catch(() => null);
+        if (t) (t.ok ? toast.success : toast.warning)(t.message);
+        if (t?.ok) await endpoints.aiModelsSync(saved.id).catch(() => null);            // کشف مدل‌های واقعی
+      }
+      load();
     } catch (e) { toast.error(e instanceof ApiError ? `${e.message} (${e.code})` : String(e)); } finally { setBusy(null); }
   }
   async function test(p: ProviderConfig) {
@@ -140,21 +149,28 @@ export function AiModelsPage({ sites = [] }: { sites?: Site[] }) {
       <TabsContent value='insights'><InsightsPanel sites={sites} /></TabsContent>
      </Tabs>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setAdv(false); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{editing ? `ویرایش ${editing.name}` : 'افزودن ارائه‌دهنده'}</DialogTitle><DialogDescription>کلید API فقط برای ذخیره ارسال می‌شود و دیگر قابل مشاهده نیست.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>{editing ? `ویرایش ${editing.name}` : 'افزودن ارائه‌دهنده'}</DialogTitle><DialogDescription>فقط کلید API لازم است — آدرس سرویس و جزئیات فنی به‌صورت خودکار از تنظیمات داخلی Brain می‌آید. کلید فقط برای ذخیره ارسال می‌شود و دیگر قابل مشاهده نیست.</DialogDescription></DialogHeader>
           <div className='grid gap-3 text-sm'>
-            <div className='grid gap-1.5'><Label>نام</Label><Input value={f.name} onChange={(e) => setF((s) => ({ ...s, name: e.target.value }))} placeholder='مثلاً Claude اصلی' /></div>
             {!editing && (
-              <div className='grid gap-1.5'><Label>نوع</Label>
-                <NativeSelect value={f.kind} onChange={(e) => { const k = kinds.find((x) => x.kind === e.target.value); setF((s) => ({ ...s, kind: e.target.value, base_url: k?.base_url ?? '', default_model: k?.models[0] ?? '' })); }}>
+              <div className='grid gap-1.5'><Label>ارائه‌دهنده</Label>
+                <NativeSelect value={f.kind} onChange={(e) => { const k = kinds.find((x) => x.kind === e.target.value); setF((s) => ({ ...s, kind: e.target.value, base_url: k?.base_url ?? '', default_model: k?.models[0] ?? '', name: !s.name.trim() || s.name === s.kind ? e.target.value : s.name })); }}>
                   {kinds.map((k) => <NativeSelectOption key={k.kind} value={k.kind}>{k.label}</NativeSelectOption>)}
                 </NativeSelect></div>
             )}
-            <div className='grid gap-1.5'><Label>کلید API {kind?.needs_key === false && <span className='text-muted-foreground'>(اختیاری)</span>}</Label><Input type='password' value={f.api_key} onChange={(e) => setF((s) => ({ ...s, api_key: e.target.value }))} placeholder={editing?.has_key ? `فعلی: ••••${editing.key_hint} — برای تغییر وارد کنید` : ''} dir='ltr' autoComplete='off' /></div>
-            <div className='grid gap-1.5'><Label>Base URL</Label><Input value={f.base_url} onChange={(e) => setF((s) => ({ ...s, base_url: e.target.value }))} dir='ltr' placeholder={kind?.base_url} /></div>
+            {kind?.setup?.fa && !editing && <p className='text-muted-foreground rounded-md border border-dashed p-2 text-xs'>{kind.setup.fa}{kind.setup.console_url && <> · <a className='underline' href={kind.setup.console_url} target='_blank' rel='noreferrer' dir='ltr'>دریافت کلید</a></>}</p>}
+            <div className='grid gap-1.5'><Label>کلید API {kind?.needs_key === false && <span className='text-muted-foreground'>(اختیاری)</span>}</Label><Input type='password' value={f.api_key} onChange={(e) => setF((s) => ({ ...s, api_key: e.target.value }))} placeholder={editing?.has_key ? `فعلی: ••••${editing.key_hint} — برای تغییر وارد کنید` : kind?.setup?.key_prefix ? `${kind.setup.key_prefix}…` : ''} dir='ltr' autoComplete='off' /></div>
+            {kind?.requires_base_url && (
+              <div className='grid gap-1.5'><Label>Base URL <span className='text-muted-foreground'>(برای این نوع لازم است)</span></Label><Input value={f.base_url} onChange={(e) => setF((s) => ({ ...s, base_url: e.target.value }))} dir='ltr' placeholder={kind?.base_url} /></div>
+            )}
             <div className='grid gap-1.5'><Label htmlFor='default-model'>مدل پیش‌فرض</Label><Input id='default-model' value={f.default_model} onChange={(e) => setF((s) => ({ ...s, default_model: e.target.value }))} dir='ltr' list='kind-models' /><datalist id='kind-models' aria-label='مدل‌های پیشنهادی'>{(kind?.models ?? []).map((m) => <option key={m} value={m}>{m}</option>)}</datalist></div>
-            <div className='flex justify-end gap-2'><Button variant='ghost' onClick={() => setOpen(false)}>انصراف</Button><Button onClick={save} disabled={!!busy || !f.name.trim()}>{busy === 'save' ? '…' : 'ذخیره'}</Button></div>
+            {!kind?.requires_base_url && (adv ? (
+              <div className='grid gap-1.5 rounded-md border border-dashed p-2'><Label>Base URL Override <span className='text-muted-foreground'>(پیشرفته — فقط اگر می‌دانید چرا)</span></Label><Input value={f.base_url} onChange={(e) => setF((s) => ({ ...s, base_url: e.target.value }))} dir='ltr' placeholder={kind?.base_url} /></div>
+            ) : (
+              <button type='button' className='text-muted-foreground w-fit text-xs underline' onClick={() => setAdv(true)}>تنظیمات پیشرفته ▾</button>
+            ))}
+            <div className='flex justify-end gap-2'><Button variant='ghost' onClick={() => setOpen(false)}>انصراف</Button><Button onClick={save} disabled={!!busy || !f.name.trim() || (kind?.needs_key !== false && !editing?.has_key && !f.api_key.trim())}>{busy === 'save' ? 'در حال ذخیره و تست…' : 'ذخیره و تست اتصال'}</Button></div>
           </div>
         </DialogContent>
       </Dialog>
@@ -244,7 +260,7 @@ export function ProviderKindCard({ kindKey, providers, kind, onConnect, onEdit, 
             </span>
           ) : status === 'missing_credentials' ? (
             <span className='block space-y-1'>
-              <span className='block font-medium text-foreground'>برای تولید واقعی محتوا، کلید API کلود لازم است.</span>
+              <span className='block font-medium text-foreground'>برای تولید واقعی محتوا، کلید API {meta.title} لازم است — فقط کلید؛ بقیه تنظیمات خودکار است.</span>
               <span className='block'>{kind?.setup?.fa ?? 'کلید API را از کنسول Anthropic بسازید و اینجا وارد کنید.'}</span>
               <span className='block' dir='ltr'>1) <a className='underline' href={kind?.setup?.console_url ?? 'https://platform.claude.com/settings/keys'} target='_blank' rel='noreferrer'>کنسول ارائه‌دهنده</a> → Create Key &nbsp; 2) «{claude ? 'ثبت کلید' : meta.connectLabel}» → paste {kind?.setup?.key_prefix ? `(${kind.setup.key_prefix}…)` : ''} &nbsp; 3) تست اتصال</span>
               <span className='block'>کلید و اجرای مدل فقط روی سرور انجام می‌شود؛ چیزی روی کامپیوتر شما نصب یا اجرا نمی‌شود.</span>

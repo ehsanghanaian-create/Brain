@@ -50,7 +50,14 @@ def cfg_repo(eng: Engine = Depends(engine)) -> ProviderConfigRepository:
 
 @router.get("/provider-kinds")
 def provider_kinds() -> list[dict]:
-    return [{"kind": k, **v} for k, v in PROVIDER_KINDS.items()]
+    """Registry = source of truth for the UI: endpoint/protocol/auth details never leak to the user.
+    requires_base_url is True only where the endpoint genuinely depends on user input (Cloudflare account id,
+    custom OpenAI-compatible hosts); everywhere else the official base_url comes from this registry and the UI
+    hides the field behind «تنظیمات پیشرفته»."""
+    return [{"kind": k, **v,
+             "auth_type": "api_key" if v.get("needs_key") else "optional_api_key",
+             "requires_base_url": k in ("cloudflare", "custom"),
+             "supports_model_discovery": k != "cloudflare"} for k, v in PROVIDER_KINDS.items()]
 
 
 @router.get("/provider-configs")
@@ -110,8 +117,20 @@ def test_provider_config(pid: int, repo: ProviderConfigRepository = Depends(cfg_
             g.invalidate(p.name)
             r = g.adapter(p.name).test_connection()
             models = [m for m in (r.get("models") or []) if m]
-            res = ({"ok": True, "status": "ok", "message": f"اتصال برقرار است — {len(models)} مدل در دسترس", "models_found": models[:50], "tested_at": utcnow()} if r.get("ok")
-                   else {"ok": False, "status": "not_authorized" if "unauthorized" in str(r.get("error", "")) else "error", "message": f"اتصال ناموفق: {r.get('error')}", "tested_at": utcnow()})
+            if r.get("ok"):
+                res = {"ok": True, "status": "ok", "message": f"اتصال برقرار است — {len(models)} مدل در دسترس", "models_found": models[:50], "tested_at": utcnow()}
+                if p.default_model and models and p.default_model not in models and p.kind not in ("cloudflare", "omniroute"):
+                    res["default_model_missing"] = True
+                    res["message"] += f" · مدل انتخاب‌شده ({p.default_model}) دیگر در فهرست ارائه‌دهنده نیست — مدل دیگری انتخاب کنید"
+            else:
+                err = str(r.get("error", ""))
+                fa = ("کلید API اشتباه است — لطفاً کلید را بررسی کنید" if "unauthorized" in err
+                      else "محدودیت درخواست ارائه‌دهنده فعال شده است — کمی بعد دوباره تلاش کنید" if "429" in err or "busy" in err
+                      else "اتصال برقرار نشد — اینترنت و تنظیمات شبکه را بررسی کنید" if "network" in err or "timeout" in err.lower()
+                      else "مدل یا آدرس سرویس پیدا نشد" if "404" in err
+                      else err)
+                res = {"ok": False, "status": "not_authorized" if "unauthorized" in err else "error",
+                       "message": f"اتصال ناموفق: {fa}", "detail": err, "tested_at": utcnow()}
         except Exception:  # noqa: BLE001 — fall back to the phase-6 probe
             res = test_provider(p, key)
     repo.record_test(pid, res)

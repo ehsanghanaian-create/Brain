@@ -92,6 +92,22 @@ def _row(m) -> ProviderConfig:
                           created_at=m["created_at"], updated_at=m["updated_at"])
 
 
+def _clean_base_url(base_url: str | None, kind: str) -> str | None:
+    """Users must never be able to break a provider with a mangled Base URL: trim, add the https scheme when
+    missing, and treat empty/scheme-less copies of the registry host as «use the registry default» (None)."""
+    b = (base_url or "").strip().rstrip("/")
+    if not b:
+        return None
+    if not b.startswith(("http://", "https://")):
+        b = "https://" + b
+    default = (PROVIDER_KINDS.get(kind, {}).get("base_url") or "").rstrip("/")
+    if default:
+        host = "https://" + default.split("://", 1)[-1].split("/", 1)[0]
+        if b in (default, host):                                    # official endpoint (or just its host) → registry default
+            return None
+    return b
+
+
 class ProviderConfigRepository(Repository):
     def __init__(self, engine: Engine, secrets: SecretStore | None = None):
         super().__init__(engine)
@@ -118,6 +134,7 @@ class ProviderConfigRepository(Repository):
         if self.get_by_name(name):
             raise ValueError(f"provider '{name}' already exists")
         kd = PROVIDER_KINDS[kind]
+        base_url = _clean_base_url(base_url, kind)
         if not default_model and kd.get("env_model"):
             import os
             default_model = (os.environ.get(kd["env_model"]) or "").strip() or None
@@ -133,6 +150,16 @@ class ProviderConfigRepository(Repository):
     def update(self, pid: int, **fields) -> ProviderConfig | None:
         api_key = fields.pop("api_key", None)
         allowed = {k: v for k, v in fields.items() if k in ("name", "base_url", "default_model", "models", "enabled") and v is not None}
+        if "base_url" in allowed:
+            p0 = self.get(pid)
+            cleaned = _clean_base_url(allowed["base_url"], p0.kind if p0 else "")
+            if cleaned is None:
+                allowed.pop("base_url")                             # empty/official-host input → keep or reset to registry default
+                if p0 and p0.base_url:
+                    with self.engine.begin() as cx:
+                        cx.execute(ai_providers.update().where(ai_providers.c.id == pid).values(base_url=PROVIDER_KINDS.get(p0.kind, {}).get("base_url") or None, updated_at=utcnow()))
+            else:
+                allowed["base_url"] = cleaned
         if "models" in allowed:
             allowed["models"] = dumps(allowed["models"])
         if "enabled" in allowed:
@@ -146,6 +173,7 @@ class ProviderConfigRepository(Repository):
         return self.get(pid)
 
     def set_key(self, pid: int, api_key: str) -> None:
+        api_key = api_key.strip()                                   # pasted keys often carry stray whitespace
         ref = f"ai-provider-{pid}"
         self.secrets.set(ref, api_key)
         with self.engine.begin() as cx:

@@ -17,6 +17,14 @@ log = logging.getLogger("http")
 RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
 
 
+def ai_proxy() -> str | None:
+    """Optional egress proxy for CLOUD AI providers (Gemini/Claude/OpenAI…) — AI_PROXY env, same SSH-tunnel pattern
+    as WP_PROXY, for networks where the provider endpoints are DPI-throttled. Local endpoints (Ollama, OmniRoute on
+    127.0.0.1) are never proxied. Empty/unset → direct connection."""
+    import os
+    return (os.environ.get("AI_PROXY") or "").strip() or None
+
+
 def site_proxy() -> str | None:
     """Optional egress proxy for requests to the user's OWN sites (WP REST test/sync, crawler, publisher) —
     e.g. WP_PROXY=socks5://127.0.0.1:1080 through an SSH tunnel when the local ISP filters the site's domain

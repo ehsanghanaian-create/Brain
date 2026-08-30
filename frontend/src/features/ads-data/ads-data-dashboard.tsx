@@ -18,6 +18,7 @@ import {
   IconDatabase,
   IconDownload,
   IconEye,
+  IconShieldX,
   IconInfoCircle,
   IconListDetails,
   IconPhone,
@@ -429,6 +430,63 @@ function IpBlockControls({ siteId, siteDomain, ip, blocked, onChanged }: { siteI
     </div>
   ) : (
     <Button size='sm' variant='destructive' onClick={() => setMode('confirm-block')}>مسدود کردن IP</Button>
+  );
+}
+
+/** دکمهٔ فشردهٔ بلاک روی هر ردیف IP — کلیک → مودال تأیید (IP + سایت + دلیل) → مسدود از طریق پلاگین. */
+function RowBlockButton({ siteId, siteDomain, ip, blocked, onChanged }: { siteId: string; siteDomain: string; ip: string; blocked: boolean; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('ترافیک مشکوک');
+  const [busy, setBusy] = useState(false);
+
+  async function act(block: boolean) {
+    setBusy(true);
+    try {
+      const r = block ? await endpoints.securityBlock(siteId, ip, reason.trim() || undefined) : await endpoints.securityUnblock(siteId, ip);
+      if (r.success) {
+        const dup = r.status === 'already_blocked' || r.status === 'already_unblocked';
+        toast.success(block
+          ? (dup ? 'این IP قبلاً مسدود شده است.' : '✓ IP با موفقیت مسدود شد.')
+          : (dup ? 'این IP مسدود نبود.' : '✓ مسدودی IP برداشته شد.'));
+        onChanged();
+      } else {
+        toast.error(r.message || (block ? '✕ مسدود کردن IP انجام نشد.' : '✕ برداشتن مسدودی انجام نشد.'));
+      }
+    } catch {
+      toast.error(block ? '✕ مسدود کردن IP انجام نشد.' : '✕ برداشتن مسدودی انجام نشد.');
+    } finally { setBusy(false); setOpen(false); }
+  }
+
+  if (blocked) {
+    return (
+      <Button size='sm' variant='outline' className='h-8 text-xs' disabled={busy}
+        onClick={() => { if (window.confirm(`مسدودی این IP روی ${siteDomain} برداشته شود؟\n${ip}`)) void act(false); }}>
+        <IconShieldX className='size-3.5' />رفع مسدودی
+      </Button>
+    );
+  }
+  return (
+    <>
+      <Button size='sm' variant='destructive' className='h-8 text-xs' onClick={() => setOpen(true)}>
+        <IconShieldX className='size-3.5' />مسدود
+      </Button>
+      {open && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4' onClick={() => setOpen(false)} dir='rtl'>
+          <div className='bg-background w-full max-w-md space-y-3 rounded-xl border p-5 shadow-lg' onClick={(e) => e.stopPropagation()}>
+            <h3 className='flex items-center gap-2 font-semibold'><IconShieldX className='size-5 text-destructive' />مسدود کردن IP</h3>
+            <p className='text-sm'>آیا مطمئن هستید که می‌خواهید <code dir='ltr' className='rounded bg-muted px-1'>{ip}</code> را در سایت <b dir='ltr'>{siteDomain}</b> مسدود کنید؟</p>
+            <div className='space-y-1'>
+              <label className='text-xs text-muted-foreground'>دلیل:</label>
+              <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder='ترافیک مشکوک' />
+            </div>
+            <div className='flex justify-end gap-2 pt-1'>
+              <Button variant='ghost' disabled={busy} onClick={() => setOpen(false)}>انصراف</Button>
+              <Button variant='destructive' disabled={busy} onClick={() => void act(true)}>{busy ? 'در حال مسدودسازی…' : 'مسدود کردن'}</Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1061,7 +1119,12 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
                             <td className='px-4 py-3 tabular-nums'>{fa.format(row.tel_clicks)}</td>
                             <td className='px-4 py-3 whitespace-nowrap text-xs'>{time.format(new Date(row.last_seen))}</td>
                             <td className='max-w-56 truncate px-4 py-3 font-mono text-xs' dir='ltr' title={row.latest_page_path ?? ''}>{row.latest_page_path ?? '—'}</td>
-                            <td className='px-4 py-3'><Button size='icon-sm' variant='ghost' aria-label={`مشاهده جزئیات ${row.ip_address}`}><IconEye /></Button></td>
+                            <td className='px-4 py-3'>
+                              <div className='flex items-center justify-end gap-1' onClick={(e) => e.stopPropagation()}>
+                                {blockerSite && <RowBlockButton siteId={blockerSite} siteDomain={site} ip={row.ip_address} blocked={blockedIps.has(row.ip_address)} onChanged={() => void refreshBlocked(blockerSite)} />}
+                                <Button size='icon-sm' variant='ghost' aria-label={`مشاهده جزئیات ${row.ip_address}`} onClick={() => openIp(row)}><IconEye /></Button>
+                              </div>
+                            </td>
                           </tr>
                         );
                       })}
@@ -1077,6 +1140,7 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
                         <div className='flex items-start justify-between gap-3'><div><p className='font-mono text-sm' dir='ltr'>{row.ip_address}</p><Badge variant='outline' className={`mt-2 text-[10px] ${confidenceInfo(row.ip_confidence).className}`}>{confidenceInfo(row.ip_confidence).label}</Badge><GeoInfo row={row} /><p className='text-muted-foreground mt-1 text-[11px]'>{time.format(new Date(row.last_seen))}</p></div><Badge variant='outline' className={risk.badge}>{risk.label}</Badge></div>
                         <div className='mt-4 grid grid-cols-3 gap-2 text-center text-xs'><div className='bg-muted/50 rounded-lg p-2'><p className='font-semibold'>{fa.format(row.events)}</p><p className='text-muted-foreground mt-1'>رویداد</p></div><div className='bg-muted/50 rounded-lg p-2'><p className='font-semibold'>{fa.format(row.landings)}</p><p className='text-muted-foreground mt-1'>ورود</p></div><div className='bg-muted/50 rounded-lg p-2'><p className='font-semibold'>{fa.format(row.tel_clicks)}</p><p className='text-muted-foreground mt-1'>تماس</p></div></div>
                         <p className='text-muted-foreground mt-3 truncate font-mono text-[11px]' dir='ltr'>{row.latest_page_path ?? 'بدون مسیر صفحه'}</p>
+                        {blockerSite && <div className='mt-3' onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}><RowBlockButton siteId={blockerSite} siteDomain={site} ip={row.ip_address} blocked={blockedIps.has(row.ip_address)} onChanged={() => void refreshBlocked(blockerSite)} /></div>}
                       </button>
                     );
                   })}

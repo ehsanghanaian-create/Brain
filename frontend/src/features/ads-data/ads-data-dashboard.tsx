@@ -6,7 +6,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { api } from '@/lib/api/client';
+import { api, endpoints } from '@/lib/api/client';
+import { toast } from 'sonner';
 import {
   IconAlertTriangle,
   IconChartBar,
@@ -374,11 +375,89 @@ function EmptyState({ title, description }: { title: string; description: string
   );
 }
 
+/** مسدود/رفع مسدودی یک IP از طریق پلاگین امنیتی خود سایت — همیشه با تأیید انسانی، هرگز خودکار. */
+function IpBlockControls({ siteId, siteDomain, ip, blocked, onChanged }: { siteId: string; siteDomain: string; ip: string; blocked: boolean; onChanged: () => void }) {
+  const [mode, setMode] = useState<'idle' | 'confirm-block' | 'confirm-unblock'>('idle');
+  const [reason, setReason] = useState('ترافیک مشکوک');
+  const [busy, setBusy] = useState(false);
+
+  async function doBlock() {
+    setBusy(true);
+    try {
+      const r = await endpoints.securityBlock(siteId, ip, reason.trim() || undefined);
+      if (r.success) toast.success(r.status === 'already_blocked' ? 'این IP قبلاً مسدود شده است.' : '✓ IP با موفقیت مسدود شد.');
+      else toast.error(r.message || '✕ مسدود کردن IP انجام نشد.');
+      onChanged();
+    } catch { toast.error('✕ مسدود کردن IP انجام نشد.'); } finally { setBusy(false); setMode('idle'); }
+  }
+  async function doUnblock() {
+    setBusy(true);
+    try {
+      const r = await endpoints.securityUnblock(siteId, ip);
+      if (r.success) toast.success(r.status === 'already_unblocked' ? 'این IP مسدود نبود.' : '✓ مسدودی IP برداشته شد.');
+      else toast.error(r.message || '✕ برداشتن مسدودی انجام نشد.');
+      onChanged();
+    } catch { toast.error('✕ برداشتن مسدودی انجام نشد.'); } finally { setBusy(false); setMode('idle'); }
+  }
+
+  if (blocked) {
+    return mode === 'confirm-unblock' ? (
+      <span className='flex flex-wrap items-center gap-2 text-xs'>
+        آیا می‌خواهید مسدودی این IP را بردارید؟
+        <Button size='sm' variant='destructive' disabled={busy} onClick={() => void doUnblock()}>{busy ? '…' : 'بله، بردار'}</Button>
+        <Button size='sm' variant='ghost' disabled={busy} onClick={() => setMode('idle')}>انصراف</Button>
+      </span>
+    ) : (
+      <span className='flex items-center gap-2'>
+        <Badge variant='destructive'>مسدود شده</Badge>
+        <Button size='sm' variant='outline' onClick={() => setMode('confirm-unblock')}>رفع مسدودی</Button>
+      </span>
+    );
+  }
+  return mode === 'confirm-block' ? (
+    <div className='w-full space-y-2 rounded-xl border border-destructive/40 p-3 text-xs'>
+      <p className='font-medium'>مسدود کردن IP</p>
+      <p>آیا مطمئن هستید که می‌خواهید <code dir='ltr'>{ip}</code> را در سایت <b dir='ltr'>{siteDomain}</b> مسدود کنید؟</p>
+      <div className='flex items-center gap-2'>
+        <span className='shrink-0'>دلیل:</span>
+        <Input value={reason} onChange={(e) => setReason(e.target.value)} className='h-8 text-xs' placeholder='ترافیک مشکوک' />
+      </div>
+      <div className='flex gap-2'>
+        <Button size='sm' variant='ghost' disabled={busy} onClick={() => setMode('idle')}>انصراف</Button>
+        <Button size='sm' variant='destructive' disabled={busy} onClick={() => void doBlock()}>{busy ? '…' : 'مسدود کردن'}</Button>
+      </div>
+    </div>
+  ) : (
+    <Button size='sm' variant='destructive' onClick={() => setMode('confirm-block')}>مسدود کردن IP</Button>
+  );
+}
+
 export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLabel: string }) {
   const [hours, setHours] = useState(24);
   const [site, setSite] = useState(siteId || 'modirankhodro-emdad.com');
   const [sites, setSites] = useState<{ site_id: string; events: number }[]>([{ site_id: siteId || 'modirankhodro-emdad.com', events: 0 }]);
   const siteQuery = encodeURIComponent(site);
+  // security.* — مسدودسازی IP از طریق پلاگین خود سایت (فقط با کلیک انسانی)
+  const [blockerSite, setBlockerSite] = useState<string | null>(null);
+  const [blockedIps, setBlockedIps] = useState<Set<string>>(new Set());
+  const refreshBlocked = useCallback(async (sid: string | null) => {
+    if (!sid) { setBlockedIps(new Set()); return; }
+    try {
+      const r = await endpoints.securityBlocked(sid);
+      setBlockedIps(new Set(r.connected ? r.items.map((i) => i.ip) : []));
+    } catch { setBlockedIps(new Set()); }
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    endpoints.securityResolveSite(site)
+      .then(async (r) => {
+        if (cancelled) return;
+        setBlockerSite(r.configured ? r.site_id : null);
+        await refreshBlocked(r.configured ? r.site_id : null);
+      })
+      .catch(() => { if (!cancelled) { setBlockerSite(null); setBlockedIps(new Set()); } });
+    return () => { cancelled = true; };
+  }, [site, refreshBlocked]);
   useEffect(() => {
     api<{ sites: { site_id: string; events: number }[] }>('/ads-data/sites')
       .then((r) => { if (r.sites.length) { setSites(r.sites); if (!r.sites.some((s) => s.site_id === site)) setSite(r.sites[0].site_id); } })
@@ -1083,7 +1162,14 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
               </SheetHeader>
 
               <div className='space-y-5 p-5'>
-                <Button size='sm' variant='outline' onClick={() => void copyIp()}>{copiedIp ? <IconCheck /> : <IconCopy />}{copiedIp ? 'کپی شد' : 'کپی IP'}</Button>
+                <div className='flex flex-wrap items-center gap-2'>
+                  <Button size='sm' variant='outline' onClick={() => void copyIp()}>{copiedIp ? <IconCheck /> : <IconCopy />}{copiedIp ? 'کپی شد' : 'کپی IP'}</Button>
+                  {blockerSite && (
+                    <IpBlockControls siteId={blockerSite} siteDomain={site} ip={selectedIp.ip_address}
+                      blocked={blockedIps.has(selectedIp.ip_address)}
+                      onChanged={() => void refreshBlocked(blockerSite)} />
+                  )}
+                </div>
 
                 <section>
                   <h3 className='mb-3 text-sm font-semibold'>خلاصه فعالیت</h3>

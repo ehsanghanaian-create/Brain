@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { BUSINESS_CATEGORIES, MODE_FA } from '../constants';
 import { AutoSyncLine } from './auto-sync-line';
 import { StatusBadge } from './connection-tester';
+import { SecurityCard } from './security-card';
 import { DeleteSiteButton } from './delete-site-button';
 import { Ga4IntegrationCard } from './ga4-integration-card';
 import { GoogleAccountCard } from './google-account-card';
@@ -151,6 +152,7 @@ export function SiteDetail({ site, connections, memory, graph, initialTab }: {
           <GscIntegrationCard siteId={site.site_id} initialValue={site.gsc_property} initialResult={connections.status.gsc} refreshKey={gscRefresh} />
           <Ga4IntegrationCard siteId={site.site_id} initialValue={site.ga4_property} initialResult={connections.status.ga4} refreshKey={ga4Refresh} />
           <GoogleAccountCard onChange={() => { setGscRefresh((n) => n + 1); setGa4Refresh((n) => n + 1); }} />
+          <SecurityCard siteId={site.site_id} />
         </div>
       </TabsContent>
 

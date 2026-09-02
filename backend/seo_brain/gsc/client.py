@@ -191,10 +191,12 @@ class GscClient:
         cands = {wanted}
         host = wanted.replace("https://", "").replace("http://", "").strip("/")
         cands.update({f"sc-domain:{host}", f"https://{host}/", f"http://{host}/", f"https://www.{host}/"})
-        for e in entries:
-            if e.get("siteUrl") in cands:
-                return e["siteUrl"], e.get("permissionLevel")
-        return None, None
+        matches = [e for e in entries if e.get("siteUrl") in cands]
+        if not matches:
+            return None, None
+        rank = {"siteOwner": 0, "siteFullUser": 1, "siteRestrictedUser": 2, "siteUnverifiedUser": 3}
+        best = min(matches, key=lambda e: rank.get(e.get("permissionLevel"), 4))
+        return best["siteUrl"], best.get("permissionLevel")
 
     # -- search analytics -----------------------------------------------------------
     def query(self, site_url: str, start: date, end: date, dimensions: list[str], row_limit: int = MAX_ROWS_PER_REQUEST,

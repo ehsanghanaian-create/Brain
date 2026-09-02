@@ -6,6 +6,10 @@
  * Types come from schema.d.ts (generated from docs/seo-brain/openapi.v1.json — never hand-written).
  */
 import type { components } from './schema';
+import type {
+  ReportBacklinks, ReportKeywordList, ReportKeywordPerf, ReportMainKeyword,
+  ReportOpportunities, ReportProblems, ReportReportages, ReportSummary
+} from '@/features/reports/types';
 
 export type Schemas = components['schemas'];
 export type Site = Schemas['SiteCreate'] & { mode: 'manual' | 'assisted' | 'autopilot'; workspace_path: string | null; created_at: string; updated_at: string; gsc_property: string | null; ga4_property: string | null; wp_url: string | null };
@@ -329,6 +333,31 @@ export const endpoints = {
     return api<GraphView>(`/sites/${encodeURIComponent(id)}/graph/view?${q.toString()}`);
   },
   nodeDetails: (id: string, nodeId: string) => api<NodeDetails>(`/sites/${encodeURIComponent(id)}/graph/node-details/${encodeURIComponent(nodeId)}`),
+  // site report center
+  reportSummary: (id: string, days = 28) => api<ReportSummary>(`/sites/${encodeURIComponent(id)}/report/summary?days=${days}`),
+  reportMainKeyword: (id: string, days = 28) => api<ReportMainKeyword>(`/sites/${encodeURIComponent(id)}/report/main-keyword?days=${days}`),
+  setReportMainKeyword: (id: string, keyword: string) =>
+    api<{ keyword: string; performance: ReportKeywordPerf | null }>(`/sites/${encodeURIComponent(id)}/report/main-keyword`, { method: 'PUT', json: { keyword } }),
+  reportKeywords: (id: string, params: Record<string, string | number | undefined> = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => v !== undefined && v !== '' && q.set(k, String(v)));
+    return api<ReportKeywordList>(`/sites/${encodeURIComponent(id)}/report/keywords?${q.toString()}`);
+  },
+  reportProblems: (id: string, params: Record<string, string | undefined> = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => v !== undefined && v !== '' && q.set(k, String(v)));
+    return api<ReportProblems>(`/sites/${encodeURIComponent(id)}/report/problems?${q.toString()}`);
+  },
+  reportOpportunities: (id: string) => api<ReportOpportunities>(`/sites/${encodeURIComponent(id)}/report/opportunities`),
+  reportBacklinks: (id: string) => api<ReportBacklinks>(`/sites/${encodeURIComponent(id)}/report/backlinks`),
+  createReportBacklink: (id: string, body: Record<string, unknown>) => api<{ id: number }>(`/sites/${encodeURIComponent(id)}/report/backlinks`, { method: 'POST', json: body }),
+  updateReportBacklink: (id: string, bid: number, body: Record<string, unknown>) => api<{ ok: boolean }>(`/sites/${encodeURIComponent(id)}/report/backlinks/${bid}`, { method: 'PUT', json: body }),
+  deleteReportBacklink: (id: string, bid: number) => api<{ ok: boolean }>(`/sites/${encodeURIComponent(id)}/report/backlinks/${bid}`, { method: 'DELETE' }),
+  reportReportages: (id: string) => api<ReportReportages>(`/sites/${encodeURIComponent(id)}/report/reportages`),
+  createReportage: (id: string, body: Record<string, unknown>) => api<{ id: number }>(`/sites/${encodeURIComponent(id)}/report/reportages`, { method: 'POST', json: body }),
+  updateReportage: (id: string, rid: number, body: Record<string, unknown>) => api<{ ok: boolean }>(`/sites/${encodeURIComponent(id)}/report/reportages/${rid}`, { method: 'PUT', json: body }),
+  deleteReportage: (id: string, rid: number) => api<{ ok: boolean }>(`/sites/${encodeURIComponent(id)}/report/reportages/${rid}`, { method: 'DELETE' }),
+  verifyReportage: (id: string, rid: number) => api<{ verified_at: string; status: string | null; rel?: string; error?: string }>(`/sites/${encodeURIComponent(id)}/report/reportages/${rid}/verify`, { method: 'POST' }),
   // phase 5 — keywords
   keywords: (id: string, params: Record<string, string | number | undefined> = {}) => {
     const q = new URLSearchParams();

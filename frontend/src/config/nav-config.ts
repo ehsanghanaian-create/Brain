@@ -55,8 +55,8 @@ export const navGroups: NavGroup[] = [
   {
     label: 'سیستم',
     items: [
-      { title: 'گزارش‌ها', url: '/dashboard/reports', icon: 'reports', items: [],
-        description: 'گزارش رشد کلمات کلیدی، عملکرد محتوا و مشکلات سئو (فاز ۱۷)' },
+      { title: 'گزارش سایت', url: '/dashboard/reports', icon: 'reports', items: [],
+        description: 'مرکز گزارش کامل هر سایت: کلمه کلیدی اصلی، جایگاه‌ها، مشکلات، بک‌لینک و رپورتاژ' },
       { title: 'داده زنده تبلیغات', url: '/ads-data', icon: 'reports', items: [],
         description: 'IP، GCLID، session و رفتار زنده ورودی‌های تبلیغاتی' },
       { title: 'تنظیمات', url: '/dashboard/settings', icon: 'settings', items: [],

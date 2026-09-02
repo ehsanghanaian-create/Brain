@@ -30,7 +30,11 @@ log = logging.getLogger("automation.scheduler")
 
 PIPELINES = ("wordpress_pipeline", "gsc_pipeline", "ga4_pipeline")
 OK_STATUSES = ("succeeded", "completed_with_errors")
-DEFAULT_SETTINGS = {"enabled": True, "interval_hours": 24}
+# interval_minutes is canonical (global refresh: check every tick, refresh each connected integration
+# every N minutes — default 10). Legacy stored interval_hours is still honored when minutes is absent.
+DEFAULT_SETTINGS = {"enabled": True, "interval_minutes": 10}
+MIN_INTERVAL_MINUTES = 10
+MAX_INTERVAL_MINUTES = 7 * 24 * 60
 RETRY_AFTER_MINUTES = 60          # one gentle retry per hour for transient failures…
 MAX_CONSECUTIVE_FAILURES = 3      # …then back off to the normal interval (not_authorized is never retried)
 
@@ -52,29 +56,49 @@ def _parse(ts: str | None) -> datetime | None:
         return None
 
 
+def _clamp_minutes(value: Any) -> int:
+    try:
+        return max(MIN_INTERVAL_MINUTES, min(MAX_INTERVAL_MINUTES, int(value)))
+    except (TypeError, ValueError):
+        return int(DEFAULT_SETTINGS["interval_minutes"])
+
+
 def auto_sync_settings(engine: Engine, site_id: str) -> dict[str, Any]:
     with engine.connect() as cx:
         r = cx.execute(text("SELECT value FROM site_settings WHERE site_id=:s AND key='auto_sync'"), {"s": site_id}).first()
-    out = dict(DEFAULT_SETTINGS)
+    stored: dict[str, Any] = {}
     if r and r[0]:
         try:
-            out.update({k: v for k, v in json.loads(r[0]).items() if k in DEFAULT_SETTINGS})
+            stored = json.loads(r[0]) or {}
         except ValueError:
-            pass
-    out["interval_hours"] = max(1, min(24 * 7, int(out.get("interval_hours") or 24)))
+            stored = {}
+    out = dict(DEFAULT_SETTINGS)
+    if "enabled" in stored:
+        out["enabled"] = bool(stored["enabled"])
+    if stored.get("interval_minutes") is not None:
+        out["interval_minutes"] = _clamp_minutes(stored["interval_minutes"])
+    elif stored.get("interval_hours") is not None:   # legacy sites configured in hours keep their cadence
+        out["interval_minutes"] = _clamp_minutes(int(stored["interval_hours"]) * 60)
+    # legacy display field for existing consumers of the auto-sync card
+    out["interval_hours"] = max(1, round(out["interval_minutes"] / 60)) if out["interval_minutes"] >= 60 else 1
     return out
 
 
-def save_auto_sync_settings(engine: Engine, site_id: str, enabled: bool | None = None, interval_hours: int | None = None) -> dict[str, Any]:
+def save_auto_sync_settings(engine: Engine, site_id: str, enabled: bool | None = None,
+                            interval_hours: int | None = None, interval_minutes: int | None = None) -> dict[str, Any]:
     cur = auto_sync_settings(engine, site_id)
     if enabled is not None:
         cur["enabled"] = bool(enabled)
-    if interval_hours is not None:
-        cur["interval_hours"] = max(1, min(24 * 7, int(interval_hours)))
+    if interval_minutes is not None:
+        cur["interval_minutes"] = _clamp_minutes(interval_minutes)
+    elif interval_hours is not None:
+        cur["interval_minutes"] = _clamp_minutes(int(interval_hours) * 60)
+    cur["interval_hours"] = max(1, round(cur["interval_minutes"] / 60)) if cur["interval_minutes"] >= 60 else 1
     with engine.begin() as cx:
         cx.execute(text("INSERT INTO site_settings(site_id, key, value, updated_at) VALUES(:s,'auto_sync',:v,:u) "
                         "ON CONFLICT(site_id, key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at"),
-                   {"s": site_id, "v": json.dumps(cur), "u": _iso(_utcnow())})
+                   {"s": site_id, "v": json.dumps({"enabled": cur["enabled"], "interval_minutes": cur["interval_minutes"]}),
+                    "u": _iso(_utcnow())})
     return cur
 
 
@@ -135,11 +159,11 @@ def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> 
     """Per-integration plan used by both the scheduler and the auto-sync API: last success, next planned, due."""
     now = now or _utcnow()
     cfg = auto_sync_settings(engine, site_id)
-    interval = timedelta(hours=cfg["interval_hours"])
+    interval = timedelta(minutes=cfg["interval_minutes"])
     with engine.connect() as cx:
         site = cx.execute(text("SELECT wp_url, gsc_property, ga4_property FROM sites WHERE site_id=:s"), {"s": site_id}).first()
     if not site:
-        return {"enabled": cfg["enabled"], "interval_hours": cfg["interval_hours"], "sources": {}}
+        return {"enabled": cfg["enabled"], "interval_minutes": cfg["interval_minutes"], "interval_hours": cfg["interval_hours"], "sources": {}}
     from ..connections.service import GA4_SCOPE, _google_client_configured, _token_info
     tok = _token_info()
     google_ok = _google_client_configured() and tok.get("present")
@@ -162,7 +186,7 @@ def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> 
         sources[kind] = {"configured": configured[kind], "last_success": _iso(last) if last else None,
                          "next_at": _iso(nxt) if (cfg["enabled"] and configured[kind]) else None,
                          "due": bool(cfg["enabled"] and configured[kind] and nxt <= now)}
-    return {"enabled": cfg["enabled"], "interval_hours": cfg["interval_hours"], "sources": sources}
+    return {"enabled": cfg["enabled"], "interval_minutes": cfg["interval_minutes"], "interval_hours": cfg["interval_hours"], "sources": sources}
 
 
 def run_tick(engine: Engine, queue, max_sites: int = 2, stale_after_minutes: int = 120) -> dict[str, Any]:

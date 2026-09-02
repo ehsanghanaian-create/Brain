@@ -81,10 +81,13 @@ def test_stale_recovery_unblocks_is_running(env):
 def test_plan_due_logic_and_settings(env):
     c, eng = env["client"], env["eng"]
     _mk_site(c, "s1", wp_url="https://s1.example/", gsc_property="sc-domain:s1.example", ga4_property="471988572")
-    # never synced → everything configured is due now
+    # never synced → everything configured is due now (global default: refresh every 10 minutes)
     p = plan_for_site(eng, "s1")
-    assert p["enabled"] is True and p["interval_hours"] == 24
+    assert p["enabled"] is True and p["interval_minutes"] == 10
     assert all(p["sources"][k]["due"] for k in ("wordpress", "gsc", "ga4"))
+    # the retry/backoff cases below assume an hourly-scale interval → pin it explicitly
+    save_auto_sync_settings(eng, "s1", interval_hours=24)
+    assert auto_sync_settings(eng, "s1")["interval_minutes"] == 24 * 60
     # recent success → not due; old success → due again
     _seed_success(eng, "s1", "wordpress_pipeline", hours_ago=1)
     _seed_success(eng, "s1", "gsc_pipeline", hours_ago=30)
@@ -120,6 +123,7 @@ def test_tick_enqueues_existing_jobs_with_cap_and_no_duplicates(env):
 def test_retry_only_transient_failures(env):
     c, eng = env["client"], env["eng"]
     _mk_site(c, "r1", gsc_property="sc-domain:r1.example")
+    save_auto_sync_settings(eng, "r1", interval_hours=24)         # retry semantics need an hourly-scale interval
     _seed_success(eng, "r1", "gsc_pipeline", hours_ago=2)         # success 2h ago → normally not due for 22h
     def seed_run(status, minutes_ago, n):
         ts = _iso(datetime.now(timezone.utc) - timedelta(minutes=minutes_ago))
@@ -140,6 +144,7 @@ def test_retry_only_transient_failures(env):
     assert plan_for_site(eng, "r1")["sources"]["gsc"]["due"] is False
     # not_authorized is never retried
     _mk_site(c, "r2", gsc_property="sc-domain:r2.example")
+    save_auto_sync_settings(eng, "r2", interval_hours=24)
     _seed_success(eng, "r2", "gsc_pipeline", hours_ago=2)
     ts = _iso(datetime.now(timezone.utc) - timedelta(minutes=90))
     with eng.begin() as cx:

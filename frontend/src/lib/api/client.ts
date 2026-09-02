@@ -7,7 +7,7 @@
  */
 import type { components } from './schema';
 import type {
-  ReportBacklinks, ReportKeywordList, ReportKeywordPerf, ReportMainKeyword,
+  ReportBacklinks, ReportFull, ReportKeywordList, ReportKeywordPerf, ReportMainKeyword,
   ReportOpportunities, ReportProblems, ReportReportages, ReportSummary
 } from '@/features/reports/types';
 
@@ -334,6 +334,8 @@ export const endpoints = {
   },
   nodeDetails: (id: string, nodeId: string) => api<NodeDetails>(`/sites/${encodeURIComponent(id)}/graph/node-details/${encodeURIComponent(nodeId)}`),
   // site report center
+  reportFull: (id: string, days = 28) => api<ReportFull>(`/sites/${encodeURIComponent(id)}/report?days=${days}`),
+  refreshSite: (id: string) => api<{ site_id: string; queued: { kind: string; status?: string; run_id?: string }[]; skipped: string[] }>(`/sites/${encodeURIComponent(id)}/refresh`, { method: 'POST' }),
   reportSummary: (id: string, days = 28) => api<ReportSummary>(`/sites/${encodeURIComponent(id)}/report/summary?days=${days}`),
   reportMainKeyword: (id: string, days = 28) => api<ReportMainKeyword>(`/sites/${encodeURIComponent(id)}/report/main-keyword?days=${days}`),
   setReportMainKeyword: (id: string, keyword: string) =>

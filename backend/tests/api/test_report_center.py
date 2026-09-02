@@ -179,6 +179,87 @@ def test_check_article_parses_link_and_rel(client, monkeypatch):
     assert out2["status"] == "target_changed"
 
 
+def test_full_report_connections_and_history_with_failed_integration(client):
+    """GET /sites/{id}/report: one payload with connections + sync history; a failed run is visible, not hidden."""
+    _seed(client)
+    _seed_gsc(client)
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO site_connections(site_id, kind, status, tested_at)
+                           VALUES('demo','wordpress','ok','2026-08-10T10:00:00Z')"""))
+        cx.execute(text("""INSERT INTO sync_runs(run_id, site_id, source, started_at, finished_at, status, rows_written)
+                           VALUES('r-ok','demo','gsc_pipeline','2026-08-10T10:00:00Z','2026-08-10T10:00:12Z','succeeded',350),
+                                 ('r-bad','demo','ga4_pipeline','2026-08-11T10:00:00Z','2026-08-11T10:00:03Z','failed',0)"""))
+    body = client.get("/api/v1/sites/demo/report").json()
+    # connections: wordpress configured (wp_url set) + tested ok → connected; gsc/ga4 not configured (no google auth in tests)
+    assert body["connections"]["wordpress"]["connected"] is True
+    assert body["connections"]["gsc"]["configured"] is False
+    hist = body["sync_history"]
+    assert [h["source"] for h in hist[:2]] == ["ga4_pipeline", "gsc_pipeline"]
+    assert hist[0]["status"] == "failed"
+    assert hist[1]["duration_seconds"] == 12 and hist[1]["rows_written"] == 350
+    assert body["sync_running"] is False
+    # همان payload شامل summary هم هست
+    assert body["gsc"]["available"] is True and "score" in body
+    # سری زمانی جایگاه برای نمودار روند رتبه
+    assert any(p.get("position") is not None for p in body["gsc"]["timeseries"])
+
+
+def test_scheduler_minutes_interval_and_due_logic(client):
+    from seo_brain.automation import scheduler as sch
+    eng = client.eng
+    _seed(client)
+    # پیش‌فرض جدید: هر ۱۰ دقیقه؛ تنظیم قدیمی ساعتی هنوز معتبر است
+    cfg = sch.auto_sync_settings(eng, "demo")
+    assert cfg["interval_minutes"] == 10
+    sch.save_auto_sync_settings(eng, "demo", interval_hours=2)
+    assert sch.auto_sync_settings(eng, "demo")["interval_minutes"] == 120
+    sch.save_auto_sync_settings(eng, "demo", interval_minutes=10)
+    assert sch.auto_sync_settings(eng, "demo")["interval_minutes"] == 10
+    # wordpress پیکربندی شده (wp_url دارد): بدون اجرای موفق → due؛ اجرای موفق ۵ دقیقه پیش → not due؛ ۱۱ دقیقه پیش → due
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    plan = sch.plan_for_site(eng, "demo", now=now)
+    assert plan["interval_minutes"] == 10 and plan["sources"]["wordpress"]["due"] is True
+    with eng.begin() as cx:
+        cx.execute(text("""INSERT INTO sync_runs(run_id, site_id, source, started_at, finished_at, status)
+                           VALUES('w1','demo','wordpress_pipeline',:a,:b,'succeeded')"""),
+                   {"a": sch._iso(now - timedelta(minutes=5)), "b": sch._iso(now - timedelta(minutes=5))})
+    assert sch.plan_for_site(eng, "demo", now=now)["sources"]["wordpress"]["due"] is False
+    with eng.begin() as cx:
+        cx.execute(text("UPDATE sync_runs SET started_at=:a, finished_at=:a WHERE run_id='w1'"),
+                   {"a": sch._iso(now - timedelta(minutes=11))})
+    assert sch.plan_for_site(eng, "demo", now=now)["sources"]["wordpress"]["due"] is True
+
+
+def test_refresh_now_queues_only_configured(client, monkeypatch):
+    import seo_brain.api.routers.sites as sites_mod
+    _seed(client)
+    calls: list[str] = []
+    monkeypatch.setattr(sites_mod, "_queue_wordpress_sync",
+                        lambda sid, eng, q, **kw: calls.append("wordpress") or {"status": "queued", "run_id": "wp1", "job_id": "j1"})
+    monkeypatch.setattr(sites_mod, "_queue_gsc_sync",
+                        lambda sid, eng, q, **kw: calls.append("gsc") or {"status": "queued", "run_id": "g1", "job_id": "j2"})
+    monkeypatch.setattr(sites_mod, "_queue_ga4_sync",
+                        lambda sid, eng, q, **kw: calls.append("ga4") or {"status": "queued", "run_id": "a1", "job_id": "j3"})
+    r = client.post("/api/v1/sites/demo/refresh")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # فقط wordpress پیکربندی شده (بدون توکن گوگل در تست) → فقط همان صف می‌شود
+    assert calls == ["wordpress"]
+    assert [x["kind"] for x in body["queued"]] == ["wordpress"]
+    assert sorted(body["skipped"]) == ["ga4", "gsc"]
+
+
+def test_keyword_scope_tracked(client):
+    _seed(client)
+    _seed_gsc(client)
+    with client.eng.begin() as cx:
+        cx.execute(text("INSERT INTO keywords(site_id, keyword, normalized) VALUES('demo','امداد خودرو رنو','امداد خودرو رنو')"))
+    body = client.get("/api/v1/sites/demo/report/keywords?days=7&scope=tracked").json()
+    assert body["total"] == 1 and body["items"][0]["query"] == "امداد خودرو رنو"
+    assert body["tracked_count"] == 1
+
+
 def test_site_isolation(client):
     _seed(client, "site-a")
     _seed(client, "site-b")

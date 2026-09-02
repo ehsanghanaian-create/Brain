@@ -14,10 +14,10 @@ import { EmptyState, ErrorState, LoadingState } from '@/components/seo-brain/sta
 import { KpiCard } from '@/components/seo-brain/kpi-card';
 import { ApiError, endpoints, type Site } from '@/lib/api/client';
 import type {
-  BacklinkRow, ReportageRow, ReportBacklinks, ReportKeywordList,
+  BacklinkRow, ReportageRow, ReportBacklinks, ReportFull, ReportKeywordList,
   ReportMainKeyword, ReportOpportunities, ReportProblems, ReportReportages, ReportSummary
 } from '@/features/reports/types';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { toast } from 'sonner';
 
@@ -54,7 +54,9 @@ const REPORTAGE_STATUS_FA: Record<string, { label: string; cls: string }> = {
 
 const chartConfig = {
   clicks: { label: 'کلیک', color: 'var(--chart-1)' },
-  impressions: { label: 'نمایش', color: 'var(--chart-2)' }
+  impressions: { label: 'نمایش', color: 'var(--chart-2)' },
+  position: { label: 'جایگاه', color: 'var(--chart-3)' },
+  sessions: { label: 'نشست', color: 'var(--chart-4)' }
 } satisfies ChartConfig;
 
 function Delta({ cur, prev, invert = false, digits = 0 }: { cur: number | null | undefined; prev: number | null | undefined; invert?: boolean; digits?: number }) {
@@ -80,29 +82,65 @@ function ChangeCell({ change }: { change: number | null }) {
   );
 }
 
+const CONNECTION_FA: Record<string, string> = { gsc: 'Search Console', wordpress: 'وردپرس', ga4: 'GA4' };
+const SOURCE_FA: Record<string, string> = {
+  gsc_pipeline: 'Search Console', gsc: 'Search Console (داده)', wordpress_pipeline: 'وردپرس',
+  wordpress: 'وردپرس (داده)', ga4_pipeline: 'GA4', ga4: 'GA4 (داده)', analysis: 'تحلیل سئو', graph: 'گراف'
+};
+
 export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; initialSiteId: string }) {
   const [siteId, setSiteId] = useState(initialSiteId);
   const [days, setDays] = useState(28);
-  const [summary, setSummary] = useState<ReportSummary | null>(null);
+  const [summary, setSummary] = useState<ReportFull | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
+  const pollRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    endpoints.reportSummary(siteId, days)
+    endpoints.reportFull(siteId, days)
       .then((s) => { if (!cancelled) { setSummary(s); setError(null); } })
       .catch((e) => { if (!cancelled) setError(e instanceof ApiError ? e : new ApiError(0, 'unknown', String(e), null, '')); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [siteId, days, refreshKey]);
 
+  // تا وقتی همگام‌سازی در جریان است هر ۵ ثانیه گزارش را تازه کن؛ با پایان sync خودش می‌ایستد
+  useEffect(() => {
+    if (summary?.sync_running) {
+      pollRef.current = window.setTimeout(() => refresh(), 5000);
+      return () => { if (pollRef.current) window.clearTimeout(pollRef.current); };
+    }
+    setRefreshing(false);
+    return undefined;
+  }, [summary, refresh]);
+
+  const refreshNow = async () => {
+    setRefreshing(true);
+    try {
+      const out = await endpoints.refreshSite(siteId);
+      if (out.queued.length === 0) toast.info('اتصال فعالی برای همگام‌سازی وجود ندارد');
+      else toast.success(`همگام‌سازی شروع شد: ${out.queued.map((x) => CONNECTION_FA[x.kind] ?? x.kind).join('، ')}`);
+      refresh();
+    } catch (e) {
+      setRefreshing(false);
+      toast.error(e instanceof ApiError ? e.message : String(e));
+    }
+  };
+
   const site = sites.find((s) => s.site_id === siteId);
   const g = summary?.gsc;
   const cur = g?.totals;
   const prev = g?.previous ?? undefined;
+  const syncing = refreshing || Boolean(summary?.sync_running);
+  const lastUpdate = summary ? Object.values(summary.freshness.last_runs).sort().at(-1) : null;
+  const nextAt = summary
+    ? Object.values(summary.freshness.auto_sync?.sources ?? {}).map((s) => s.next_at).filter(Boolean).sort()[0]
+    : null;
 
   return (
     <div className='space-y-5'>
@@ -117,14 +155,32 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
             </Button>
           ))}
         </div>
-        <Button size='sm' variant='outline' onClick={refresh}>تازه‌سازی</Button>
+        <Button size='sm' variant='outline' onClick={refreshNow} disabled={syncing}>
+          {syncing ? 'در حال همگام‌سازی…' : 'بروزرسانی الان'}
+        </Button>
         {summary && (
           <span className='text-muted-foreground ms-auto text-xs'>
-            آخرین همگام‌سازی GSC: {ago(summary.freshness.last_runs.gsc)}
-            {summary.freshness.auto_sync?.sources?.gsc?.next_at ? ` · بعدی: ${ago(summary.freshness.auto_sync.sources.gsc.next_at)}` : ''}
+            آخرین بروزرسانی: {ago(lastUpdate)}{nextAt ? ` · بعدی: ${ago(nextAt)}` : ''}
           </span>
         )}
       </div>
+
+      {summary && (
+        <div className='flex flex-wrap gap-1.5'>
+          {(['gsc', 'wordpress', 'ga4'] as const).map((k) => {
+            const c = summary.connections[k];
+            return (
+              <Badge key={k} variant='outline'
+                className={c.connected ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                  : c.configured ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                  : 'text-muted-foreground'}>
+                {CONNECTION_FA[k]}: {c.connected ? 'متصل' : c.configured ? 'مشکل اتصال' : 'متصل نیست'}
+              </Badge>
+            );
+          })}
+          {syncing && <Badge className='border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300'><span className='me-1 inline-block size-1.5 animate-pulse rounded-full bg-sky-500' />در حال دریافت داده جدید…</Badge>}
+        </div>
+      )}
 
       {error && <ErrorState error={error} onRetry={refresh} />}
       {loading && !summary && <LoadingState label='در حال ساخت گزارش سایت…' rows={6} />}
@@ -176,27 +232,62 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
           <MainKeywordCard siteId={siteId} days={days} summary={summary} onChanged={refresh} />
 
           {g?.available && g.timeseries && g.timeseries.length > 1 && (
-            <Card>
-              <CardHeader className='pb-2'>
-                <CardTitle className='text-base'>روند ورودی ارگانیک (GSC)</CardTitle>
-                {summary.ga4.available && summary.ga4.totals && (
-                  <CardDescription>
-                    GA4 (کل ترافیک {summary.ga4.date_from} تا {summary.ga4.date_to}): {num(summary.ga4.totals.sessions)} نشست · {num(summary.ga4.totals.users)} کاربر · {num(summary.ga4.totals.conversions)} تبدیل · تعامل {pct(summary.ga4.totals.engagement_rate)}
-                  </CardDescription>
-                )}
-              </CardHeader>
-              <CardContent>
-                <ChartContainer config={chartConfig} className='h-56 w-full' dir='ltr'>
-                  <AreaChart data={g.timeseries} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-                    <CartesianGrid vertical={false} strokeDasharray='3 3' />
-                    <XAxis dataKey='date' tick={{ fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={40} />
-                    <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={36} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <Area type='monotone' dataKey='clicks' stroke='var(--color-clicks)' fill='var(--color-clicks)' fillOpacity={0.18} strokeWidth={2} />
-                  </AreaChart>
-                </ChartContainer>
-              </CardContent>
-            </Card>
+            <div className='grid gap-4 lg:grid-cols-2'>
+              <Card>
+                <CardHeader className='pb-2'><CardTitle className='text-base'>روند ورودی ارگانیک (کلیک GSC)</CardTitle></CardHeader>
+                <CardContent>
+                  <ChartContainer config={chartConfig} className='h-48 w-full' dir='ltr'>
+                    <AreaChart data={g.timeseries} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                      <CartesianGrid vertical={false} strokeDasharray='3 3' />
+                      <XAxis dataKey='date' tick={{ fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={40} />
+                      <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={36} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <Area type='monotone' dataKey='clicks' stroke='var(--color-clicks)' fill='var(--color-clicks)' fillOpacity={0.18} strokeWidth={2} />
+                    </AreaChart>
+                  </ChartContainer>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className='pb-2'>
+                  <CardTitle className='text-base'>روند جایگاه (میانگین وزنی روزانه)</CardTitle>
+                  <CardDescription>محور وارونه — بالاتر یعنی جایگاه بهتر</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ChartContainer config={chartConfig} className='h-48 w-full' dir='ltr'>
+                    <AreaChart data={g.timeseries} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                      <CartesianGrid vertical={false} strokeDasharray='3 3' />
+                      <XAxis dataKey='date' tick={{ fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={40} />
+                      <YAxis reversed tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={36} domain={['auto', 'auto']} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <Area type='monotone' dataKey='position' stroke='var(--color-position)' fill='var(--color-position)' fillOpacity={0.12} strokeWidth={2} connectNulls />
+                    </AreaChart>
+                  </ChartContainer>
+                </CardContent>
+              </Card>
+              {summary.ga4.available && summary.ga4.timeseries && summary.ga4.timeseries.length > 1 && (
+                <Card className='lg:col-span-2'>
+                  <CardHeader className='pb-2'>
+                    <CardTitle className='text-base'>روند ترافیک GA4 (کل نشست‌ها)</CardTitle>
+                    {summary.ga4.totals && (
+                      <CardDescription>
+                        {summary.ga4.date_from} تا {summary.ga4.date_to}: {num(summary.ga4.totals.sessions)} نشست · {num(summary.ga4.totals.users)} کاربر · {num(summary.ga4.totals.conversions)} تبدیل · تعامل {pct(summary.ga4.totals.engagement_rate)}
+                      </CardDescription>
+                    )}
+                  </CardHeader>
+                  <CardContent>
+                    <ChartContainer config={chartConfig} className='h-44 w-full' dir='ltr'>
+                      <AreaChart data={summary.ga4.timeseries} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+                        <CartesianGrid vertical={false} strokeDasharray='3 3' />
+                        <XAxis dataKey='date' tick={{ fontSize: 10 }} tickLine={false} axisLine={false} minTickGap={40} />
+                        <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={36} />
+                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <Area type='monotone' dataKey='sessions' stroke='var(--color-sessions)' fill='var(--color-sessions)' fillOpacity={0.15} strokeWidth={2} />
+                      </AreaChart>
+                    </ChartContainer>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           )}
 
           <Tabs defaultValue='keywords'>
@@ -208,12 +299,14 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
               <TabsTrigger value='opportunities'>فرصت‌ها</TabsTrigger>
               <TabsTrigger value='backlinks'>بک‌لینک‌ها</TabsTrigger>
               <TabsTrigger value='reportages'>رپورتاژها</TabsTrigger>
+              <TabsTrigger value='history'>تاریخچه همگام‌سازی</TabsTrigger>
             </TabsList>
             <TabsContent value='keywords'><KeywordsPanel siteId={siteId} days={days} /></TabsContent>
             <TabsContent value='problems'><ProblemsPanel siteId={siteId} refreshKey={refreshKey} /></TabsContent>
             <TabsContent value='opportunities'><OpportunitiesPanel siteId={siteId} refreshKey={refreshKey} /></TabsContent>
             <TabsContent value='backlinks'><BacklinksPanel siteId={siteId} onChanged={refresh} /></TabsContent>
             <TabsContent value='reportages'><ReportagesPanel siteId={siteId} onChanged={refresh} /></TabsContent>
+            <TabsContent value='history'><SyncHistoryPanel history={summary.sync_history} /></TabsContent>
           </Tabs>
         </>
       )}
@@ -322,6 +415,48 @@ function MainKeywordCard({ siteId, days, summary, onChanged }: { siteId: string;
   );
 }
 
+/* ---------------------------------------------------------------- تاریخچه همگام‌سازی */
+
+function SyncHistoryPanel({ history }: { history: import('@/features/reports/types').SyncHistoryRow[] }) {
+  if (history.length === 0) {
+    return <EmptyState title='هنوز همگام‌سازی‌ای اجرا نشده است' description='با اولین Sync (خودکار یا «بروزرسانی الان») تاریخچه اینجا ثبت می‌شود.' />;
+  }
+  return (
+    <Card>
+      <CardContent className='pt-4'>
+        <div className='overflow-x-auto rounded-md border'>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>زمان</TableHead><TableHead>منبع</TableHead><TableHead>وضعیت</TableHead>
+                <TableHead>مدت</TableHead><TableHead>ردیف‌های ذخیره‌شده</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {history.map((h, i) => (
+                <TableRow key={i}>
+                  <TableCell className='text-xs'>{ago(h.started_at)}</TableCell>
+                  <TableCell className='text-xs'>{SOURCE_FA[h.source] ?? h.source}</TableCell>
+                  <TableCell>
+                    <Badge variant='outline' className={
+                      h.status === 'failed' ? 'border-red-500/30 text-red-700 dark:text-red-300'
+                        : h.status in { queued: 1, running: 1 } ? 'border-sky-500/30 text-sky-700 dark:text-sky-300'
+                        : 'border-emerald-500/30 text-emerald-700 dark:text-emerald-300'}>
+                      {h.status === 'failed' ? 'ناموفق' : h.status === 'queued' ? 'در صف' : h.status === 'running' ? 'در حال اجرا' : 'موفق'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className='text-xs tabular-nums'>{h.duration_seconds != null ? `${fa.format(h.duration_seconds)} ثانیه` : '—'}</TableCell>
+                  <TableCell className='text-xs tabular-nums'>{h.rows_written != null ? fa.format(h.rows_written) : '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 /* ---------------------------------------------------------------- عملکرد کلمات کلیدی */
 
 function KeywordsPanel({ siteId, days }: { siteId: string; days: number }) {
@@ -329,6 +464,7 @@ function KeywordsPanel({ siteId, days }: { siteId: string; days: number }) {
   const [data, setData] = useState<ReportKeywordList | null>(null);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
+  const [scope, setScope] = useState<'all' | 'tracked'>('all');
   const [order, setOrder] = useState('clicks');
   const [dirn, setDirn] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(0);
@@ -336,12 +472,12 @@ function KeywordsPanel({ siteId, days }: { siteId: string; days: number }) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    endpoints.reportKeywords(siteId, { days, q, order, dir: dirn, limit: PAGE, offset: page * PAGE })
+    endpoints.reportKeywords(siteId, { days, q, scope, order, dir: dirn, limit: PAGE, offset: page * PAGE })
       .then((d) => { if (!cancelled) setData(d); })
       .catch((e) => { if (!cancelled) toast.error(e instanceof ApiError ? e.message : String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [siteId, days, q, order, dirn, page]);
+  }, [siteId, days, q, scope, order, dirn, page]);
 
   const setSort = (k: string) => {
     if (order === k) setDirn(dirn === 'desc' ? 'asc' : 'desc');
@@ -358,10 +494,20 @@ function KeywordsPanel({ siteId, days }: { siteId: string; days: number }) {
     <Card>
       <CardContent className='space-y-3 pt-4'>
         <div className='flex flex-wrap items-center gap-2'>
+          <div className='bg-muted flex rounded-lg p-0.5' role='group' aria-label='محدوده کلمات'>
+            <Button size='sm' variant={scope === 'all' ? 'default' : 'ghost'} className='px-2.5' onClick={() => { setScope('all'); setPage(0); }}>همه کوئری‌ها</Button>
+            <Button size='sm' variant={scope === 'tracked' ? 'default' : 'ghost'} className='px-2.5' onClick={() => { setScope('tracked'); setPage(0); }}>کلمات اصلی (ردیابی‌شده)</Button>
+          </div>
           <Input value={q} onChange={(e) => { setQ(e.target.value); setPage(0); }} placeholder='جست‌وجوی کلمه کلیدی…' className='w-56' />
           {data?.window && <span className='text-muted-foreground text-xs' dir='ltr'>{data.window.from} → {data.window.to}</span>}
           <span className='text-muted-foreground ms-auto text-xs'>{fa.format(data?.total ?? 0)} کوئری</span>
         </div>
+        {scope === 'tracked' && data?.status === 'OK' && data.total === 0 && (
+          <p className='text-muted-foreground text-xs'>
+            هنوز کلمه‌ای در «کلمات کلیدی» این سایت ثبت نشده یا در این بازه داده GSC ندارد — از صفحه{' '}
+            <a className='underline underline-offset-2' href={`/dashboard/keywords?site=${encodeURIComponent(siteId)}`}>کلمات کلیدی</a> اضافه کنید.
+          </p>
+        )}
         <div className='overflow-x-auto rounded-md border'>
           <Table>
             <TableHeader>
@@ -511,6 +657,10 @@ function OpportunitiesPanel({ siteId, refreshKey }: { siteId: string; refreshKey
               {s.type_fa} ({fa.format(s.count)})
             </button>
           ))}
+          <Button size='sm' variant='outline' className='ms-auto' nativeButton={false}
+            render={<a href={`/dashboard/content-planner?site=${encodeURIComponent(siteId)}`} />}>
+            ساخت محتوا از این فرصت‌ها در پلنر ←
+          </Button>
         </div>
         <div className='overflow-x-auto rounded-md border'>
           <Table>
@@ -601,7 +751,7 @@ function BacklinksPanel({ siteId, onChanged }: { siteId: string; onChanged: () =
             <TableHeader>
               <TableRow>
                 <TableHead>دامنه مبدأ</TableHead><TableHead>URL مبدأ</TableHead><TableHead>مقصد</TableHead><TableHead>انکر</TableHead>
-                <TableHead>Rel</TableHead><TableHead>وضعیت</TableHead><TableHead>اولین مشاهده</TableHead><TableHead />
+                <TableHead>نوع</TableHead><TableHead>Rel</TableHead><TableHead>وضعیت</TableHead><TableHead>اولین مشاهده</TableHead><TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -613,6 +763,7 @@ function BacklinksPanel({ siteId, onChanged }: { siteId: string; onChanged: () =
                   </TableCell>
                   <TableCell dir='ltr' className='max-w-44 truncate text-xs' title={b.target_url}>{b.target_url}</TableCell>
                   <TableCell className='max-w-40 truncate text-sm' title={b.anchor_text ?? ''}>{b.anchor_text ?? '—'}</TableCell>
+                  <TableCell className='text-xs'>{({ reportage: 'رپورتاژ', guest_post: 'پست مهمان', natural: 'طبیعی' } as Record<string, string>)[b.link_type] ?? 'سایر'}</TableCell>
                   <TableCell className='text-xs' dir='ltr'>{b.rel ?? 'follow'}</TableCell>
                   <TableCell>
                     <Badge variant='outline' className={b.status === 'active' ? 'border-emerald-500/30 text-emerald-700 dark:text-emerald-300' : b.status === 'lost' ? 'border-red-500/30 text-red-700 dark:text-red-300' : ''}>
@@ -647,6 +798,15 @@ function BacklinksPanel({ siteId, onChanged }: { siteId: string; onChanged: () =
             <Field label='URL صفحه‌ای که به ما لینک داده' ltr value={form.source_url} onChange={(v) => setForm({ ...form, source_url: v })} placeholder='https://example-news.com/post' />
             <Field label='URL مقصد در سایت ما' ltr value={form.target_url} onChange={(v) => setForm({ ...form, target_url: v })} placeholder='https://oursite.com/service' />
             <Field label='انکرتکست' value={form.anchor_text} onChange={(v) => setForm({ ...form, anchor_text: v })} />
+            <div className='space-y-1.5'>
+              <Label>نوع بک‌لینک</Label>
+              <NativeSelect value={form.link_type} onChange={(e) => setForm({ ...form, link_type: e.target.value })}>
+                <NativeSelectOption value='reportage'>رپورتاژ</NativeSelectOption>
+                <NativeSelectOption value='guest_post'>پست مهمان</NativeSelectOption>
+                <NativeSelectOption value='natural'>طبیعی</NativeSelectOption>
+                <NativeSelectOption value='generic'>سایر</NativeSelectOption>
+              </NativeSelect>
+            </div>
             <div className='grid grid-cols-2 gap-3'>
               <div className='space-y-1.5'>
                 <Label>Rel</Label>

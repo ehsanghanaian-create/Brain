@@ -349,6 +349,7 @@ def ga4_sync_status(site_id: str, site: Site = Depends(require_site), eng: Engin
 class AutoSyncUpdate(BaseModel):
     enabled: bool | None = None
     interval_hours: int | None = Field(default=None, ge=1, le=168)
+    interval_minutes: int | None = Field(default=None, ge=10, le=10080)
 
 
 @router.get("/{site_id}/auto-sync")
@@ -362,8 +363,29 @@ def auto_sync_get(site_id: str, site: Site = Depends(require_site), eng: Engine 
 def auto_sync_put(site_id: str, body: AutoSyncUpdate, site: Site = Depends(require_site), eng: Engine = Depends(engine)) -> dict:
     """Toggle automatic refresh / change the interval (stored in the existing site_settings table)."""
     from ...automation.scheduler import plan_for_site, save_auto_sync_settings
-    save_auto_sync_settings(eng, site_id, enabled=body.enabled, interval_hours=body.interval_hours)
+    save_auto_sync_settings(eng, site_id, enabled=body.enabled, interval_hours=body.interval_hours, interval_minutes=body.interval_minutes)
     return {"site_id": site_id, **plan_for_site(eng, site_id)}
+
+
+@router.post("/{site_id}/refresh")
+def refresh_now(site_id: str, site: Site = Depends(require_site), eng: Engine = Depends(engine), q: JobQueue = Depends(job_queue)) -> dict:
+    """«بروزرسانی الان»: enqueue the SAME pipeline jobs the sync buttons use, for every configured integration."""
+    from ...automation.scheduler import plan_for_site
+    plan = plan_for_site(eng, site_id)
+    queued: list[dict] = []
+    skipped: list[str] = []
+    for kind, src in plan["sources"].items():
+        if not src["configured"]:
+            skipped.append(kind)
+            continue
+        if kind == "wordpress":
+            r = _queue_wordpress_sync(site_id, eng, q, stage="full", crawl=True, max_urls=None, reason="manual_refresh")
+        elif kind == "gsc":
+            r = _queue_gsc_sync(site_id, eng, q, days=None, reason="manual_refresh")
+        else:
+            r = _queue_ga4_sync(site_id, eng, q, days=None, reason="manual_refresh")
+        queued.append({"kind": kind, **{k: r.get(k) for k in ("status", "run_id", "job_id")}})
+    return {"site_id": site_id, "queued": queued, "skipped": skipped}
 
 
 @router.get("/{site_id}/wordpress/publish-capability")

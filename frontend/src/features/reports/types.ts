@@ -25,13 +25,14 @@ export interface ReportSummary {
     window?: { from: string; to: string; days: number };
     totals?: { clicks: number; impressions: number; ctr: number | null; position: number | null };
     previous?: { clicks: number; impressions: number; ctr: number | null; position: number | null } | null;
-    timeseries?: { date: string; clicks: number; impressions: number }[];
+    timeseries?: { date: string; clicks: number; impressions: number; position: number | null }[];
   };
   ga4: {
     available: boolean;
     date_from?: string;
     date_to?: string;
     totals?: { sessions: number; users: number; conversions: number; engagement_rate: number | null };
+    timeseries?: { date: string; sessions: number; users: number }[];
   };
   counts: {
     indexable_pages: number;
@@ -46,8 +47,32 @@ export interface ReportSummary {
   main_keyword: { keyword: string | null; performance: ReportKeywordPerf | null };
   freshness: {
     last_runs: Record<string, string>;
-    auto_sync: { enabled: boolean; interval_hours: number; sources: Record<string, { configured: boolean; last_success: string | null; next_at: string | null; due: boolean }> };
+    auto_sync: { enabled: boolean; interval_minutes: number; interval_hours: number; sources: Record<string, { configured: boolean; last_success: string | null; next_at: string | null; due: boolean }> };
   };
+}
+
+export interface ReportConnection {
+  configured: boolean;
+  connected: boolean;
+  tested_status: string | null;
+  tested_at: string | null;
+  last_success: string | null;
+  next_at: string | null;
+}
+
+export interface SyncHistoryRow {
+  source: string;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  rows_written: number | null;
+  duration_seconds: number | null;
+}
+
+export interface ReportFull extends ReportSummary {
+  connections: Record<'gsc' | 'wordpress' | 'ga4', ReportConnection>;
+  sync_history: SyncHistoryRow[];
+  sync_running: boolean;
 }
 
 export interface ReportMainKeyword {
@@ -69,6 +94,8 @@ export interface ReportKeywordRow {
 
 export interface ReportKeywordList {
   status: 'OK' | 'NO_GSC_DATA';
+  scope?: 'all' | 'tracked';
+  tracked_count?: number | null;
   window?: { from: string; to: string; days: number; previous: { from: string; to: string } };
   total: number;
   items: ReportKeywordRow[];

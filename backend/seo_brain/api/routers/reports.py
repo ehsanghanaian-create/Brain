@@ -106,8 +106,9 @@ def _gsc_block(cx, site_id: str, days: int) -> dict[str, Any]:
     cur = _one(cx, _GSC_TOTALS, s=site_id, a=cur_from, b=cur_to) or {}
     prev = _one(cx, _GSC_TOTALS, s=site_id, a=prev_from, b=prev_to) or {}
     series = _rows(cx, """
-        SELECT date, SUM(clicks) AS clicks, SUM(impressions) AS impressions FROM gsc_daily
-        WHERE site_id=:s AND date BETWEEN :a AND :b GROUP BY date ORDER BY date""",
+        SELECT date, SUM(clicks) AS clicks, SUM(impressions) AS impressions,
+               CASE WHEN SUM(impressions)>0 THEN ROUND(SUM(position*impressions)/SUM(impressions), 2) END AS position
+        FROM gsc_daily WHERE site_id=:s AND date BETWEEN :a AND :b GROUP BY date ORDER BY date""",
         s=site_id, a=cur_from, b=cur_to)
     return {"available": True, "date_from": lo, "date_to": hi,
             "window": {"from": cur_from, "to": cur_to, "days": days},
@@ -156,6 +157,55 @@ def _main_keyword(cx, site_id: str) -> str | None:
         return None
 
 
+# ---------------------------------------------------------------- aggregate report
+
+CONNECTION_KINDS = ("gsc", "wordpress", "ga4")
+
+
+def _connections(cx, site_id: str, plan: dict[str, Any]) -> dict[str, Any]:
+    """Connected/disconnected per integration: configured (from the scheduler plan) + last tested state."""
+    tested = {r["kind"]: r for r in _rows(cx,
+        "SELECT kind, status, tested_at FROM site_connections WHERE site_id=:s", s=site_id)}
+    out: dict[str, Any] = {}
+    for kind in CONNECTION_KINDS:
+        src = (plan.get("sources") or {}).get(kind) or {}
+        t = tested.get(kind)
+        out[kind] = {"configured": bool(src.get("configured")),
+                     "connected": bool(src.get("configured")) and (t or {}).get("status") != "failed",
+                     "tested_status": (t or {}).get("status"), "tested_at": (t or {}).get("tested_at"),
+                     "last_success": src.get("last_success"), "next_at": src.get("next_at")}
+    return out
+
+
+def _sync_history(cx, site_id: str, limit: int = 15) -> list[dict[str, Any]]:
+    rows = _rows(cx, """
+        SELECT source, status, started_at, finished_at, rows_written FROM sync_runs
+        WHERE site_id=:s AND source IN ('wordpress_pipeline','gsc_pipeline','ga4_pipeline','wordpress','gsc','ga4','analysis','graph')
+        ORDER BY started_at DESC, id DESC LIMIT :lim""", s=site_id, lim=limit)
+    for r in rows:
+        dur = None
+        try:
+            if r["started_at"] and r["finished_at"]:
+                a = datetime.fromisoformat(r["started_at"].replace("Z", "+00:00"))
+                b = datetime.fromisoformat(r["finished_at"].replace("Z", "+00:00"))
+                dur = max(0, round((b - a).total_seconds()))
+        except ValueError:
+            pass
+        r["duration_seconds"] = dur
+    return rows
+
+
+@router.get("")
+def full_report(site_id: str, days: int = Query(default=28, ge=7, le=365), eng: Engine = Depends(engine)) -> dict[str, Any]:
+    """گزارش تجمیعی هر سایت: summary + وضعیت اتصال‌ها + تاریخچه همگام‌سازی — یک فراخوانی برای کل صفحه گزارش."""
+    body = report_summary(site_id, days, eng)
+    with eng.connect() as cx:
+        connections = _connections(cx, site_id, body["freshness"]["auto_sync"])
+        history = _sync_history(cx, site_id)
+    running = any(r["status"] in ("queued", "running") for r in history)
+    return {**body, "connections": connections, "sync_history": history, "sync_running": running}
+
+
 # ---------------------------------------------------------------- summary
 
 @router.get("/summary")
@@ -171,9 +221,12 @@ def report_summary(site_id: str, days: int = Query(default=28, ge=7, le=365), en
                    CASE WHEN SUM(sessions)>0 THEN SUM(engagement_rate*sessions)/SUM(sessions) END AS engagement_rate
             FROM ga4_daily WHERE site_id=:s AND source='page'""", s=site_id)
         if g and g.get("sessions"):
+            ga4_series = _rows(cx, """
+                SELECT date, SUM(sessions) AS sessions, SUM(total_users) AS users FROM ga4_daily
+                WHERE site_id=:s AND source='page' GROUP BY date ORDER BY date""", s=site_id)
             ga4 = {"available": True, "date_from": g["a"], "date_to": g["b"], "totals": {
                 "sessions": g["sessions"], "users": g["users"], "conversions": g["conversions"],
-                "engagement_rate": g["engagement_rate"]}}
+                "engagement_rate": g["engagement_rate"]}, "timeseries": ga4_series}
 
         sev = {r["severity"]: r["n"] for r in _rows(cx,
             "SELECT severity, COUNT(*) AS n FROM seo_problems WHERE site_id=:s GROUP BY severity", s=site_id)}
@@ -252,14 +305,18 @@ def set_main_keyword(site_id: str, body: MainKeywordIn, eng: Engine = Depends(en
 @router.get("/keywords")
 def keyword_performance(site_id: str, days: int = Query(default=28, ge=7, le=365),
                         q: str | None = None, min_impressions: int = Query(default=0, ge=0),
+                        scope: Literal["all", "tracked"] = "all",
                         order: Literal["clicks", "impressions", "position", "ctr", "change"] = "clicks",
                         dir: Literal["asc", "desc"] = "desc",
                         limit: int = Query(default=50, ge=1, le=500), offset: int = Query(default=0, ge=0),
                         eng: Engine = Depends(engine)) -> dict[str, Any]:
     with eng.connect() as cx:
+        tracked: set[str] | None = None
+        if scope == "tracked":
+            tracked = {r["keyword"] for r in _rows(cx, "SELECT keyword FROM keywords WHERE site_id=:s", s=site_id)}
         lo, hi = _gsc_bounds(cx, site_id)
         if not hi:
-            return {"status": "NO_GSC_DATA", "items": [], "total": 0}
+            return {"status": "NO_GSC_DATA", "items": [], "total": 0, "tracked_count": len(tracked or [])}
         cur_from, cur_to, prev_from, prev_to = _win(hi, days)
         like = f"%{q.strip()}%" if q and q.strip() else None
         rows = _rows(cx, f"""
@@ -286,13 +343,16 @@ def keyword_performance(site_id: str, days: int = Query(default=28, ge=7, le=365
             LEFT JOIN pg ON pg.query = cur.query AND pg.rn = 1""",
             s=site_id, a=cur_from, b=cur_to, pa=prev_from, pb=prev_to, mi=min_impressions,
             **({"like": like} if like else {}))
+        if tracked is not None:
+            rows = [r for r in rows if r["query"] in tracked]
         key = {"clicks": lambda r: r["clicks"] or 0, "impressions": lambda r: r["impressions"] or 0,
                "position": lambda r: r["position"] if r["position"] is not None else 9999,
                "ctr": lambda r: r["ctr"] or 0, "change": lambda r: r["change"] if r["change"] is not None else -9999}[order]
         rows.sort(key=key, reverse=(dir == "desc"))
         total = len(rows)
-        return {"status": "OK", "window": {"from": cur_from, "to": cur_to, "days": days,
-                                            "previous": {"from": prev_from, "to": prev_to}},
+        return {"status": "OK", "scope": scope, "tracked_count": len(tracked) if tracked is not None else None,
+                "window": {"from": cur_from, "to": cur_to, "days": days,
+                           "previous": {"from": prev_from, "to": prev_to}},
                 "total": total, "items": rows[offset:offset + limit]}
 
 

@@ -10,6 +10,12 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false, nocache: true }
 };
 
-export default function AdsDataPage() {
-  return <main className='bg-background min-h-screen'><AdsDataDashboard siteId={defaultSiteId} siteLabel={defaultSiteLabel} /></main>;
+export const dynamic = 'force-dynamic';
+
+/** «داده زنده تبلیغات» — سایت از ?site= می‌آید (پیش‌فرض: env یا مدیران خودرو). */
+export default async function AdsDataPage({ searchParams }: { searchParams: Promise<{ site?: string }> }) {
+  const { site } = await searchParams;
+  const siteId = site?.trim() || defaultSiteId;
+  const siteLabel = siteId === defaultSiteId ? defaultSiteLabel : siteId;
+  return <main className='bg-background min-h-screen'><AdsDataDashboard siteId={siteId} siteLabel={siteLabel} /></main>;
 }

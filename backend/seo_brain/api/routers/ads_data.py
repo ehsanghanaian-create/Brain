@@ -162,6 +162,7 @@ def _iso(value: datetime) -> str:
 
 
 def _allowed_sites() -> set[str]:
+    # A tenant must opt in explicitly. Cross-project defaults are unsafe.
     raw = env("ADS_COLLECTOR_SITES", "modirankhodro-emdad.com,renaultemdad.com") or ""
     return {item.strip().lower() for item in raw.split(",") if item.strip()}
 
@@ -464,26 +465,13 @@ def _geo_lookup(ip: str) -> dict[str, Any]:
 def _attach_geo(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for row in items:
         row.update(_geo_lookup(row["ip_address"]))
-        # Fold datacenter/proxy origin into the risk score — only for IPs whose
-        # address is reliable (same gate as _risk_score); otherwise the flags
-        # would describe a CDN edge, not the visitor.
+        # Hosting/VPN/location are context, not proof of click fraud. Keep the
+        # flags visible for investigation but never increase risk from them
+        # alone; legitimate staff and customers frequently use VPNs.
         if "browser_timezone" in row:
-            row.setdefault("geo_tz_mismatch", False)
-        if row.get("ip_confidence") in {"trusted_proxy", "direct_peer"}:
-            extra, reasons = 0, list(row.get("risk_reasons") or [])
-            if row.get("geo_hosting"):
-                extra += 40
-                reasons.append("datacenter_ip")
-            if row.get("geo_proxy"):
-                extra += 40
-                reasons.append("proxy_ip")
-            if "browser_timezone" in row and _tz_country_mismatch(row.get("geo_country_code"), row.get("browser_timezone")):
-                extra += 30
-                reasons.append("tz_country_mismatch")
-                row["geo_tz_mismatch"] = True
-            if extra:
-                row["risk_score"] = min(100, int(row.get("risk_score") or 0) + extra)
-                row["risk_reasons"] = reasons
+            row["geo_tz_mismatch"] = _tz_country_mismatch(
+                row.get("geo_country_code"), row.get("browser_timezone")
+            )
     return items
 
 
@@ -587,6 +575,9 @@ def collect_event(payload: AdsEventIn, eng: Engine = Depends(ads_engine)) -> dic
         ), row)
     accepted = bool(result.rowcount)
     _audit_event(row, accepted=accepted, duplicate=not accepted)
+    if accepted:
+        from ...ads.guard import safe_process
+        safe_process(row)
     return {"accepted": accepted, "duplicate": not accepted, "received_at": received}
 
 
@@ -626,14 +617,14 @@ def _cutoff(hours: int) -> str:
 
 @router.get("/sites")
 def collector_sites(eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
-    """Allowed collector sites + per-site event counts — drives the dashboard's site selector."""
+    """Allowed collector sites + per-site event counts — drives the site switcher."""
     with eng.connect() as cx:
         counts = dict(cx.execute(text("SELECT site_id, COUNT(*) FROM ads_click_events GROUP BY site_id")).all())
     return {"sites": [{"site_id": s, "events": int(counts.get(s, 0))} for s in sorted(_allowed_sites())]}
 
 
 @router.get("/summary")
-def summary(hours: int = Query(default=24, ge=0, le=87_600), site_id: str = Query(min_length=3, max_length=120),
+def summary(hours: int = Query(default=24, ge=0, le=87_600), site_id: str = Query(default="modirankhodro-emdad.com", min_length=3, max_length=120),
             eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
     since = _cutoff(hours)
     five_minutes = _iso(_utcnow() - timedelta(minutes=5))
@@ -724,9 +715,155 @@ def summary(hours: int = Query(default=24, ge=0, le=87_600), site_id: str = Quer
     }
 
 
+@router.get("/alerts")
+def live_alerts(site_id: str = Query(default="modirankhodro-emdad.com", min_length=3, max_length=120),
+                eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
+    """A lightweight, report-window-independent feed for the office monitor.
+
+    Phone-click events include every acquisition channel. Click-fraud suspects
+    require a confirmed Google Ads click id and are grouped over the last five
+    minutes, so organic/direct/internal traffic cannot raise an attack alert.
+    """
+    now = _utcnow()
+    five_minutes = _iso(now - timedelta(minutes=5))
+    fifteen_minutes = _iso(now - timedelta(minutes=15))
+    history_start = _iso(now - timedelta(days=14))
+    with eng.connect() as cx:
+        phone_events = [dict(row) for row in cx.execute(text("""
+            SELECT id, received_at,
+                   CASE WHEN COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>''
+                        THEN 'google_ads_confirmed' ELSE 'other' END AS attribution
+            FROM ads_click_events
+            WHERE site_id=:site_id AND event_type='tel_click'
+            ORDER BY id DESC LIMIT 20
+        """), {"site_id": site_id}).mappings()]
+        suspects = [dict(row) for row in cx.execute(text("""
+            SELECT COALESCE(
+                       MAX(CASE WHEN CAST(ip_resolution_version AS INTEGER)>=3 THEN ip_address END),
+                       MAX(ip_address)
+                   ) AS ip_address,
+                   ip_hash,
+                   COUNT(DISTINCT CASE
+                       WHEN COALESCE(gclid,'')<>'' THEN 'g:' || gclid
+                       WHEN COALESCE(gbraid,'')<>'' THEN 'b:' || gbraid
+                       WHEN COALESCE(wbraid,'')<>'' THEN 'w:' || wbraid
+                   END) AS click_ids,
+                   COUNT(DISTINCT session_id) AS sessions,
+                   COUNT(DISTINCT CASE WHEN event_type='tel_click' THEN session_id END) AS calls,
+                   SUM(CASE WHEN event_type='landing' THEN 1 ELSE 0 END) AS landings,
+                   MIN(received_at) AS first_seen,
+                   GROUP_CONCAT(DISTINCT NULLIF(landing_path,'')) AS landing_paths_csv,
+                   MAX(received_at) AS last_seen
+            FROM ads_click_events
+            WHERE site_id=:site_id AND received_at>=:five
+              AND (COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>'')
+            GROUP BY ip_hash
+            HAVING click_ids>=3
+            ORDER BY click_ids DESC, last_seen DESC LIMIT 10
+        """), {"site_id": site_id, "five": five_minutes}).mappings()]
+        ad_entries = [dict(row) for row in cx.execute(text("""
+            SELECT MAX(id) AS id, MAX(received_at) AS received_at,
+                   MAX(landing_path) AS landing_path, MAX(ip_hash) AS ip_hash
+            FROM ads_click_events
+            WHERE site_id=:site_id AND received_at>=:current
+              AND (COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>'')
+            GROUP BY CASE
+                WHEN COALESCE(gclid,'')<>'' THEN 'g:' || gclid
+                WHEN COALESCE(gbraid,'')<>'' THEN 'b:' || gbraid
+                ELSE 'w:' || wbraid END
+            ORDER BY id DESC LIMIT 20
+        """), {"site_id": site_id, "current": fifteen_minutes}).mappings()]
+        current = dict(cx.execute(text("""
+            SELECT COUNT(DISTINCT CASE
+                       WHEN COALESCE(gclid,'')<>'' THEN 'g:' || gclid
+                       WHEN COALESCE(gbraid,'')<>'' THEN 'b:' || gbraid
+                       WHEN COALESCE(wbraid,'')<>'' THEN 'w:' || wbraid END) AS click_ids,
+                   COUNT(DISTINCT CASE WHEN event_type='tel_click' THEN session_id END) AS calls,
+                   COUNT(DISTINCT ip_hash) AS ips,
+                   COUNT(DISTINCT session_id) AS sessions
+            FROM ads_click_events
+            WHERE site_id=:site_id AND received_at>=:current
+              AND (COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>'')
+        """), {"site_id": site_id, "current": fifteen_minutes}).mappings().one())
+        history = [dict(row) for row in cx.execute(text("""
+            SELECT CAST(strftime('%s', received_at) AS INTEGER) / 900 AS bucket,
+                   COUNT(DISTINCT CASE
+                       WHEN COALESCE(gclid,'')<>'' THEN 'g:' || gclid
+                       WHEN COALESCE(gbraid,'')<>'' THEN 'b:' || gbraid
+                       WHEN COALESCE(wbraid,'')<>'' THEN 'w:' || wbraid END) AS click_ids,
+                   COUNT(DISTINCT CASE WHEN event_type='tel_click' THEN session_id END) AS calls
+            FROM ads_click_events
+            WHERE site_id=:site_id AND received_at>=:history AND received_at<:current
+              AND (COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>'')
+            GROUP BY bucket HAVING click_ids>0
+        """), {"site_id": site_id, "history": history_start, "current": fifteen_minutes}).mappings()]
+
+    for row in suspects:
+        row["level"] = (
+            "danger"
+            if int(row.get("click_ids") or 0) >= 5 and int(row.get("calls") or 0) == 0
+            else "review"
+        )
+        row["landing_paths"] = [path for path in str(row.pop("landing_paths_csv") or "").split(",") if path][:5]
+    from ...ads.guard import status as _guard_status
+    guard = _guard_status(site_id=site_id)
+    guard_active = any(now.timestamp() - item["at"] < 900 for item in guard["incidents"])
+    volumes = [int(row.get("click_ids") or 0) for row in history]
+    historical_clicks = sum(volumes)
+    historical_calls = sum(int(row.get("calls") or 0) for row in history)
+    baseline_rate = historical_calls / historical_clicks if historical_clicks else 0.0
+    average_volume = sum(volumes) / len(volumes) if volumes else 0.0
+    variance = sum((value - average_volume) ** 2 for value in volumes) / len(volumes) if volumes else 0.0
+    dynamic_threshold = max(5, math.ceil(average_volume + 2 * math.sqrt(variance)))
+    current_clicks = int(current.get("click_ids") or 0)
+    current_calls = int(current.get("calls") or 0)
+    expected_calls = current_clicks * baseline_rate
+    enough_history = historical_clicks >= 20 and len(volumes) >= 5
+    volume_spike = current_clicks >= dynamic_threshold
+    no_call_anomaly = enough_history and current_calls == 0 and expected_calls >= 1.5
+    distributed_burst = int(current.get("ips") or 0) >= 5 and current_clicks >= dynamic_threshold
+    anomaly_level = (
+        "danger" if no_call_anomaly and (volume_spike or distributed_burst)
+        else "review" if no_call_anomaly or distributed_burst
+        else "safe"
+    )
+    status = (
+        "danger" if guard_active or anomaly_level == "danger" or any(row["level"] == "danger" for row in suspects)
+        else "review" if anomaly_level == "review" or suspects
+        else "safe"
+    )
+    return {
+        "generated_at": _iso(_utcnow()),
+        "site_id": site_id,
+        "window_minutes": 5,
+        "status": status,
+        "guard": guard,
+        "phone_events": phone_events,
+        "ad_entries": ad_entries,
+        "suspects": suspects,
+        "traffic_anomaly": {
+            "level": anomaly_level,
+            "current_click_ids": current_clicks,
+            "current_calls": current_calls,
+            "current_ips": int(current.get("ips") or 0),
+            "current_sessions": int(current.get("sessions") or 0),
+            "baseline_call_rate": round(baseline_rate, 4),
+            "expected_calls": round(expected_calls, 2),
+            "dynamic_click_threshold": dynamic_threshold,
+            "history_windows": len(volumes),
+            "enough_history": enough_history,
+            "reasons": [name for name, active in (
+                ("volume_spike", volume_spike),
+                ("calls_below_baseline", no_call_anomaly),
+                ("many_distinct_ips", distributed_burst),
+            ) if active],
+        },
+    }
+
+
 @router.get("/pages")
 def page_insights(hours: int = Query(default=24, ge=0, le=87_600),
-                  site_id: str = Query(min_length=3, max_length=120),
+                  site_id: str = Query(default="modirankhodro-emdad.com", min_length=3, max_length=120),
                   limit: int = Query(default=50, ge=1, le=200),
                   eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
     """Aggregate page and scroll behavior without returning visitor identifiers."""
@@ -780,18 +917,23 @@ def page_insights(hours: int = Query(default=24, ge=0, le=87_600),
 
 
 def _risk_score(row: dict[str, Any]) -> tuple[int, list[str]]:
+    # Click-fraud risk is meaningful only for traffic proven to originate from
+    # Google Ads. Organic/direct/internal activity remains visible in logs but
+    # must never raise a click-fraud alert.
+    if int(row.get("google_ads_confirmed_events") or 0) <= 0:
+        return 0, []
     if row.get("ip_confidence") not in {"trusted_proxy", "direct_peer"}:
         return 0, ["ip_not_reliable"]
     score, reasons = 0, []
-    if int(row.get("landings") or 0) >= 10:
+    if int(row.get("ads_landings") or 0) >= 10:
         score += 30; reasons.append("landing_velocity")
-    elif int(row.get("landings") or 0) >= 5:
+    elif int(row.get("ads_landings") or 0) >= 5:
         score += 15; reasons.append("landing_velocity_watch")
-    if int(row.get("tel_clicks") or 0) >= 3:
+    if int(row.get("ads_tel_clicks") or 0) >= 3:
         score += 35; reasons.append("tel_click_burst")
-    if int(row.get("sessions") or 0) >= 8:
+    if int(row.get("ads_sessions") or 0) >= 8:
         score += 20; reasons.append("many_sessions")
-    if int(row.get("events_5m") or 0) >= 15:
+    if int(row.get("ads_events_5m") or 0) >= 15:
         score += 35; reasons.append("five_minute_burst")
     return min(score, 100), reasons
 
@@ -811,12 +953,19 @@ def _ip_rows(cx, site_id: str, since: str, limit: int) -> list[dict[str, Any]]:
                COUNT(DISTINCT gclid) AS gclids,
                SUM(CASE WHEN COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>'' THEN 1 ELSE 0 END) AS google_ads_confirmed_events,
                SUM(CASE WHEN COALESCE(campaign_id,'')<>'' OR COALESCE(ad_group_id,'')<>'' OR COALESCE(creative_id,'')<>'' THEN 1 ELSE 0 END) AS google_ads_likely_events,
+               COUNT(DISTINCT CASE WHEN (COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>'') THEN session_id END) AS ads_sessions,
+               SUM(CASE WHEN event_type='landing' AND (COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>'') THEN 1 ELSE 0 END) AS ads_landings,
+               SUM(CASE WHEN event_type='tel_click' AND (COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>'') THEN 1 ELSE 0 END) AS ads_tel_clicks,
                SUM(CASE WHEN event_type='landing' THEN 1 ELSE 0 END) AS landings,
                SUM(CASE WHEN event_type='tel_click' THEN 1 ELSE 0 END) AS tel_clicks,
                SUM(CASE WHEN event_type='form_submit' THEN 1 ELSE 0 END) AS form_submits,
                SUM(CASE WHEN received_at>=:five AND event_type NOT IN
                    ('heartbeat','scroll','page_exit','page_view','section_view')
                    THEN 1 ELSE 0 END) AS events_5m,
+               SUM(CASE WHEN received_at>=:five
+                         AND (COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>'')
+                         AND event_type NOT IN ('heartbeat','scroll','page_exit','page_view','section_view')
+                        THEN 1 ELSE 0 END) AS ads_events_5m,
                MAX(user_agent) AS latest_user_agent,
                MAX(page_path) AS latest_page_path,
                MAX(referrer) AS latest_referrer
@@ -832,7 +981,7 @@ def _ip_rows(cx, site_id: str, since: str, limit: int) -> list[dict[str, Any]]:
 
 @router.get("/ips")
 def ips(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query(default=200, ge=1, le=10_000),
-        site_id: str = Query(min_length=3, max_length=120), eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
+        site_id: str = Query(default="modirankhodro-emdad.com", min_length=3, max_length=120), eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
     with eng.connect() as cx:
         items = _ip_rows(cx, site_id, _cutoff(hours), limit)
     items = _attach_geo(items)
@@ -841,7 +990,7 @@ def ips(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query(defa
 
 @router.get("/ips.csv")
 def ips_csv(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query(default=10000, ge=1, le=100_000),
-            site_id: str = Query(min_length=3, max_length=120), eng: Engine = Depends(ads_engine)) -> Response:
+            site_id: str = Query(default="modirankhodro-emdad.com", min_length=3, max_length=120), eng: Engine = Depends(ads_engine)) -> Response:
     with eng.connect() as cx:
         items = _ip_rows(cx, site_id, _cutoff(hours), limit)
     items = _attach_geo(items)
@@ -911,7 +1060,7 @@ def _event_rows(cx, site_id: str, hours: int, limit: int, offset: int = 0,
 @router.get("/events")
 def events(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query(default=100, ge=1, le=1000),
            offset: int = Query(default=0, ge=0, le=10_000_000),
-           site_id: str = Query(min_length=3, max_length=120), event_type: str | None = None,
+           site_id: str = Query(default="modirankhodro-emdad.com", min_length=3, max_length=120), event_type: str | None = None,
            q: str | None = Query(default=None, max_length=500),
            attribution: str | None = Query(default=None, max_length=20),
            eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
@@ -1016,12 +1165,13 @@ def _session_rows(cx, site_id: str, since: str) -> list[dict[str, Any]]:
         s["distinct_pages"] = len(s.pop("_pages"))
         s["ads_attribution"] = _ads_attribution(s)
         score, reasons = 0, []
-        if s["tel_clicks"] >= 3:
-            score += 35; reasons.append("tel_click_burst")
-        if s["events"] >= 30:
-            score += 25; reasons.append("session_flood")
-        elif s["events"] >= 15:
-            score += 12; reasons.append("session_flood")
+        if s["ads_attribution"] == "google_ads_confirmed":
+            if s["tel_clicks"] >= 3:
+                score += 35; reasons.append("tel_click_burst")
+            if s["events"] >= 30:
+                score += 25; reasons.append("session_flood")
+            elif s["events"] >= 15:
+                score += 12; reasons.append("session_flood")
         s["risk_score"] = min(100, score)
         s["risk_reasons"] = reasons
         items.append(s)
@@ -1046,9 +1196,11 @@ def _visitor_stats(cx, site_id: str, since: str) -> dict[str, dict[str, Any]]:
     also count how many of those IPs are 'flagged' (datacenter/proxy/foreign) so
     normal Iranian-mobile IP rotation is not mistaken for a bot."""
     rows = cx.execute(text("""
-        SELECT visitor_id, ip_hash, ip_address, ip_resolution_version, session_id, event_type
+        SELECT visitor_id, ip_hash, ip_address, ip_resolution_version, session_id, event_type,
+               gclid, gbraid, wbraid
         FROM ads_click_events
         WHERE site_id=:s AND received_at>=:since AND COALESCE(visitor_id,'')<>''
+          AND (COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>'')
     """), {"s": site_id, "since": since}).mappings()
     acc: dict[str, dict[str, Any]] = {}
     for r in rows:
@@ -1056,7 +1208,7 @@ def _visitor_stats(cx, site_id: str, since: str) -> dict[str, dict[str, Any]]:
         st = acc.get(vid)
         if st is None:
             st = acc[vid] = {"events": 0, "landings": 0, "tel_clicks": 0,
-                             "_ips": {}, "_sessions": set()}
+                             "_ips": {}, "_sessions": set(), "_click_ids": set()}
         st["events"] += 1
         et = r["event_type"]
         if et == "landing":
@@ -1068,11 +1220,16 @@ def _visitor_stats(cx, site_id: str, since: str) -> dict[str, dict[str, Any]]:
             st["_ips"][r["ip_hash"]] = r["ip_address"]
         if r.get("session_id"):
             st["_sessions"].add(r["session_id"])
+        # A braid can accompany the same GCLID and is not a unique click key.
+        # Browser repeat-click scoring uses distinct GCLIDs only, within this site.
+        if r.get("gclid"):
+            st["_click_ids"].add("g:" + r["gclid"])
     out: dict[str, dict[str, Any]] = {}
     for vid, st in acc.items():
         flagged = sum(1 for ip in st["_ips"].values() if _ip_is_flagged(ip))
         out[vid] = {"events": st["events"], "landings": st["landings"], "tel_clicks": st["tel_clicks"],
-                    "ips": len(st["_ips"]), "sessions": len(st["_sessions"]), "flagged_ips": flagged}
+                    "ips": len(st["_ips"]), "sessions": len(st["_sessions"]),
+                    "click_ids": len(st["_click_ids"]), "flagged_ips": flagged}
     return out
 
 
@@ -1085,21 +1242,23 @@ def _visitor_risk(stat: dict[str, Any] | None) -> tuple[int, list[str]]:
     boost, reasons = 0, []
     flagged = int(stat.get("flagged_ips") or 0)
     ips = int(stat.get("ips") or 0)
-    landings = int(stat.get("landings") or 0)
-    if flagged >= 2:
+    click_ids = int(stat.get("click_ids") or 0)
+    # Network changes matter only together with repeated, distinct Ads click
+    # identifiers. VPN use or a datacenter IP by itself must remain contextual.
+    if flagged >= 2 and click_ids >= 4:
         boost += 40; reasons.append("visitor_ip_rotation")
-    elif flagged == 1 and ips >= 2:
+    elif flagged == 1 and ips >= 2 and click_ids >= 4:
         boost += 15; reasons.append("visitor_multi_ip")
-    if landings >= 6:
+    if click_ids >= 6:
         boost += 25; reasons.append("visitor_repeat_clicks")
-    elif landings >= 4:
+    elif click_ids >= 4:
         boost += 10; reasons.append("visitor_repeat_clicks")
     return boost, reasons
 
 
 @router.get("/sessions")
 def sessions(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query(default=500, ge=1, le=5000),
-             site_id: str = Query(min_length=3, max_length=120), eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
+             site_id: str = Query(default="modirankhodro-emdad.com", min_length=3, max_length=120), eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
     since = _cutoff(hours)
     with eng.connect() as cx:
         items = _session_rows(cx, site_id, since)
@@ -1111,6 +1270,7 @@ def sessions(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query
         s["visitor_ips"] = int(st["ips"]) if st else 1
         s["visitor_sessions"] = int(st["sessions"]) if st else 1
         s["visitor_landings"] = int(st["landings"]) if st else int(s.get("landings") or 0)
+        s["visitor_click_ids"] = int(st["click_ids"]) if st else 0
         boost, vreasons = _visitor_risk(st)
         if boost:
             s["risk_score"] = min(100, int(s.get("risk_score") or 0) + boost)
@@ -1121,7 +1281,7 @@ def sessions(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query
 
 @router.get("/keywords")
 def keywords(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query(default=300, ge=1, le=2000),
-             site_id: str = Query(min_length=3, max_length=120), eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
+             site_id: str = Query(default="modirankhodro-emdad.com", min_length=3, max_length=120), eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
     """Per matched-keyword performance with a fraud rate derived from the
     per-IP risk score: fraud_rate = share of a keyword's events coming from
     high-risk (>=70) IPs; suspicious = the softer >=35 tier."""
@@ -1194,7 +1354,7 @@ def keywords(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query
 @router.get("/events.csv")
 def events_csv(hours: int = Query(default=0, ge=0, le=87_600),
                limit: int = Query(default=500_000, ge=1, le=500_000),
-               site_id: str = Query(min_length=3, max_length=120), event_type: str | None = None,
+               site_id: str = Query(default="modirankhodro-emdad.com", min_length=3, max_length=120), event_type: str | None = None,
                q: str | None = Query(default=None, max_length=500),
                attribution: str | None = Query(default=None, max_length=20),
                eng: Engine = Depends(ads_engine)) -> Response:
@@ -1209,3 +1369,16 @@ def events_csv(hours: int = Query(default=0, ge=0, le=87_600),
     return Response(stream.getvalue(), media_type="text/csv; charset=utf-8", headers={
         "Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store",
     })
+
+
+@router.get("/guard/status")
+def guard_status(site_id: str | None = None):
+    from ...ads.guard import status
+    return status(site_id=site_id)
+
+
+@router.get("/guard/view")
+def guard_view():
+    from fastapi.responses import HTMLResponse
+    from ...ads.guard import view_html
+    return HTMLResponse(view_html(), headers={"Cache-Control": "no-store"})

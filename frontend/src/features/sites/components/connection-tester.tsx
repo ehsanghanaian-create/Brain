@@ -206,7 +206,7 @@ function DiagnosticsLog({ kind, result, errorDetail }: { kind: ConnectionKind; r
           <ul className='space-y-1'>
             {diags.map((d) => (
               <li key={d.step} className='flex flex-wrap items-center gap-1'>
-                <span className={`inline-block h-2.5 w-2.5 rounded-full ${d.skipped ? 'bg-slate-400' : d.ok ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                <span className={`inline-block h-2.5 w-2.5 rounded-full ${d.skipped ? 'bg-slate-400' : d.ok ? 'bg-emerald-500' : d.step === 'auth' && diags.some((x) => x.step === 'auth_fallback' && x.ok) ? 'bg-amber-500' : 'bg-red-500'}`} />
                 <span className='font-medium'>{d.fa ?? d.step}</span>
                 <span className='text-muted-foreground' dir='ltr'>{d.url}</span>
                 <Badge variant='outline' dir='ltr'>{d.skipped ? 'skipped' : (d.status_code ?? d.error ?? '—')}{d.ms != null ? ` · ${d.ms}ms` : ''}</Badge>

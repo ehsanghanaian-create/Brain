@@ -178,9 +178,16 @@ def resolve_site_by_domain(engine: Engine, domain: str) -> str | None:
     host = (domain or "").strip().lower().removeprefix("www.")
     if not host:
         return None
+    def _h(u: str | None) -> str:
+        try:
+            return (httpx.URL(u).host or "").lower().removeprefix("www.") if u else ""
+        except Exception:
+            return ""
+    wp_match = None
     with engine.connect() as cx:
         for sid, canonical, wp in cx.execute(text("SELECT site_id, canonical_url, wp_url FROM sites")):
-            for u in (canonical, wp):
-                if u and host == (httpx.URL(u).host or "").lower().removeprefix("www."):
-                    return sid
-    return None
+            if host == _h(canonical):
+                return sid          # a canonical match is authoritative
+            if wp_match is None and host == _h(wp):
+                wp_match = sid      # wp_url can be mistyped — keep as fallback only
+    return wp_match

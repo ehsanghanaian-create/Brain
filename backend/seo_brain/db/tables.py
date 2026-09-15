@@ -810,3 +810,62 @@ content_plan_generation_jobs = Table(
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
 )
+
+
+# ----------------------------------------------------------------------------- traffic intel: first-party tracking (migration 0011)
+
+track_keys = Table(
+    "track_keys", metadata,
+    Column("site_id", String, primary_key=True),
+    Column("write_key", String, nullable=False),      # public, site-scoped, write-only
+    Column("hash_secret", String, nullable=False),    # server-only; salts the daily visitor hash
+    Column("enabled", Integer, nullable=False, server_default='1'),
+    Column("created_at", String, nullable=False),
+    Column("rotated_at", String),
+)
+
+track_sessions = Table(
+    "track_sessions", metadata,
+    Column("session_id", String, primary_key=True),
+    Column("site_id", String, nullable=False),
+    Column("visitor_id", String, nullable=False),
+    Column("day", String, nullable=False),
+    Column("started_at", String, nullable=False),
+    Column("last_seen_at", String, nullable=False),
+    Column("landing_path", String, nullable=False, server_default='/'),
+    Column("exit_path", String, nullable=False, server_default=''),
+    Column("referrer_host", String, nullable=False, server_default=''),
+    Column("channel", String, nullable=False, server_default='direct'),   # organic | paid | referral | social | direct
+    Column("search_engine", String, nullable=False, server_default=''),
+    Column("utm_source", String, nullable=False, server_default=''),
+    Column("utm_medium", String, nullable=False, server_default=''),
+    Column("utm_campaign", String, nullable=False, server_default=''),
+    Column("utm_term", String, nullable=False, server_default=''),
+    Column("gclid", String, nullable=False, server_default=''),
+    Column("device", String, nullable=False, server_default='desktop'),   # mobile | tablet | desktop
+    Column("country", String, nullable=False, server_default=''),
+    Column("pages_count", Integer, nullable=False, server_default='0'),
+    Column("events_count", Integer, nullable=False, server_default='0'),
+    Column("max_scroll", Integer, nullable=False, server_default='0'),
+    Column("duration_s", Integer, nullable=False, server_default='0'),
+    Column("converted_at", String),
+    Column("conversion_type", String),                                    # tel_click | form_submit
+    Column("created_at", String, nullable=False),
+)
+
+track_events = Table(
+    "track_events", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("site_id", String, nullable=False),
+    Column("session_id", String, nullable=False),
+    Column("day", String, nullable=False),
+    Column("ts", String, nullable=False),
+    Column("type", String, nullable=False),   # pageview | scroll | click | tel_click | form_submit | engaged | exit
+    Column("path", String, nullable=False, server_default='/'),
+    Column("label", String, nullable=False, server_default=''),
+    Column("value", Float),
+    Column("pos_x", Float),
+    Column("pos_y", Float),
+    Column("meta", Text, nullable=False, server_default='{}'),
+    Column("created_at", String, nullable=False),
+)

@@ -59,6 +59,8 @@ export const navGroups: NavGroup[] = [
         description: 'مرکز گزارش کامل هر سایت: کلمه کلیدی اصلی، جایگاه‌ها، مشکلات، بک‌لینک و رپورتاژ' },
       { title: 'داده زنده تبلیغات', url: '/ads-data', icon: 'reports', items: [],
         description: 'IP، GCLID، session و رفتار زنده ورودی‌های تبلیغاتی' },
+      { title: 'ترافیک و تماس‌ها', url: '/dashboard/traffic', icon: 'trendingUp', items: [],
+        description: 'ورودی ارگانیک، رفتار کاربر و کلیک روی شماره تماس از ترکر فرست‌پارتی قالب' },
       { title: 'تنظیمات', url: '/dashboard/settings', icon: 'settings', items: [],
         description: 'اتصال به بک‌اند، توکن API، ترجیحات نمایش' }
     ]

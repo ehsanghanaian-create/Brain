@@ -55,6 +55,8 @@ export const navGroups: NavGroup[] = [
     items: [
       { title: 'گزارش‌ها', url: '/dashboard/reports', icon: 'reports', items: [],
         description: 'گزارش رشد کلمات کلیدی، عملکرد محتوا و مشکلات سئو (فاز ۱۷)' },
+      { title: 'ترافیک و تماس‌ها', url: '/dashboard/traffic', icon: 'trendingUp', items: [],
+        description: 'ورودی ارگانیک، رفتار کاربر و کلیک روی شماره تماس از ترکر فرست‌پارتی قالب' },
       { title: 'تنظیمات', url: '/dashboard/settings', icon: 'settings', items: [],
         description: 'اتصال به بک‌اند، توکن API، ترجیحات نمایش' }
     ]

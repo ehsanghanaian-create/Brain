@@ -460,3 +460,67 @@ export async function settle<T>(p: Promise<T>): Promise<{ data: T; error: null }
     return { data: null, error: e instanceof ApiError ? e : new ApiError(0, 'unknown', String(e), null, '-') };
   }
 }
+
+// ---- traffic intel: first-party visit tracking + Search Console join (migration 0011) -------------
+export type TrafficCoverage = { sessions: number; events: number; first_day: string | null; last_day: string | null; gsc_rows: number };
+export type TrafficOverview = {
+  date_from: string; date_to: string; days: number;
+  sessions: number; pageviews: number; conversions: number; tel_clicks: number; form_submits: number;
+  conversion_rate: number; bounce_rate: number; avg_duration_s: number;
+  by_channel: { channel: string; sessions: number; conversions: number }[];
+  by_search_engine: { search_engine: string; sessions: number }[];
+  by_device: { device: string; sessions: number; conversions: number }[];
+  series: { day: string; sessions: number; organic: number; conversions: number }[];
+  coverage: TrafficCoverage;
+};
+export type TrafficEntry = {
+  path: string; sessions: number; organic_sessions: number; conversions: number; tel_clicks: number;
+  avg_duration: number; avg_scroll: number; conversion_rate: number;
+  gsc_page: string | null; gsc_clicks: number; gsc_impressions: number; gsc_position: number | null; gsc_ctr: number;
+  gsc_to_session_ratio: number | null;
+};
+export type TrafficEntries = { days: number; items: TrafficEntry[]; tracker_pages: number; gsc_pages: number };
+export type TrafficCalls = {
+  date_from: string; date_to: string; total: number;
+  by_page: { path: string; clicks: number }[];
+  by_hour: { hour: string; clicks: number }[];
+  by_day: { day: string; clicks: number }[];
+  by_channel: { channel: string; search_engine: string; clicks: number }[];
+  recent: { ts: string; path: string; label: string; channel: string; search_engine: string; device: string; landing_path: string; gclid: string }[];
+};
+export type TrafficBehavior = {
+  date_from: string; date_to: string; path: string | null;
+  scroll: { depth: number; hits: number }[];
+  clicks: { label: string; path: string; clicks: number; x: number | null; y: number | null }[];
+  points: { x: number; y: number; type: string }[];
+  pages: { path: string; views: number; sessions: number }[];
+  exits: { path: string; sessions: number }[];
+};
+/** Estimated, never exact: Google does not send the organic keyword, so these rows are modelled from click share. */
+export type TrafficKeywords = {
+  days: number; estimated: true; method: string; caveat: string;
+  items: { path: string; query: string; intent: string; gsc_clicks: number; gsc_position: number; share: number; est_sessions: number; est_conversions: number; confidence: 'high' | 'medium' | 'low' }[];
+};
+export type TrafficPaid = {
+  days: number; resolved: boolean; note: string;
+  items: { gclid: string; utm_campaign: string; utm_term: string; landing_path: string; device: string; started_at: string; conversion_type: string | null }[];
+};
+export type TrackerSetup = {
+  site_id: string; write_key: string; enabled: boolean; created_at: string | null; rotated_at: string | null;
+  script_url: string; beacon_url: string; snippet: string; coverage: TrafficCoverage; canonical_url: string;
+};
+
+const t = (id: string) => `/sites/${encodeURIComponent(id)}/traffic`;
+
+export const traffic = {
+  overview: (id: string, days = 28) => api<TrafficOverview>(`${t(id)}/overview?days=${days}`),
+  entries: (id: string, days = 28, limit = 50) => api<TrafficEntries>(`${t(id)}/entries?days=${days}&limit=${limit}`),
+  calls: (id: string, days = 28, limit = 50) => api<TrafficCalls>(`${t(id)}/calls?days=${days}&limit=${limit}`),
+  behavior: (id: string, days = 28, path?: string | null, limit = 50) =>
+    api<TrafficBehavior>(`${t(id)}/behavior?days=${days}&limit=${limit}${path ? `&path=${encodeURIComponent(path)}` : ''}`),
+  keywords: (id: string, days = 28, limit = 100) => api<TrafficKeywords>(`${t(id)}/keywords?days=${days}&limit=${limit}`),
+  paid: (id: string, days = 90, limit = 100) => api<TrafficPaid>(`${t(id)}/paid?days=${days}&limit=${limit}`),
+  setup: (id: string) => api<TrackerSetup>(`${t(id)}/setup`),
+  setEnabled: (id: string, enabled: boolean) => api<TrackerSetup>(`${t(id)}/setup`, { method: 'PATCH', json: { enabled } }),
+  rotate: (id: string) => api<TrackerSetup>(`${t(id)}/setup/rotate`, { method: 'POST' })
+};

@@ -39,6 +39,9 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["seo_brain*"]
 
+[tool.setuptools.package-data]
+"seo_brain.tracking" = ["static/*.js"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

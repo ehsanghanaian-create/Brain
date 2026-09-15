@@ -24,7 +24,11 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
       body: hasBody ? await req.arrayBuffer() : undefined,   // arrayBuffer keeps multipart/binary intact
       cache: 'no-store'
     });
-    const body = await res.text();
+    const text = await res.text();
+    // a null-body status (204/205/304) must not carry a body — even '' — or the Response
+    // constructor throws per the Fetch spec; our own beacon endpoint always answers 204.
+    const nullBodyStatus = res.status === 204 || res.status === 205 || res.status === 304;
+    const body = nullBodyStatus ? null : text;
     const responseHeaders: Record<string, string> = {
       'Content-Type': res.headers.get('content-type') ?? 'application/json',
       'X-Request-ID': res.headers.get('x-request-id') ?? requestId,

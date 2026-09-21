@@ -92,15 +92,24 @@ def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = 
         _p("taxonomies")
         taxes = client.content_taxonomies()
         for slug, t in taxes.items():
+            table = "categories" if t.get("hierarchical") else "tags"
+            # Progress persists through another connection. Neither that write
+            # nor a slow REST request may run while this connection owns SQLite's
+            # writer lock (the callback otherwise waits on its own caller).
+            _p("categories" if slug == "category" else "taxonomies", taxonomy=slug)
+            try:
+                terms = client.fetch_all(t["rest_base"], {"hide_empty": "false"})
+            except WPError as e:
+                stats["errors"].append(str(e))
+                log.error(str(e))
+                terms = []
             upsert(conn, "taxonomies", {
                 "site_id": site.site_id, "slug": slug, "name": t.get("name"), "rest_base": t.get("rest_base"),
                 "hierarchical": 1 if t.get("hierarchical") else 0, "object_types": j(t.get("types")),
             }, ["site_id", "slug"])
-            table = "categories" if t.get("hierarchical") else "tags"
-            _p("categories" if slug == "category" else "taxonomies", taxonomy=slug)
             n = 0
             try:
-                for term in client.fetch_all(t["rest_base"], {"hide_empty": "false"}):
+                for term in terms:
                     row = {
                         "site_id": site.site_id, "taxonomy": slug, "wp_id": term["id"], "name": unescape(term.get("name") or ""),
                         "slug": term.get("slug"), "url": normalize_url(term.get("link", ""), site_host=site.host),
@@ -202,6 +211,7 @@ def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = 
         log.info(f"WordPress sync {status}: {stats['posts']} content items, taxonomies={stats['taxonomies']}, media={stats['media']}")
         return stats
     except Exception as e:
+        conn.rollback()
         conn.execute("UPDATE sync_runs SET finished_at=?, status='failed', notes=? WHERE run_id=?", (utcnow(), str(e), run_id))
         conn.commit()
         raise

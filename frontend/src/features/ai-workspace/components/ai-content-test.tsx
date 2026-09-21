@@ -17,7 +17,7 @@ import { toast } from 'sonner';
 const fa = new Intl.NumberFormat('fa-IR');
 const INTENT_FA: Record<string, string> = { informational: 'اطلاعاتی', navigational: 'ناوبری', commercial: 'تجاری', transactional: 'تراکنشی', local: 'محلی' };
 const usd = (v: number | null | undefined) => (typeof v === 'number' ? `${v.toFixed(4)}$` : '—');
-const KIND_FA: Record<string, string> = { anthropic: 'Claude', openai: 'ChatGPT', google: 'Gemini', openrouter: 'OpenRouter', ollama: 'Ollama', custom: 'API سفارشی', omniroute: 'OmniRoute', echo: 'Echo' };
+const KIND_FA: Record<string, string> = { anthropic: 'Claude', xai: 'Grok', openai: 'ChatGPT', google: 'Gemini', groq: 'Groq', cloudflare: 'Cloudflare', openrouter: 'OpenRouter', ollama: 'Ollama', custom: 'API سفارشی', omniroute: 'OmniRoute', echo: 'Echo' };
 const ROUTE_KIND_FA: Record<string, string> = { direct: 'ارائه‌دهنده مستقیم', gateway: 'گیت‌وی مسیریابی', offline: 'آفلاین' };
 const routeKindOf = (p: { kind: string; route_kind?: string }) => p.route_kind ?? (p.kind === 'echo' ? 'offline' : p.kind === 'omniroute' ? 'gateway' : 'direct');
 const STATUS_FA: Record<string, { fa: string; tone: 'good' | 'warn' | 'bad' | 'default' }> = { connected: { fa: 'متصل', tone: 'good' }, untested: { fa: 'کلید ثبت شده — تست نشده', tone: 'warn' }, error: { fa: 'خطا در اتصال', tone: 'bad' }, missing_credentials: { fa: 'کلید ثبت نشده', tone: 'bad' }, offline_fallback: { fa: 'آفلاین (تست)', tone: 'default' } };

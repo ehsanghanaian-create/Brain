@@ -1,4 +1,5 @@
 import Providers from '@/components/layout/providers';
+import { SparkleLayer } from '@/components/layout/sparkle-layer';
 import { Toaster } from '@/components/ui/sonner';
 import { fontVariables } from '@/components/themes/font.config';
 import { DEFAULT_THEME, THEMES } from '@/components/themes/theme.config';
@@ -8,11 +9,12 @@ import type { Metadata, Viewport } from 'next';
 import { cookies } from 'next/headers';
 import NextTopLoader from 'nextjs-toploader';
 import { NuqsAdapter } from 'nuqs/adapters/next/app';
+import '@fontsource-variable/vazirmatn';
 import '../styles/globals.css';
 
 const META_THEME_COLORS = {
-  light: '#ffffff',
-  dark: '#09090b'
+  light: '#f7f8fc',
+  dark: '#0e1020'
 };
 
 export const metadata: Metadata = {
@@ -67,6 +69,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           >
             <Providers activeThemeValue={themeToApply}>
               <Toaster />
+              <SparkleLayer />
               {children}
             </Providers>
           </ThemeProvider>

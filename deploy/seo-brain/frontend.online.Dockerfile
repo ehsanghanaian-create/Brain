@@ -19,6 +19,8 @@ COPY . .
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     BUILD_STANDALONE=true
+# the production host has 1.9 GB RAM + swap: cap the Next.js build heap (same value the 20260915 build used)
+ENV NODE_OPTIONS=--max-old-space-size=1200
 
 RUN pnpm build
 

@@ -78,7 +78,7 @@ class AgentRunner:
         prov = {"agent": agent, "prompt_version_id": pv.get("id"), "prompt_ref": pv.get("ref"), "memory_snapshot_id": self.snapshot_id, "route": dec.to_dict()["chain"][:3], "route_reason": dec.reason,
                 "attempts": [a.__dict__ for a in res.attempts]}
         if not res.ok or not res.response:
-            return AgentResult(agent, False, {}, prov, error=(res.attempts[-1].error if res.attempts else "no response"))
+            return AgentResult(agent, False, {}, prov, error=res.error_summary)
         r = res.response
         prov.update(provider=r.provider, model=r.model, input_tokens=r.input_tokens, output_tokens=r.output_tokens, cost_usd=r.cost_usd or 0.0, latency_ms=r.latency_ms)
         payload = r.parsed if isinstance(r.parsed, dict) else {}

@@ -10,6 +10,9 @@ const TOKEN = process.env.SEO_BRAIN_API_TOKEN ?? '';
 
 async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const { path } = await ctx.params;
+  if (path.some((seg) => seg === '' || seg === '.' || seg === '..')) {
+    return NextResponse.json({ error: { code: 'bad_path', message: 'مسیر نامعتبر', request_id: null } }, { status: 400 });
+  }
   const target = `${BASE}/api/v1/${path.map(encodeURIComponent).join('/')}${req.nextUrl.search}`;
   const requestId = req.headers.get('x-request-id') ?? crypto.randomUUID().replace(/-/g, '').slice(0, 16);
   const headers: Record<string, string> = { 'X-Request-ID': requestId, Accept: 'application/json' };
@@ -43,7 +46,7 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   } catch (e) {
     // backend unreachable → same envelope shape as the backend would send
     return NextResponse.json(
-      { error: { code: 'backend_unreachable', message: `بک‌اند در ${BASE} در دسترس نیست`, details: { target, reason: String(e) }, request_id: requestId } },
+      { error: { code: 'backend_unreachable', message: 'بک‌اند در دسترس نیست', details: { reason: e instanceof Error ? e.name : 'fetch_failed' }, request_id: requestId } },
       { status: 503, headers: { 'X-Request-ID': requestId } }
     );
   }

@@ -5,6 +5,13 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Only http(s) or relative URLs become clickable — WordPress responses and user-entered links are untrusted. */
+export function safeHref(url: string | null | undefined): string | undefined {
+  if (!url) return undefined;
+  const v = String(url).trim();
+  return /^(https?:)?\/\//i.test(v) || v.startsWith('/') ? v : undefined;
+}
+
 export function formatBytes(
   bytes: number,
   opts: {

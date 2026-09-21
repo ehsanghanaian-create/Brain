@@ -446,18 +446,18 @@ def test_claude_provider_setup_routes_and_workspace_default(c):
     # recommended routes: preview is read-only, applying is explicit
     rec = c.get(f"/api/v1/ai/provider-configs/{p['id']}/recommended-routes").json()["routes"]
     by = {r["task_kind"]: r for r in rec}
-    assert by["article_long"]["model"] == "claude-sonnet-5" and by["article_long"]["fallback_model"] == "claude-opus-5" and by["seo_review"]["model"] == "claude-sonnet-5" and by["title_meta"]["model"] == "claude-haiku-4-5"
+    assert by["article_long"]["model"] == "claude-opus-5" and by["article_long"]["fallback_model"] == "claude-sonnet-5" and by["seo_review"]["model"] == "claude-sonnet-5" and by["title_meta"]["model"] == "claude-haiku-4-5"
     assert all(r["provider_id"] is None for r in c.get("/api/v1/ai/task-routes").json()["routes"])
     ap = c.post(f"/api/v1/ai/provider-configs/{p['id']}/recommended-routes", json={}).json()
     assert ap["applied"] == len(rec)
     routes = {r["task_kind"]: r for r in c.get("/api/v1/ai/task-routes").json()["routes"]}
-    assert routes["article_long"]["provider_name"] == "anthropic" and routes["article_long"]["model"] == "claude-sonnet-5" and routes["article_long"]["fallback_model"] == "claude-opus-5" and routes["article_long"]["policy"] == "explicit"
+    assert routes["article_long"]["provider_name"] == "anthropic" and routes["article_long"]["model"] == "claude-opus-5" and routes["article_long"]["fallback_model"] == "claude-sonnet-5" and routes["article_long"]["policy"] == "explicit"
     assert routes["faq"]["model"] == "claude-haiku-4-5"
     prev = c.get("/api/v1/ai/routing/preview?task_kind=article_long").json()
-    assert prev["policy"] == "explicit" and [s["model"] for s in prev["chain"][:2]] == ["claude-sonnet-5", "claude-opus-5"]
-    # workspace: Claude Sonnet is the default, Echo remains available (last)
+    assert prev["policy"] == "explicit" and [s["model"] for s in prev["chain"][:2]] == ["claude-opus-5", "claude-sonnet-5"]
+    # workspace: the default follows the routed long-article writer (Claude Opus via the explicit route); Echo stays last
     opts = c.get(f"/api/v1/sites/{SID}/ai-workspace/options").json()
-    assert opts["default"] == {"provider": "anthropic", "model": "claude-sonnet-5", "kind": "anthropic"} and opts["providers"][-1]["name"] == "echo"
+    assert opts["default"] == {"provider": "anthropic", "model": "claude-opus-5", "kind": "anthropic"} and opts["providers"][-1]["name"] == "echo"
     cl = next(pp for pp in opts["providers"] if pp["name"] == "anthropic")
     assert cl["status"] == "connected" and cl["models"][0]["model_id"] == "claude-sonnet-5" and cl["models"][0]["display"] == "Claude Sonnet 5" and cl["last_test"]["ok"]
     spec = {"title": "امداد خودرو رنو ساندرو", "keyword": "امداد خودرو رنو ساندرو", "secondary_keywords": ["امداد خودرو ساندرو تهران"], "intent": "commercial", "content_type": "service_landing", "word_count": 500}
@@ -484,27 +484,27 @@ def test_gemini_provider_setup_routes_env_fallback_and_workspace(c, monkeypatch)
     _seed_content(c)
     kinds = {k["kind"]: k for k in c.get("/api/v1/ai/provider-kinds").json()}
     g = kinds["google"]
-    assert g["models"][0] == "gemini-3.6-flash" and g["setup"]["console_url"].startswith("https://aistudio.google.com")
+    assert g["models"][0] == "gemini-3.5-flash" and g["setup"]["console_url"].startswith("https://aistudio.google.com")
     assert "content_generation" in g["capabilities"] and g["env_key"] == "GEMINI_API_KEY"
     # registry drives the UI: Gemini needs NO base URL from the user; only Cloudflare/custom truly do
     assert g["requires_base_url"] is False and g["supports_model_discovery"] is True and g["auth_type"] == "api_key"
     assert kinds["cloudflare"]["requires_base_url"] is True and kinds["custom"]["requires_base_url"] is True
     assert kinds["ollama"]["auth_type"] == "optional_api_key"
     p = _add_provider(c, "gemini", "google", "AIzaTestKey12345678")
-    assert p["has_key"] and p["default_model"] == "gemini-3.6-flash" and "api_key" not in json.dumps(p) and "secret_ref" not in p
+    assert p["has_key"] and p["default_model"] == "gemini-3.5-flash" and "api_key" not in json.dumps(p) and "secret_ref" not in p
     models = {m["model_id"]: m for m in c.get(f"/api/v1/ai/models?provider_id={p['id']}").json()}
-    assert {"gemini-3.6-flash", "gemini-2.5-pro", "gemini-2.5-flash"} <= set(models)
+    assert {"gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash-lite"} <= set(models)
     assert models["gemini-3.6-flash"]["tier"] == "balanced" and models["gemini-3.6-flash"]["context_tokens"] == 1000000
     t = c.post(f"/api/v1/ai/provider-configs/{p['id']}/test").json()
     assert t["ok"] and "AIzaTest" not in json.dumps(t)
     # recommended routes: heavy tasks fall back to 2.5 Pro, light tasks to 2.5 Flash — applying stays a human action
     rec = {r["task_kind"]: r for r in c.get(f"/api/v1/ai/provider-configs/{p['id']}/recommended-routes").json()["routes"]}
-    assert rec["article_long"]["model"] == "gemini-3.6-flash" and rec["article_long"]["fallback_model"] == "gemini-2.5-pro"
-    assert rec["faq"]["model"] == "gemini-3.6-flash" and rec["faq"]["fallback_model"] == "gemini-2.5-flash"
+    assert rec["article_long"]["model"] == "gemini-3.5-flash" and rec["article_long"]["fallback_model"] == "gemini-3.5-flash-lite"
+    assert rec["faq"]["model"] == "gemini-3.5-flash-lite" and rec["faq"]["fallback_model"] == "gemini-3.5-flash"
     ap = c.post(f"/api/v1/ai/provider-configs/{p['id']}/recommended-routes", json={}).json()
     assert ap["applied"] == len(rec)
     prev = c.get("/api/v1/ai/routing/preview?task_kind=content_writing").json()
-    assert prev["policy"] == "explicit" and [s["model"] for s in prev["chain"][:2]] == ["gemini-3.6-flash", "gemini-2.5-pro"]
+    assert prev["policy"] == "explicit" and [s["model"] for s in prev["chain"][:2]] == ["gemini-3.5-flash", "gemini-3.5-flash-lite"]
     # workspace generation goes through the same gateway/ledger path
     spec = {"title": "امداد خودرو پژو", "keyword": "امداد خودرو پژو", "word_count": 400}
     r = c.post(f"/api/v1/sites/{SID}/ai-workspace/generate", json={**spec, "provider": "gemini", "model": "gemini-3.6-flash"})
@@ -525,6 +525,79 @@ def test_gemini_provider_setup_routes_env_fallback_and_workspace(c, monkeypatch)
     monkeypatch.setenv("GEMINI_MODEL", "gemini-2.5-flash")
     p3 = c.post("/api/v1/ai/provider-configs", json={"name": "gemini-envmodel", "kind": "google"}).json()
     assert p3["default_model"] == "gemini-2.5-flash"
+
+
+def test_time_limited_provider_keys_expire_into_fallback(c):
+    """A key pasted with key_ttl_days (7-day Claude keys) shows its countdown, and once expired it counts as absent:
+    configured=False, api_key() None, routing skips the provider so the next configured one takes over."""
+    from sqlalchemy import text
+    p = c.post("/api/v1/ai/provider-configs", json={"name": "claude-7d", "kind": "anthropic", "api_key": "sk-ant-api03-weekly1234", "key_ttl_days": 7}).json()
+    assert p["has_key"] and p["configured"] and p["key_expired"] is False and 6.9 <= p["key_days_left"] <= 7.0 and p["key_expires_at"] and p["key_set_at"]
+    grok = _add_provider(c, "grok", "xai", "xai-testkey-1234")
+    assert c.post(f"/api/v1/ai/provider-configs/{p['id']}/recommended-routes", json={}).json()["applied"] > 0
+    prev = c.get("/api/v1/ai/routing/preview?task_kind=article_long").json()
+    assert prev["chain"][0]["provider"] == "claude-7d"
+    with c.eng.begin() as cx:                                                     # time travel: the key expired yesterday
+        cx.execute(text("UPDATE ai_providers SET key_expires_at='2020-01-01T00:00:00.000Z' WHERE id=:i"), {"i": p["id"]})
+    p2 = c.get(f"/api/v1/ai/provider-configs").json()[0]
+    assert p2["name"] == "claude-7d" and p2["key_expired"] is True and p2["configured"] is False and p2["key_days_left"] == 0
+    repo = ProviderConfigRepository(c.eng, c.store)
+    assert repo.api_key(repo.get(p["id"])) is None
+    prev2 = c.get("/api/v1/ai/routing/preview?task_kind=article_long").json()
+    assert prev2["chain"][0]["provider"] == "grok" and all(s["provider"] != "claude-7d" for s in prev2["chain"])
+    # a fresh key without ttl clears the expiry
+    c.patch(f"/api/v1/ai/provider-configs/{p['id']}", json={"api_key": "sk-ant-api03-fresh5678"})
+    p3 = c.get("/api/v1/ai/provider-configs").json()[0]
+    assert p3["configured"] is True and p3["key_expires_at"] is None and p3["key_days_left"] is None
+    assert grok["configured"] is True
+
+
+def test_editor_assistant_modes_and_echo_fallback(c):
+    """The editor chat runs through the gateway with the site memory pack; with no real provider it degrades to Echo
+    (offline) instead of failing, and unknown modes are rejected."""
+    from seo_brain.brain.generation.assist import MODES
+    _seed_content(c)
+    r = c.post(f"/api/v1/sites/{SID}/ai-workspace/assist", json={"markdown": "## سرفصل\n\nمتن آزمایشی مقاله دربارهٔ امداد خودرو.", "mode": "seo", "title": "تست", "keyword": "امداد خودرو"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["ok"] and d["reply"] and d["mode"] == "seo" and d["meta"]["provider"] == "echo" and "revised_markdown" in d and d["run_id"].startswith("as-")
+    assert c.post(f"/api/v1/sites/{SID}/ai-workspace/assist", json={"markdown": "x", "mode": "nope"}).status_code == 422
+    assert set(MODES) == {"seo", "rewrite", "shorten", "expand", "faq", "chat"} and MODES["seo"][0] == "seo_review"
+
+
+def test_xai_provider_kind_cross_provider_fallbacks_and_anthropic_env(c, monkeypatch):
+    """Grok (xAI) is a first-class OpenAI-compatible kind; every explicit route lists the provider's own second model and
+    then every other configured provider as fallbacks (Claude → Grok → …), refreshed when a provider is added later;
+    ANTHROPIC_API_KEY works as the same optional env fallback as GEMINI_API_KEY."""
+    from seo_brain.ai.gateway.adapters import make_adapter
+    from seo_brain.ai.gateway.catalog import guess_tier
+    kinds = {k["kind"]: k for k in c.get("/api/v1/ai/provider-kinds").json()}
+    x = kinds["xai"]
+    assert x["models"][0] == "grok-4" and x["env_key"] == "XAI_API_KEY" and x["requires_base_url"] is False and x["setup"]["key_prefix"] == "xai-"
+    assert kinds["anthropic"]["env_key"] == "ANTHROPIC_API_KEY"
+    assert make_adapter("xai", "grok", "xai-k", None, [], {}).base_url == "https://api.x.ai/v1"
+    assert guess_tier("grok-4-fast-non-reasoning")[0] == "fast" and guess_tier("grok-4")[0] == "quality" and guess_tier("grok-4-fast-reasoning")[0] == "balanced"
+    claude = _add_provider(c, "anthropic", "anthropic", "sk-ant-api03-abcdefgh1234")
+    assert c.post(f"/api/v1/ai/provider-configs/{claude['id']}/recommended-routes", json={}).json()["applied"] > 0
+    routes = {r["task_kind"]: r for r in c.get("/api/v1/ai/task-routes").json()["routes"]}
+    assert routes["article_long"]["model"] == "claude-opus-5" and [(f["provider_name"], f["model"]) for f in routes["article_long"]["fallbacks"]] == [("anthropic", "claude-sonnet-5")]
+    # Grok added afterwards → Claude's routes learn the new backup writer without any re-apply
+    grok = _add_provider(c, "grok", "xai", "xai-testkey-1234")
+    assert {"grok-4", "grok-4-fast-reasoning", "grok-4-fast-non-reasoning"} <= {m["model_id"] for m in c.get(f"/api/v1/ai/models?provider_id={grok['id']}").json()}
+    rec = {r["task_kind"]: r for r in c.get(f"/api/v1/ai/provider-configs/{grok['id']}/recommended-routes").json()["routes"]}
+    assert rec["article_long"]["model"] == "grok-4" and rec["faq"]["model"] == "grok-4-fast-non-reasoning"
+    routes = {r["task_kind"]: r for r in c.get("/api/v1/ai/task-routes").json()["routes"]}
+    assert [(f["provider_name"], f["model"]) for f in routes["article_long"]["fallbacks"]] == [("anthropic", "claude-sonnet-5"), ("grok", "grok-4")]
+    prev = c.get("/api/v1/ai/routing/preview?task_kind=article_long").json()
+    assert [(s["provider"], s["model"]) for s in prev["chain"][:3]] == [("anthropic", "claude-opus-5"), ("anthropic", "claude-sonnet-5"), ("grok", "grok-4")]
+    assert len({(s["provider"], s["model"]) for s in prev["chain"]}) == len(prev["chain"])
+    # optional env fallback for Claude, same contract as Gemini
+    p2 = c.post("/api/v1/ai/provider-configs", json={"name": "claude-env", "kind": "anthropic"}).json()
+    assert p2["configured"] is False and p2["key_source"] is None
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-env-key")
+    p2b = next(p for p in c.get("/api/v1/ai/provider-configs").json() if p["name"] == "claude-env")
+    assert p2b["configured"] is True and p2b["key_source"] == "env" and p2b["has_key"] is False
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
 
 
 # --------------------------------------------------------------------------- OmniRoute (external gateway behind the SEO Brain Gateway)

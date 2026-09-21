@@ -256,6 +256,9 @@ class AnthropicAdapter(HttpAdapter):
             raise ProviderError(f"model or endpoint not found (HTTP 404): {r.text[:120]}", retryable=False)
         if r.status_code == 429 or r.status_code >= 500:
             raise ProviderError(f"provider busy/error (HTTP {r.status_code})", retryable=True)
+        if r.status_code in (400, 402) and ("credit balance" in r.text or "insufficient_quota" in r.text or "billing" in r.text.lower()):
+            # valid key, empty wallet — the model list still works, only real calls fail; not retryable, another provider may take over
+            raise ProviderError("no credits: اعتبار حساب ارائه‌دهنده تمام شده است — در پنل ارائه‌دهنده (Plans & Billing) اعتبار بخرید", retryable=False)
         raise ProviderError(f"bad request (HTTP {r.status_code}): {r.text[:200]}", retryable=False)
 
 
@@ -356,6 +359,10 @@ class GeminiAdapter(HttpAdapter):
         if request.json_schema and contents:
             contents[-1]["parts"][0]["text"] += _json_instruction(request.json_schema)
         body: dict[str, Any] = {"contents": contents, "generationConfig": {"temperature": request.temperature, "maxOutputTokens": request.max_tokens, **({"responseMimeType": "application/json"} if request.json_schema else {})}}
+        if "flash" in request.model.lower():
+            # Flash models "think" by default and the thoughts are billed against maxOutputTokens: a 1200-word Persian
+            # article lost ~2300 tokens to thinking and came back truncated mid-JSON. Writing needs the budget for text.
+            body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}
         data = self._post(f"{self.base_url}/models/{request.model}:generateContent?key={self.api_key}", body)
@@ -395,8 +402,9 @@ class OllamaAdapter(HttpAdapter):
 
 
 ADAPTERS = {"anthropic": AnthropicAdapter, "openai": OpenAICompatAdapter, "openrouter": OpenAICompatAdapter,
-            "groq": OpenAICompatAdapter, "cloudflare": CloudflareAdapter, "custom": OpenAICompatAdapter,
+            "groq": OpenAICompatAdapter, "xai": OpenAICompatAdapter, "cloudflare": CloudflareAdapter, "custom": OpenAICompatAdapter,
             "google": GeminiAdapter, "ollama": OllamaAdapter}
+COMPAT_DEFAULT_BASE = {"openrouter": "https://openrouter.ai/api/v1", "xai": "https://api.x.ai/v1"}
 
 
 def make_adapter(kind: str, name: str, api_key: str | None, base_url: str | None, models: list[str] | None, prices: dict[str, tuple[float, float]] | None,
@@ -408,6 +416,6 @@ def make_adapter(kind: str, name: str, api_key: str | None, base_url: str | None
     if not cls:
         raise ProviderError(f"unknown provider kind '{kind}'", retryable=False)
     a = cls(name, api_key, base_url, models, prices, transport)
-    if kind == "openrouter" and not base_url:
-        a.base_url = "https://openrouter.ai/api/v1"
+    if kind in COMPAT_DEFAULT_BASE and not base_url:
+        a.base_url = COMPAT_DEFAULT_BASE[kind]
     return a

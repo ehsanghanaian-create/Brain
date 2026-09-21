@@ -1,5 +1,6 @@
 'use client';
 /** Site Report Center — مرکز گزارش کامل هر سایت (فقط داده واقعی: GSC/GA4/کراولر/ثبت دستی). */
+import { safeHref } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -611,7 +612,7 @@ function ProblemsPanel({ siteId, refreshKey }: { siteId: string; refreshKey: num
                   <div className='space-y-1 border-t px-3 py-2'>
                     {items.slice(0, 30).map((it, i) => (
                       <div key={i} className='flex items-center gap-2 text-xs'>
-                        <a href={it.url ?? '#'} target='_blank' rel='noreferrer' dir='ltr' className='max-w-xl truncate underline-offset-2 hover:underline' title={it.url ?? ''}>{it.url}</a>
+                        <a href={safeHref(it.url) ?? '#'} target='_blank' rel='noreferrer' dir='ltr' className='max-w-xl truncate underline-offset-2 hover:underline' title={it.url ?? ''}>{it.url}</a>
                         {it.related_url && <span className='text-muted-foreground truncate' dir='ltr'>↔ {it.related_url}</span>}
                       </div>
                     ))}
@@ -759,7 +760,7 @@ function BacklinksPanel({ siteId, onChanged }: { siteId: string; onChanged: () =
                 <TableRow key={b.id}>
                   <TableCell dir='ltr' className='text-xs font-medium'>{b.source_domain}</TableCell>
                   <TableCell dir='ltr' className='max-w-48 truncate text-xs' title={b.source_url}>
-                    <a href={b.source_url} target='_blank' rel='noreferrer' className='underline-offset-2 hover:underline'>{b.source_url}</a>
+                    <a href={safeHref(b.source_url) ?? '#'} target='_blank' rel='noreferrer' className='underline-offset-2 hover:underline'>{b.source_url}</a>
                   </TableCell>
                   <TableCell dir='ltr' className='max-w-44 truncate text-xs' title={b.target_url}>{b.target_url}</TableCell>
                   <TableCell className='max-w-40 truncate text-sm' title={b.anchor_text ?? ''}>{b.anchor_text ?? '—'}</TableCell>

@@ -7,10 +7,12 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import type { GraphMode, GraphView, Site } from '@/lib/api/client';
 import {
   IconAdjustmentsHorizontal, IconArrowsMaximize, IconFocusCentered, IconLayoutBoard,
-  IconRefresh, IconSearch, IconX
+  IconRefresh, IconSearch, IconSparkles, IconX
 } from '@tabler/icons-react';
 import { NODE_STYLE, RELATION_FA, TYPE_FAMILIES } from '../constants';
-import type { Direction, Grouping } from '../layout';
+import { LAYOUT_FA, type Direction, type Grouping } from '../layout';
+
+const LAYOUTS = Object.keys(LAYOUT_FA) as Grouping[];
 
 export type ToolbarState = {
   siteId: string;
@@ -23,6 +25,7 @@ export type ToolbarState = {
   hideIsolated: boolean;
   focusNeighbors: boolean;
   limit: number;
+  flow: boolean;
 };
 
 export function GraphToolbar({
@@ -70,6 +73,14 @@ export function GraphToolbar({
                 </button>
               ))}
             </div>
+            <div className='flex overflow-x-auto rounded-lg border bg-muted/20 p-1' role='tablist' aria-label='چیدمان گراف' title='حالت نمایش گراف'>
+              {LAYOUTS.map((layout) => (
+                <button key={layout} role='tab' aria-selected={state.grouping === layout} onClick={() => onChange({ grouping: layout })}
+                  className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-all duration-200 ${state.grouping === layout ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-background/60'}`}>
+                  {LAYOUT_FA[layout]}
+                </button>
+              ))}
+            </div>
           </div>
 
           <form className='relative flex min-w-0 flex-1 items-center gap-1' onSubmit={(event) => { event.preventDefault(); onSearchSubmit(); }}>
@@ -90,6 +101,7 @@ export function GraphToolbar({
               <IconFocusCentered /> {state.focusNeighbors ? 'نمایش کل گراف' : `فقط ارتباط‌های مستقیم (${neighborCount.toLocaleString('fa-IR')})`}
             </Button>
           )}
+          <Button size='sm' variant={state.flow ? 'default' : 'outline'} onClick={() => onChange({ flow: !state.flow })} title='ذرات متحرک روی همهٔ ارتباط‌ها (در گراف‌های کوچک)'><IconSparkles /> جریان ارتباط‌ها</Button>
           <Button size='sm' variant='outline' onClick={onFit}><IconArrowsMaximize /> جا دادن در صفحه</Button>
           <Button size='sm' variant='outline' onClick={onRelayout}><IconRefresh /> چیدمان دوباره</Button>
           <Badge variant='secondary' className='h-8 px-3 tabular-nums'>
@@ -107,11 +119,7 @@ export function GraphToolbar({
         <div className='space-y-3 border-t bg-muted/15 p-3'>
           <div className='flex flex-wrap items-center gap-2'>
             <IconLayoutBoard className='text-muted-foreground size-4' />
-            <NativeSelect value={state.grouping} onChange={(event) => onChange({ grouping: event.target.value as Grouping })} className='w-40' aria-label='گروه‌بندی'>
-              <NativeSelectOption value='none'>چیدمان ارتباطی</NativeSelectOption>
-              <NativeSelectOption value='type'>گروه‌بندی بر اساس نوع</NativeSelectOption>
-              <NativeSelectOption value='community'>گروه‌بندی بر اساس خوشه</NativeSelectOption>
-            </NativeSelect>
+            <span className='text-muted-foreground text-xs'>چیدمان: {LAYOUT_FA[state.grouping]}</span>
             {state.grouping === 'none' && (
               <NativeSelect value={state.direction} onChange={(event) => onChange({ direction: event.target.value as Direction })} className='w-36' aria-label='جهت چیدمان'>
                 <NativeSelectOption value='TB'>بالا به پایین</NativeSelectOption>

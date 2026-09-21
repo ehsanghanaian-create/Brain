@@ -37,7 +37,7 @@ export function AiModelsPage({ sites = [] }: { sites?: Site[] }) {
   const kind = kinds.find((k) => k.kind === f.kind);
   function openNew() { setEditing(null); setF({ name: '', kind: 'anthropic', api_key: '', base_url: '', default_model: '' }); setOpen(true); }
   function openClaude() { const k = kinds.find((x) => x.kind === 'anthropic'); setEditing(null); setF({ name: 'anthropic', kind: 'anthropic', api_key: '', base_url: k?.base_url ?? 'https://api.anthropic.com', default_model: 'claude-sonnet-5' }); setOpen(true); }
-  function openCloudProvider(kindKey: 'groq' | 'cloudflare' | 'google') { const k = kinds.find((x) => x.kind === kindKey); setEditing(null); setF({ name: kindKey, kind: kindKey, api_key: '', base_url: k?.base_url ?? '', default_model: k?.models[0] ?? '' }); setOpen(true); }
+  function openCloudProvider(kindKey: 'groq' | 'cloudflare' | 'google' | 'xai') { const k = kinds.find((x) => x.kind === kindKey); setEditing(null); setF({ name: kindKey, kind: kindKey, api_key: '', base_url: k?.base_url ?? '', default_model: k?.models[0] ?? '' }); setOpen(true); }
   function openOmni() { const k = kinds.find((x) => x.kind === 'omniroute'); setEditing(null); setF({ name: 'omniroute', kind: 'omniroute', api_key: '', base_url: k?.base_url ?? 'http://127.0.0.1:20128/v1', default_model: 'auto' }); setOpen(true); }
   function openEdit(p: ProviderConfig) { setEditing(p); setF({ name: p.name, kind: p.kind, api_key: '', base_url: p.base_url ?? '', default_model: p.default_model ?? '' }); setOpen(true); }
   async function save() {
@@ -82,6 +82,7 @@ export function AiModelsPage({ sites = [] }: { sites?: Site[] }) {
         <ProviderKindCard kindKey='groq' providers={providers} kind={kinds.find((k) => k.kind === 'groq')} onConnect={() => openCloudProvider('groq')} onEdit={openEdit} onTest={test} onChanged={load} busy={busy} setBusy={setBusy} />
         <ProviderKindCard kindKey='cloudflare' providers={providers} kind={kinds.find((k) => k.kind === 'cloudflare')} onConnect={() => openCloudProvider('cloudflare')} onEdit={openEdit} onTest={test} onChanged={load} busy={busy} setBusy={setBusy} />
       </div>
+      <ProviderKindCard kindKey='xai' providers={providers} kind={kinds.find((k) => k.kind === 'xai')} onConnect={() => openCloudProvider('xai')} onEdit={openEdit} onTest={test} onChanged={load} busy={busy} setBusy={setBusy} />
       <ProviderKindCard kindKey='google' providers={providers} kind={kinds.find((k) => k.kind === 'google')} onConnect={() => openCloudProvider('google')} onEdit={openEdit} onTest={test} onChanged={load} busy={busy} setBusy={setBusy} />
       <ProviderKindCard kindKey='omniroute' providers={providers} kind={kinds.find((k) => k.kind === 'omniroute')} onConnect={openOmni} onEdit={openEdit} onTest={test} onChanged={load} busy={busy} setBusy={setBusy} />
       <Card>
@@ -200,7 +201,7 @@ const CARD_META: Record<string, { title: string; wanted: string[]; connectLabel:
   omniroute: { title: 'OmniRoute (گیت‌وی مسیریابی خارجی)', wanted: ['auto', 'auto/fast', 'auto/cheap', 'auto/coding'], connectLabel: 'افزودن OmniRoute', needKey: false, okText: 'OmniRoute متصل است: SEO Brain Gateway → OmniRoute → Claude / OpenAI / Gemini / … . مدل «auto» مسیریابی خود OmniRoute است؛ ids به شکل provider/model هم قابل انتخاب‌اند. بودجه، دفتر مصرف، اعتبارسنجی و مسیریابی SEO Brain همچنان اعمال می‌شود.' },
 };
 
-export function ProviderKindCard({ kindKey, providers, kind, onConnect, onEdit, onTest, onChanged, busy, setBusy }: { kindKey: 'anthropic' | 'groq' | 'cloudflare' | 'google' | 'omniroute'; providers: ProviderConfig[]; kind?: ProviderKind; onConnect: () => void; onEdit: (p: ProviderConfig) => void; onTest: (p: ProviderConfig) => Promise<void>; onChanged: () => void; busy: string | null; setBusy: (v: string | null) => void }) {
+export function ProviderKindCard({ kindKey, providers, kind, onConnect, onEdit, onTest, onChanged, busy, setBusy }: { kindKey: 'anthropic' | 'groq' | 'cloudflare' | 'google' | 'xai' | 'omniroute'; providers: ProviderConfig[]; kind?: ProviderKind; onConnect: () => void; onEdit: (p: ProviderConfig) => void; onTest: (p: ProviderConfig) => Promise<void>; onChanged: () => void; busy: string | null; setBusy: (v: string | null) => void }) {
   const meta = CARD_META[kindKey];
   const claude = providers.find((p) => p.kind === kindKey);
   const status: ClaudeStatus = kindKey === 'omniroute' ? (!claude ? 'missing_credentials' : !claude.enabled ? 'error' : !claude.last_test ? 'untested' : claude.last_test.ok ? 'connected' : 'error') : claudeStatus(claude);

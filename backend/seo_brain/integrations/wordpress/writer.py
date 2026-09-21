@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 import httpx
@@ -65,6 +65,23 @@ def _inline(s: str) -> str:
     return s
 
 
+def _zone(name: str | None):
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(name or "Asia/Tehran")
+    except Exception:  # noqa: BLE001 — no tzdata (minimal Windows Python): Iran is fixed UTC+03:30 since 2022
+        return timezone(timedelta(hours=3, minutes=30)) if (name or "Asia/Tehran") == "Asia/Tehran" else timezone.utc
+
+
+def plan_schedule(publish_date: str, publish_time: str | None, tz_name: str | None, now: datetime | None = None) -> dict[str, Any]:
+    """Calendar date/time (site-local) → WordPress `date` + `date_gmt`, and whether it is still in the future."""
+    local = datetime.fromisoformat(f"{publish_date}T{(publish_time or '09:00')[:5]}:00").replace(tzinfo=_zone(tz_name))
+    utc = local.astimezone(timezone.utc)
+    return {"date": local.replace(tzinfo=None).isoformat(timespec="seconds"),
+            "date_gmt": utc.replace(tzinfo=None).isoformat(timespec="seconds"),
+            "future": utc > (now or datetime.now(timezone.utc))}
+
+
 class WordPressWriter:
     """`http` is injectable for tests (no network in CI)."""
 
@@ -79,9 +96,13 @@ class WordPressWriter:
         return httpx.request(method, url, auth=auth, timeout=30, follow_redirects=True, proxy=site_proxy(),
                              headers={"User-Agent": "SEO-Brain-Writer/1.0"}, **kw)
 
+    def rest(self, method: str, url: str, auth: tuple[str, str], **kw) -> httpx.Response:
+        """Public entry for sibling integrations (phone.py): every outbound site write still leaves from this module."""
+        return self._request(method, url, auth, **kw)
+
     def _site(self, site_id: str):
         with self.engine.connect() as cx:
-            return cx.execute(text("SELECT wp_url, mode, canonical_url FROM sites WHERE site_id=:s"), {"s": site_id}).first()
+            return cx.execute(text("SELECT wp_url, mode, canonical_url, timezone FROM sites WHERE site_id=:s"), {"s": site_id}).first()
 
     # ------------------------------------------------------------------ capability (users/me?context=edit)
     def capability(self, site_id: str) -> dict[str, Any]:
@@ -129,7 +150,7 @@ class WordPressWriter:
             return {"status": "skipped_mode",
                     "message": "حالت انتشار سایت «خودکار» نیست — انتشار زمان‌بندی‌شده فقط در حالت خودکار انجام می‌شود؛ از دکمه «انتشار» استفاده کنید"}
         with self.engine.connect() as cx:
-            plan = cx.execute(text("SELECT id, title, seo_title, meta_description, content_item_id, category_id, publish_date, publish_time, status, publishing FROM content_plans WHERE site_id=:s AND id=:p"),
+            plan = cx.execute(text("SELECT id, title, seo_title, meta_description, content_item_id, category_id, publish_date, publish_time, status, publishing, metadata FROM content_plans WHERE site_id=:s AND id=:p"),
                               {"s": site_id, "p": plan_id}).first()
         if not plan:
             return {"status": "error", "message": "برنامه محتوا پیدا نشد"}
@@ -161,8 +182,20 @@ class WordPressWriter:
                                    "status": wp_status, "excerpt": plan[3] or draft[2] or ""}
         if wp_cat:
             payload["categories"] = [int(wp_cat)]
-        if plan[6]:                                     # honor the calendar date/time (site-local)
-            payload["date"] = f"{plan[6]}T{(plan[7] or '09:00')}:00"
+        try:
+            featured = (json.loads(plan[10] or "{}") or {}).get("featured_media_id")
+        except ValueError:
+            featured = None
+        if featured:
+            payload["featured_media"] = int(featured)
+        sched = None
+        if plan[6]:
+            # A calendar date still ahead becomes a WordPress-scheduled post (`future` + date_gmt): WordPress itself
+            # publishes at that exact minute, so no poller granularity or site mode is involved once it is sent.
+            sched = plan_schedule(plan[6], plan[7], site[3])
+            payload["date"], payload["date_gmt"] = sched["date"], sched["date_gmt"]
+            if sched["future"] and wp_status == "publish":
+                payload["status"] = "future"
         try:
             r = self._request("POST", f"{wp_rest_v2(site[0]).rstrip('/')}/posts", (auth.username, auth.app_password), json=payload)
         except Exception as e:  # noqa: BLE001
@@ -175,6 +208,8 @@ class WordPressWriter:
         result = {"wp_post_id": post.get("id"), "link": post.get("link"), "wp_status": post.get("status"),
                   "published_at": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"), "actor": actor,
                   "category_wp_id": wp_cat}
+        if sched and post.get("status") == "future":
+            result["scheduled_for"] = sched["date"]
         with self.engine.begin() as cx:
             cx.execute(text("UPDATE content_plans SET publishing=:pub, status='published', updated_at=:t WHERE site_id=:s AND id=:p"),
                        {"pub": json.dumps({**publishing, **result}, ensure_ascii=False), "t": result["published_at"], "s": site_id, "p": plan_id})

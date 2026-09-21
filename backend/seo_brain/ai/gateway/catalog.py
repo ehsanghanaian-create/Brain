@@ -24,11 +24,20 @@ DEFAULT_CATALOG: dict[str, list[dict[str, Any]]] = {
     ],
     "google": [
         # prices are indicative defaults (user-editable in AI Models) — correct them when Google publishes list prices
+        {"model_id": "gemini-3.5-flash", "display": "Gemini 3.5 Flash", "tier": "balanced", "tags": ["persian", "long_form", "json", "translation", "cheap"], "context_tokens": 1000000, "price_in_per_m": 0.3, "price_out_per_m": 2.5},
         {"model_id": "gemini-3.6-flash", "display": "Gemini 3.6 Flash", "tier": "balanced", "tags": ["persian", "long_form", "json", "translation"], "context_tokens": 1000000, "price_in_per_m": 0.5, "price_out_per_m": 3.0},
-        {"model_id": "gemini-2.5-pro", "display": "Gemini 2.5 Pro", "tier": "reasoning", "tags": ["reasoning", "long_form", "json", "translation"], "context_tokens": 1000000, "price_in_per_m": 1.25, "price_out_per_m": 10.0},
-        {"model_id": "gemini-2.5-flash", "display": "Gemini 2.5 Flash", "tier": "fast", "tags": ["cheap", "json", "translation"], "context_tokens": 1000000, "price_in_per_m": 0.3, "price_out_per_m": 2.5},
+        {"model_id": "gemini-3.8-flash", "display": "Gemini 3.8 Flash", "tier": "balanced", "tags": ["persian", "long_form", "json", "translation"], "context_tokens": 1000000, "price_in_per_m": 0.5, "price_out_per_m": 3.0},
+        {"model_id": "gemini-3.5-flash-lite", "display": "Gemini 3.5 Flash Lite", "tier": "fast", "tags": ["cheap", "json", "translation"], "context_tokens": 1000000, "price_in_per_m": 0.1, "price_out_per_m": 0.4},
+        {"model_id": "gemini-3.1-pro-preview", "display": "Gemini 3.1 Pro (preview)", "tier": "reasoning", "tags": ["reasoning", "long_form", "json", "translation"], "context_tokens": 1000000, "price_in_per_m": 1.25, "price_out_per_m": 10.0},
     ],
     "openrouter": [],
+    # xAI list prices (USD / 1M tokens) as of 2026-09 — indicative, user-editable; real ids are discovered from /v1/models
+    "xai": [
+        {"model_id": "grok-4", "display": "Grok 4", "tier": "quality", "tags": ["persian", "long_form", "reasoning", "json"], "context_tokens": 256000, "price_in_per_m": 3.0, "price_out_per_m": 15.0},
+        {"model_id": "grok-4-fast-reasoning", "display": "Grok 4 Fast (reasoning)", "tier": "balanced", "tags": ["persian", "long_form", "reasoning", "json", "cheap"], "context_tokens": 2000000, "price_in_per_m": 0.2, "price_out_per_m": 0.5},
+        {"model_id": "grok-4-fast-non-reasoning", "display": "Grok 4 Fast", "tier": "fast", "tags": ["cheap", "json", "long_form"], "context_tokens": 2000000, "price_in_per_m": 0.2, "price_out_per_m": 0.5},
+        {"model_id": "grok-3-mini", "display": "Grok 3 mini", "tier": "fast", "tags": ["cheap", "json"], "context_tokens": 131072, "price_in_per_m": 0.3, "price_out_per_m": 0.5},
+    ],
     # Free-tier execution is cost-free until the provider quota is exhausted; the gateway falls back on HTTP 429.
     "groq": [
         {"model_id": "qwen/qwen3.6-27b", "display": "Qwen 3.6 27B (Groq free tier)", "tier": "quality", "tags": ["persian", "long_form", "reasoning", "json", "free_quota"], "context_tokens": 131072, "price_in_per_m": 0.0, "price_out_per_m": 0.0},
@@ -55,8 +64,23 @@ def default_models_for(kind: str) -> list[dict[str, Any]]:
     return [dict(m) for m in DEFAULT_CATALOG.get(kind, [])]
 
 
+# discovered ids that are not chat/text models — never routed, never seeded (tts, image/video/music generation, embeddings,
+# transcription, robotics, computer-use agents, deep-research agents, live/audio variants, tool-only previews)
+NON_CHAT_MARKERS = ("tts", "image", "veo", "lyria", "embedding", "transcribe", "robotics", "computer-use", "deep-research", "antigravity",
+                    "aqa", "omni", "nano-banana", "native-audio", "-live", "customtools", "imagen", "whisper", "moderation", "rerank", "audio")
+
+
+def is_chat_model(model_id: str) -> bool:
+    m = model_id.lower()
+    return not any(x in m for x in NON_CHAT_MARKERS)
+
+
 def guess_tier(model_id: str) -> tuple[str, list[str]]:
     m = model_id.lower()
+    if "grok" in m:
+        if "non-reasoning" in m or "mini" in m:
+            return "fast", ["cheap", "json"]
+        return ("balanced" if "fast" in m else "quality"), ["persian", "long_form", "reasoning", "json"]
     if "sonnet" in m:
         return "balanced", ["persian", "long_form", "json"]
     if "haiku" in m:

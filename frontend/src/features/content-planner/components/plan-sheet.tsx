@@ -8,6 +8,7 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError, endpoints, type ContentPlan, type PlanCategory, type PlanMeta, type WsOptions } from '@/lib/api/client';
+import { safeHref } from '@/lib/utils';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -126,7 +127,7 @@ export function PlanSheet({ siteId, pid, meta, categories, onClose, onChanged }:
                 <Button size='sm' variant='outline' disabled={!!busy} onClick={() => run('ai-save', () => endpoints.planPatch(siteId, p.id, { metadata: { ...(p.metadata ?? {}), ai: Object.fromEntries(Object.entries(ai).filter(([, v]) => v !== null && v !== '')) } }), 'تنظیمات AI ذخیره شد')}>{busy === 'ai-save' ? '…' : 'ذخیره تنظیمات AI'}</Button>
                 <Button size='sm' disabled={!!busy} onClick={() => run('gen', async () => { await endpoints.planPatch(siteId, p.id, { metadata: { ...(p.metadata ?? {}), ai: Object.fromEntries(Object.entries(ai).filter(([, v]) => v !== null && v !== '')) } }); const r = await endpoints.planGenerate(siteId, p.id); toast.info(`تولید پیش‌نویس در صف اجرا قرار گرفت (${r.job_id}) — نتیجه در رویدادها و مغز محتوا ظاهر می‌شود`); })}>{busy === 'gen' ? '…' : 'تولید پیش‌نویس'}</Button>
                 <Button size='sm' variant='secondary' disabled={!!busy} onClick={() => { if (confirm(`محتوای این برنامه در وردپرس سایت منتشر شود؟${p.publish_date ? `\nتاریخ انتشار: ${jalaliLong(p.publish_date)}${p.publish_time ? ` ساعت ${p.publish_time}` : ''}` : ''}${p.category?.name ? `\nدسته: ${p.category.name}` : ''}\n(اگر پیش‌نویسی نباشد، اول تولید می‌شود)`)) run('pub-now', async () => { const r = await endpoints.planPublish(siteId, p.id); toast.info(`انتشار در صف اجرا قرار گرفت (${r.job_id})`); }); }}>{busy === 'pub-now' ? '…' : 'انتشار در وردپرس'}</Button>
-                {p.publishing?.wp_post_id && <Badge variant='outline' dir='ltr'><a className='underline' href={p.publishing.link} target='_blank' rel='noreferrer'>منتشرشده · پست #{p.publishing.wp_post_id}</a></Badge>}
+                {p.publishing?.wp_post_id && <Badge variant='outline' dir='ltr'><a className='underline' href={safeHref(p.publishing.link)} target='_blank' rel='noreferrer'>منتشرشده · پست #{p.publishing.wp_post_id}</a></Badge>}
                 <Button size='sm' variant='ghost' disabled={!!busy} onClick={() => run('cap', async () => { const r = await endpoints.wpPublishCapability(siteId); (r.can_publish ? toast.success : toast.warning)(r.message); })}>{busy === 'cap' ? '…' : 'بررسی دسترسی وردپرس'}</Button>
               </div>
               <p className='text-muted-foreground mt-1 text-xs'>انتشار خودکار در تاریخ تقویم فقط وقتی انجام می‌شود که حالت سایت «خودکار» باشد؛ دکمه «انتشار در وردپرس» همیشه با کلیک شما (تأیید انسانی) کار می‌کند.</p>

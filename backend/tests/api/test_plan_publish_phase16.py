@@ -132,6 +132,7 @@ def test_publish_plan_payload_gates_and_audit(c, monkeypatch):
     req = seen[0]
     assert req["url"].endswith("/wp-json/wp/v2/posts") and req["auth"] == ("ehsan", "app-pass")
     assert req["json"]["categories"] == [7] and req["json"]["date"] == "2026-01-15T10:30:00"          # exact calendar date/time
+    assert req["json"]["date_gmt"] == "2026-01-15T07:00:00" and req["json"]["status"] == "publish"   # past date → immediate
     assert "<h2>تیتر</h2>" in req["json"]["content"] and "<strong>مهم</strong>" in req["json"]["content"]
     plan = c.get(f"/api/v1/sites/{SID}/content-plans/{pid}").json()
     assert plan["status"] == "published" and plan["publishing"]["wp_post_id"] == 321 and plan["publishing"]["actor"] == "human"
@@ -149,6 +150,72 @@ def test_publish_plan_payload_gates_and_audit(c, monkeypatch):
     pid3 = _mk_plan(c, title="مقاله سوم", publish_date=None)
     n = len(seen)
     assert w.publish_plan(SID, pid3)["status"] == "no_draft" and len(seen) == n
+
+
+def test_publish_plan_future_date_schedules_inside_wordpress(c, monkeypatch):
+    """تاریخ تقویم که هنوز نرسیده → پست با status=future + date_gmt ارسال می‌شود تا خود وردپرس رأس همان دقیقه منتشر کند."""
+    from seo_brain.integrations.wordpress.writer import plan_schedule
+    monkeypatch.setattr("seo_brain.integrations.wordpress.writer.resolve_auth", lambda sid: WpAuth("ehsan", "app-pass", "test"))
+    pid = _mk_plan(c, title="مقاله آینده", publish_date="2099-03-21", publish_time="08:15")
+    generate_for_plan(c.eng, SID, pid, workspace=FakeWorkspace(c.eng))
+    c.patch(f"/api/v1/sites/{SID}/content-plans/{pid}", json={"metadata": {"featured_media_id": 55}})     # picked in the media library
+    seen: list = []
+    w = WordPressWriter(c.eng, http=wp_http({("POST", "posts"): (201, {"id": 900, "link": "https://demo.example/future/", "status": "future"})}, seen))
+    out = w.publish_plan(SID, pid, actor="human")
+    body = seen[0]["json"]
+    assert body["status"] == "future" and body["date"] == "2099-03-21T08:15:00" and body["date_gmt"] == "2099-03-21T04:45:00" and body["featured_media"] == 55
+    assert out["status"] == "published" and out["wp_status"] == "future" and out["scheduled_for"] == "2099-03-21T08:15:00"
+    plan = c.get(f"/api/v1/sites/{SID}/content-plans/{pid}").json()
+    assert plan["publishing"]["scheduled_for"] == "2099-03-21T08:15:00" and plan["status"] == "published"
+    # helper: site timezone honoured, missing time defaults to 09:00, past → not future
+    s = plan_schedule("2026-01-15", None, "Asia/Tehran")
+    assert s["date"] == "2026-01-15T09:00:00" and s["date_gmt"] == "2026-01-15T05:30:00" and s["future"] is False
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+
+
+def test_media_library_list_upload_and_guards(c, monkeypatch):
+    """Media Library: authenticated GET /wp/v2/media?media_type=image with WP paging headers; upload trusts the bytes
+    (image signature, 10 MB cap), POSTs with Content-Disposition, then sets alt/title in a second call."""
+    from seo_brain.integrations.wordpress.media import WordPressMedia, safe_filename, sniff_image_mime
+    monkeypatch.setattr("seo_brain.integrations.wordpress.media.resolve_auth", lambda sid: WpAuth("ehsan", "app-pass", "test"))
+    seen: list = []
+
+    def handler(method, url, auth=None, **kw):
+        seen.append({"method": method, "url": url, "auth": auth, **kw})
+        if method == "GET":
+            return httpx.Response(200, headers={"x-wp-total": "41", "x-wp-totalpages": "2"}, request=httpx.Request(method, url),
+                                  json=[{"id": 7, "source_url": "https://demo.example/a.jpg", "alt_text": "الف", "title": {"rendered": "A"}, "mime_type": "image/jpeg",
+                                         "media_details": {"width": 800, "height": 600, "sizes": {"medium": {"source_url": "https://demo.example/a-300.jpg"}}}, "date": "2026-09-01T10:00:00"}])
+        if url.endswith("/media/9"):
+            return httpx.Response(200, json={"id": 9, "source_url": "https://demo.example/new.png", "alt_text": kw["json"]["alt_text"], "title": {"rendered": "نو"}, "mime_type": "image/png", "media_details": {}}, request=httpx.Request(method, url))
+        return httpx.Response(201, json={"id": 9, "source_url": "https://demo.example/new.png", "alt_text": "", "title": {"rendered": "new"}, "mime_type": "image/png", "media_details": {}}, request=httpx.Request(method, url))
+
+    m = WordPressMedia(c.eng, http=handler)
+    page = m.list(SID, page=2, per_page=24, search="گیربکس")
+    assert page["total"] == 41 and page["total_pages"] == 2
+    assert page["items"][0] == {"id": 7, "url": "https://demo.example/a.jpg", "thumbnail": "https://demo.example/a-300.jpg", "alt": "الف", "title": "A", "mime": "image/jpeg", "width": 800, "height": 600, "date": "2026-09-01T10:00:00"}
+    assert seen[0]["url"].endswith("/wp-json/wp/v2/media") and seen[0]["params"]["media_type"] == "image" and seen[0]["params"]["search"] == "گیربکس" and seen[0]["auth"] == ("ehsan", "app-pass")
+    up = m.upload(SID, "عکس گیربکس.png", PNG, "image/png", alt_text="گیربکس")
+    assert up["status"] == "uploaded" and up["id"] == 9 and up["alt"] == "گیربکس" and up["url"] == "https://demo.example/new.png"
+    post = seen[1]
+    assert post["method"] == "POST" and post["headers"]["Content-Type"] == "image/png" and post["headers"]["Content-Disposition"].startswith('attachment; filename="image-') and post["content"] == PNG
+    assert seen[2]["url"].endswith("/media/9") and seen[2]["json"] == {"alt_text": "گیربکس"}
+    assert safe_filename("../a b.PNG", "image/png") == "a-b.png" and sniff_image_mime(PNG) == "image/png" and sniff_image_mime(b"hello world") is None
+    # HTTP layer: byte sniffing, size cap, multipart upload, listing, missing credentials
+    monkeypatch.setattr(WordPressMedia, "_request", lambda self, method, url, auth, **kw: handler(method, url, auth=auth, **kw))
+    r = c.post(f"/api/v1/sites/{SID}/wordpress/media/upload", files={"file": ("x.png", b"not really an image", "image/png")})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "unsupported_media_type"
+    r = c.post(f"/api/v1/sites/{SID}/wordpress/media/upload", files={"file": ("big.png", PNG + b"0" * (10 * 1024 * 1024), "image/png")})
+    assert r.status_code == 413
+    r = c.post(f"/api/v1/sites/{SID}/wordpress/media/upload", files={"file": ("shot.png", PNG, "image/png")}, data={"alt_text": "تصویر"})
+    assert r.status_code == 201 and r.json()["id"] == 9 and r.json()["alt"] == "تصویر"
+    r = c.get(f"/api/v1/sites/{SID}/wordpress/media?page=1&search=x")
+    assert r.status_code == 200 and r.json()["items"][0]["id"] == 7 and r.json()["total_pages"] == 2
+    monkeypatch.setattr("seo_brain.integrations.wordpress.media.resolve_auth", lambda sid: None)
+    r = c.get(f"/api/v1/sites/{SID}/wordpress/media")
+    assert r.status_code == 409 and r.json()["error"]["code"] == "credentials_missing"
 
 
 def test_capability_probe_roles_and_endpoint(c, monkeypatch):

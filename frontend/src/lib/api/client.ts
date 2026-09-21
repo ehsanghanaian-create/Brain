@@ -223,9 +223,14 @@ export type ContentCalendar = { from: string; to: string; days: Record<string, C
 export type ContentMeta = { statuses: { key: ContentStatus; fa: string; next: ContentStatus[] }[]; priorities: string[] };
 export type ProviderKind = { kind: string; label: string; base_url: string; models: string[]; needs_key: boolean; is_gateway?: boolean; setup?: { console_url: string; key_prefix: string; docs: string; fa: string }; auth_type?: 'api_key' | 'optional_api_key'; requires_base_url?: boolean; supports_model_discovery?: boolean; capabilities?: string[]; env_key?: string; env_model?: string };
 export type RecommendedRoute = { task_kind: string; provider_id: number; provider_name: string; model: string; fallback_model: string | null; policy: string };
-export type ProviderConfig = { id: number; name: string; kind: string; kind_label: string; base_url: string | null; default_model: string | null; models: string[]; enabled: boolean; has_key: boolean; key_hint: string | null; last_test: { ok: boolean; status: string; message: string; tested_at: string; models_found?: string[] } | null; created_at: string; updated_at: string; is_gateway?: boolean; route_kind?: 'direct' | 'gateway'; endpoint_url?: string | null; configured?: boolean };
+export type ProviderConfig = { id: number; name: string; kind: string; kind_label: string; base_url: string | null; default_model: string | null; models: string[]; enabled: boolean; has_key: boolean; key_hint: string | null; last_test: { ok: boolean; status: string; message: string; tested_at: string; models_found?: string[] } | null; created_at: string; updated_at: string; is_gateway?: boolean; route_kind?: 'direct' | 'gateway'; endpoint_url?: string | null; configured?: boolean; key_source?: 'secret_store' | 'env' | null; key_set_at?: string | null; key_expires_at?: string | null; key_expired?: boolean; key_days_left?: number | null };
 export type GatewayStatus = { provider_id: number; name: string; kind: string; is_gateway: boolean; endpoint_url: string | null; status: 'connected' | 'error' | 'untested' | 'missing_credentials'; has_key: boolean; last_test: any; health: Record<string, any> | null; breaker_open: boolean; capabilities: Record<string, any>; adapter_health: Record<string, any> | null; routing: { last_decision: Record<string, string> | null; primary_for: string[]; auto_models: string[]; models_available: number; models: string[] }; fallback: { fallback_for: string[]; chain_fallback: string; upstream?: string | null }; recent_calls: { id: number; model: string; ok: number; latency_ms: number; cost_usd: number; task_kind: string; created_at: string; error: string | null }[] };
 export type TaskRoute = { task_kind: string; site_id: string; provider_id: number | null; model: string | null; fallback_provider_id: number | null; fallback_model: string | null; provider_name: string | null; fallback_provider_name: string | null; updated_at: string | null; policy?: 'explicit' | 'auto' | 'echo'; fallbacks?: { provider_id: number; model: string; provider_name?: string | null }[] };
+// WordPress media library + editor assistant (content calendar)
+export type WpMediaItem = { id: number; url: string; thumbnail: string; alt: string; title: string; mime: string | null; width: number | null; height: number | null; date: string | null };
+export type WpMediaPage = { items: WpMediaItem[]; page: number; per_page: number; total: number; total_pages: number };
+export type AssistMode = 'chat' | 'seo' | 'rewrite' | 'shorten' | 'expand' | 'faq';
+export type AssistResult = { ok: boolean; run_id: string; mode: AssistMode; reply: string; revised_markdown: string | null; meta: { provider: string; model: string; input_tokens: number; output_tokens: number; cost_usd: number; latency_ms: number; elapsed_ms: number; route: any[]; policy: string } };
 // phase 7 — content intelligence
 export type ContentDraft = { id: number; content_id: number; version: number; title: string | null; meta_description: string | null; format: string; body?: string; body_text?: string; word_count: number; structure: { h1: string[]; h2: string[]; h3: string[]; paragraphs: string[]; links: { href: string; anchor: string }[]; images: { src: string; alt: string }[]; questions: string[]; faq: boolean; word_count: number }; source: string; author: string | null; revision_of: number | null; change_summary: string | null; provenance: Record<string, unknown>; review_status: string; created_at: string };
 export type ScoreFinding = { rule: string; dim: string; passed: boolean; weight: number; evidence: string; fix_fa: string };
@@ -284,6 +289,19 @@ export type JobRun = {
   result: unknown;
   error: string | null;
 };
+
+export type PhoneScanPage = { wp_id: number; type: string; url: string | null; title: string | null; hits: Record<string, number>; total: number };
+export type PhoneScan = { site_id: string; phone: string; forms: string[]; pages: PhoneScanPage[]; pages_total: number; occurrences: number; template: { home_html: number; outside_content: number; home_read: boolean; note: string } };
+export type PhoneReplaceRow = { wp_id: number; url: string | null; title: string | null; hits?: number; fields?: string[]; status?: string; message?: string; fields_written?: string[] };
+export type PhoneReplaceResult = { status: 'preview' | 'applied' | 'not_configured' | 'credentials_missing' | 'invalid'; message?: string; changed: number; pages_found: number; pages_targeted: number; results: PhoneReplaceRow[]; remaining: { template_or_elementor: number; pages_left: number | null; note: string }; runbook?: string; next_step?: string };
+export type PhoneChangePlan = { site: string | null; old8: string; new8: string; replacements: { old: string; new: string }[]; sql: Record<'sql_text' | 'sql_escaped' | 'sql_cache' | 'sql_verify', string>; prompt_ref: string | null; runbook: string };
+export type IpGraphNode = { id: string; kind: 'source' | 'actor' | 'page' | 'goal'; label: string; sub?: string | null; status: string; weight: number; meta: Record<string, unknown> };
+export type IpGraphEdge = { id: string; source: string; target: string; kind: 'entry' | 'landing' | 'goal'; weight: number; status: string };
+export type IpGraph = { scope: 'seo' | 'ads'; site_id: string; hours: number; nodes: IpGraphNode[]; edges: IpGraphEdge[]; stats: Record<string, unknown>; generated_at: string };
+export type NetworkStatus = 'ok' | 'warn' | 'off';
+export type NetworkNode = { id: string; kind: 'brain' | 'provider' | 'site' | 'gsc' | 'ga4'; label: string; status: NetworkStatus; meta: Record<string, unknown> };
+export type NetworkEdge = { id: string; source: string; target: string; kind: 'ai' | 'wp' | 'gsc' | 'ga4' | 'backlink'; label: string; status: NetworkStatus; weight: number };
+export type NetworkGraph = { nodes: NetworkNode[]; edges: NetworkEdge[]; counts: { providers: number; sites: number; cross_links: number } };
 
 export const endpoints = {
   health: () => api<Health>('/health'),
@@ -472,6 +490,8 @@ export const endpoints = {
   planGenerate: (id: string, pid: number, thenPublish = false) => api<{ status: string; job_id: string; then_publish: boolean }>(`/sites/${encodeURIComponent(id)}/content-plans/${pid}/generate${thenPublish ? '?then_publish=true' : ''}`, { method: 'POST' }),
   planPublish: (id: string, pid: number) => api<{ status: string; job_id: string }>(`/sites/${encodeURIComponent(id)}/content-plans/${pid}/publish`, { method: 'POST' }),
   wpPublishCapability: (id: string) => api<{ site_id: string; mode: string; configured: boolean; can_publish: boolean; username?: string; roles?: string[]; message: string }>(`/sites/${encodeURIComponent(id)}/wordpress/publish-capability`),
+  wpMediaList: (id: string, params: { page?: number; per_page?: number; search?: string } = {}) => { const q = new URLSearchParams(); Object.entries(params).forEach(([k, v]) => v !== undefined && v !== '' && q.set(k, String(v))); return api<WpMediaPage>(`/sites/${encodeURIComponent(id)}/wordpress/media?${q.toString()}`); },
+  wpMediaUpload: (id: string, file: File, meta: { alt_text?: string; title?: string } = {}) => { const fd = new FormData(); fd.append('file', file); if (meta.alt_text) fd.append('alt_text', meta.alt_text); if (meta.title) fd.append('title', meta.title); return api<WpMediaItem & { status: string }>(`/sites/${encodeURIComponent(id)}/wordpress/media/upload`, { method: 'POST', body: fd }); },
   // security.* capability — human-triggered IP blocking relayed to the site's own WP plugin
   securityStatus: (id: string) => api<{ connected: boolean; plugin_version?: string; writable?: boolean; count?: number; code?: string; message?: string }>(`/sites/${encodeURIComponent(id)}/security/status`),
   securityBlocked: (id: string) => api<{ connected: boolean; message?: string; items: { ip: string; reason: string | null; blocked_at: string | null; status: string }[] }>(`/sites/${encodeURIComponent(id)}/security/blocked`),
@@ -518,6 +538,19 @@ export const endpoints = {
   wsGenerate: (id: string, body: WsSpec) => api<WsResult>(`/sites/${encodeURIComponent(id)}/ai-workspace/generate`, { method: 'POST', json: body }),
   wsSaveDraft: (id: string, body: { content_id: number; markdown: string; title?: string | null; meta_description?: string | null; meta?: Record<string, unknown> }) => api<{ draft_id: number; version: number; content_id: number }>(`/sites/${encodeURIComponent(id)}/ai-workspace/save-draft`, { method: 'POST', json: body }),
   wsHistory: (id: string) => api<any[]>(`/sites/${encodeURIComponent(id)}/ai-workspace/history`),
+  /** Settings → «شبکهٔ Brain»: Brain ↔ AI writers ↔ sites ↔ GSC/GA4 + cross-site links (read-only snapshot). */
+  /** Operator runbook for swapping a site's phone number (files + DB + Elementor data + caches). Brain only writes the text. */
+  /** Where the number appears on the site (Brain's synced copy + the live home page). */
+  phoneScan: (siteId: string, phone: string) => api<PhoneScan>(`/tools/sites/${encodeURIComponent(siteId)}/phone/scan?phone=${encodeURIComponent(phone)}`),
+  /** Preview (dry_run) or actually change the number on the site through WordPress. */
+  phoneReplace: (siteId: string, body: { old_phone: string; new_phone: string; dry_run: boolean; only_ids?: number[] }) =>
+    api<PhoneReplaceResult>(`/tools/sites/${encodeURIComponent(siteId)}/phone/replace`, { method: 'POST', json: body }),
+  phoneChangePlan: (body: { old_phone: string; new_phone: string; site_id?: string; site?: string; db_name?: string; prefix?: string }) =>
+    api<PhoneChangePlan>('/tools/phone-change', { method: 'POST', json: body }),
+  network: () => api<NetworkGraph>('/network'),
+  /** Entry-flow graph: source → visitor/IP → landing page → تماس. scope `seo` = cookieless tracker, `ads` = ads collector IPs. */
+  ipGraph: (scope: 'seo' | 'ads', siteId: string, hours = 168, limit = 30) => api<IpGraph>(`/ip-graph?scope=${scope}&site_id=${encodeURIComponent(siteId)}&hours=${hours}&limit=${limit}`),
+  wsAssist: (id: string, body: { markdown: string; message?: string; mode: AssistMode; title?: string; keyword?: string; history?: { role: 'user' | 'assistant'; content: string }[]; provider?: string | null; model?: string | null }) => api<AssistResult>(`/sites/${encodeURIComponent(id)}/ai-workspace/assist`, { method: 'POST', json: body }),
   // phase 9 — ai orchestration
   aiTaskKinds: () => api<{ kind: string; fa: string; policy: any }[]>('/ai/task-kinds'),
   aiModels: (providerId?: number) => api<AiModel[]>(`/ai/models${providerId ? `?provider_id=${providerId}` : ''}`),

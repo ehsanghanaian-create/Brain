@@ -640,10 +640,11 @@
   }
 }
 
-/* SEO Brain: Persian-first typography. next/font exposes --font-vazirmatn on <body>; the theme files
-   reference it through --font-sans, and this rule guarantees the fallback chain everywhere. */
+/* SEO Brain: Persian-first typography. Vazirmatn (variable) is self-hosted through @fontsource-variable/vazirmatn
+   (imported in app/layout.tsx — no network at build time); the theme files reference it through --font-sans. */
 :root,
 [data-theme] body {
+  --font-vazirmatn: 'Vazirmatn Variable';
   --font-sans: var(--font-vazirmatn), Vazirmatn, 'Segoe UI', Tahoma, system-ui, sans-serif;
   font-family: var(--font-sans);
 }
@@ -652,9 +653,11 @@
    SEO Brain — SaaS polish layer (Persian/RTL, light + dark). Additive: tightens typography, tables, cards, forms and
    focus states without changing component APIs. */
 @layer components {
-  html { font-feature-settings: 'ss01', 'cv01'; }
-  body { font-size: 0.9375rem; line-height: 1.6; -webkit-font-smoothing: antialiased; }
-  h1, h2, h3, h4 { letter-spacing: -0.01em; text-wrap: balance; }
+  html { font-feature-settings: 'ss01', 'cv01'; font-size: 16px; }
+  body { font-size: 0.9375rem; line-height: 1.7; -webkit-font-smoothing: antialiased; font-variation-settings: 'wght' 420; }
+  h1, h2, h3, h4 { letter-spacing: 0; text-wrap: balance; font-variation-settings: 'wght' 700; line-height: 1.35; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.25rem; } h3 { font-size: 1.05rem; }
+  strong, b, .font-semibold, .font-bold { font-variation-settings: 'wght' 650; }
   p, li, td, th { text-wrap: pretty; }
   [data-slot='card'] { @apply shadow-xs transition-shadow duration-200; }
   [data-slot='card']:hover { @apply shadow-sm; }
@@ -677,4 +680,19 @@
   pre { @apply text-[12px] leading-relaxed; }
   .page-grid { @apply grid gap-4; }
   @media (min-width: 1536px) { .page-grid { gap: 1.25rem; } }
+  /* knowledge graph: animated layout switches + neon node glow on hover */
+  .graph-animating .react-flow__node { transition: transform 600ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .seo-node:hover { box-shadow: 0 0 0 1px var(--node-color), 0 0 24px -4px var(--node-color); }
+  .react-flow__node.selected .seo-node { animation: node-pulse 2.2s ease-in-out infinite; }
+  @keyframes node-pulse {
+    0%, 100% { box-shadow: 0 0 0 2px var(--node-color), 0 0 18px -4px var(--node-color); }
+    50% { box-shadow: 0 0 0 3px var(--node-color), 0 0 34px -2px var(--node-color); }
+  }
+  /* floating glowing dots on tab / menu clicks (SparkleLayer) */
+  .sparkle-dot { position: absolute; border-radius: 9999px; opacity: 0; transform: translate(-50%, -50%) scale(0.4); box-shadow: 0 0 8px 1px currentColor; will-change: transform, opacity; animation: sparkle-float 950ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+  @keyframes sparkle-float {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4); }
+    18% { opacity: 1; }
+    100% { opacity: 0; transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy) - 12px)) scale(1); }
+  }
 }

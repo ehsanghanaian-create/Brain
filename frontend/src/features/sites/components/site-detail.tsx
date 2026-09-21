@@ -8,13 +8,14 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ApiError, endpoints, type ConnectionsStatus, type ContentKnowledgePack, type GraphSummary, type InitializeResult, type JobRun, type Site, type SiteMemory } from '@/lib/api/client';
 import { useQuery } from '@tanstack/react-query';
-import { IconActivity, IconAdjustments, IconBrain, IconCheck, IconClock, IconExternalLink, IconPlugConnected, IconRefresh, IconSettings, IconWorld } from '@tabler/icons-react';
+import { IconActivity, IconAdjustments, IconBrain, IconCheck, IconClock, IconExternalLink, IconPhone, IconPlugConnected, IconRefresh, IconSettings, IconWorld } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { BUSINESS_CATEGORIES, MODE_FA } from '../constants';
 import { AutoSyncLine } from './auto-sync-line';
 import { StatusBadge } from './connection-tester';
+import { PhoneTab } from './phone-tab';
 import { SecurityCard } from './security-card';
 import { DeleteSiteButton } from './delete-site-button';
 import { Ga4IntegrationCard } from './ga4-integration-card';
@@ -24,8 +25,8 @@ import { SiteBrainForm } from './site-brain-form';
 import { WordPressIntegrationCard } from './wordpress-sync-card';
 
 const fa = new Intl.NumberFormat('fa-IR');
-type SiteTab = 'overview' | 'integrations' | 'automation' | 'brain' | 'settings';
-const validTabs = new Set<SiteTab>(['overview', 'integrations', 'automation', 'brain', 'settings']);
+type SiteTab = 'overview' | 'integrations' | 'automation' | 'phone' | 'brain' | 'settings';
+const validTabs = new Set<SiteTab>(['overview', 'integrations', 'automation', 'phone', 'brain', 'settings']);
 
 export function SiteDetail({ site, connections, memory, graph, initialTab }: {
   site: Site;
@@ -90,6 +91,7 @@ export function SiteDetail({ site, connections, memory, graph, initialTab }: {
           <TabsTrigger value='overview'><IconActivity />نمای کلی</TabsTrigger>
           <TabsTrigger value='integrations'><IconPlugConnected />اتصال‌ها</TabsTrigger>
           <TabsTrigger value='automation'><IconClock />عملیات و زمان‌بندی</TabsTrigger>
+          <TabsTrigger value='phone'><IconPhone />شمارهٔ تماس</TabsTrigger>
           <TabsTrigger value='brain'><IconBrain />مغز سایت</TabsTrigger>
           <TabsTrigger value='settings'><IconSettings />تنظیمات</TabsTrigger>
         </TabsList>
@@ -162,6 +164,10 @@ export function SiteDetail({ site, connections, memory, graph, initialTab }: {
           <CardContent><AutoSyncLine siteId={site.site_id} /></CardContent>
         </Card>
         <SiteJobs siteId={site.site_id} />
+      </TabsContent>
+
+      <TabsContent value='phone' className='space-y-4'>
+        {tab === 'phone' && <PhoneTab siteId={site.site_id} />}
       </TabsContent>
 
       <TabsContent value='brain' className='grid items-start gap-4 xl:grid-cols-[1.25fr_1fr]'>

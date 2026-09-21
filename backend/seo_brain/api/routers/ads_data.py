@@ -187,6 +187,18 @@ def _ip_hash(ip: str) -> str:
     return hmac.new(secret.encode("utf-8"), ip.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
+def _csv_safe(value):
+    """Visitor-controlled strings (paths, referrers, UTM, keyword) must not become spreadsheet formulas when the
+    export is opened in Excel/LibreOffice: neutralise leading = + - @ and control characters with a quote."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
+def _csv_row(row: dict) -> dict:
+    return {k: _csv_safe(v) for k, v in row.items()}
+
+
 def _minimal_user_agent(value: str | None) -> str | None:
     """Keep coarse browser/OS classes, never the full fingerprintable UA."""
     raw = (value or "").lower()
@@ -999,7 +1011,7 @@ def ips_csv(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query(
     writer = csv.DictWriter(stream, fieldnames=columns, extrasaction="ignore")
     writer.writeheader()
     for item in items:
-        writer.writerow({**item, "risk_reasons": "|".join(item["risk_reasons"])})
+        writer.writerow(_csv_row({**item, "risk_reasons": "|".join(item["risk_reasons"])}))
     filename = f"ads-ip-data-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.csv"
     return Response(stream.getvalue(), media_type="text/csv; charset=utf-8", headers={
         "Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store",
@@ -1364,7 +1376,7 @@ def events_csv(hours: int = Query(default=0, ge=0, le=87_600),
     writer = csv.DictWriter(stream, fieldnames=EVENT_EXPORT_COLUMNS, extrasaction="ignore")
     writer.writeheader()
     for row in rows:
-        writer.writerow(row)
+        writer.writerow(_csv_row(dict(row)))
     filename = f"ads-event-log-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.csv"
     return Response(stream.getvalue(), media_type="text/csv; charset=utf-8", headers={
         "Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store",

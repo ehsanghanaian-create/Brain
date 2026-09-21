@@ -132,4 +132,13 @@ diff -rq /tmp/pkg <clone>/backend/seo_brain -x __pycache__
 
 ## ۹) نسخهٔ نصبی ویندوز
 
-پکیج `deploy/windows-local/` (در ZIP تحویلی، در ریشه قرار می‌گیرد): ‏`INSTALL.bat` (ساخت venv + نصب backend + ‏seed دیتابیس + ‏npm install/build + شورت‌کات دسکتاپ)، ‏`START.bat` (بک‌اند + فرانت production + بازکردن مرورگر)، ‏`STOP.bat`، ‏`UNINSTALL.bat`. جزئیات در `README-FA.md` داخل پکیج.
+بستهٔ آفلاین با یک دستور از روی کامیت جاری ساخته می‌شود:
+
+```
+powershell -ExecutionPolicy Bypass -File deploy\windows-local\packaging\build-package.ps1            # با دادهٔ اولیه (seed)
+powershell -ExecutionPolicy Bypass -File deploy\windows-local\packaging\build-package.ps1 -NoSeed    # بستهٔ تمیز برای دیگران
+```
+
+خروجی در `D:\seo-brain-dist`: ‏`SEO-Brain-Setup-<date>.exe` (ویزارد تک‌فایلی: stub سی‌شارپِ `packaging/Setup.cs` + ‏ZIP چسبیده به انتهای EXE) و ‏`SEO-Brain-Portable-<date>.zip` (همان فایل‌ها + ‏`INSTALL.bat`). داخل بسته: ‏Node پرتابل، نصب‌کنندهٔ رسمی Python 3.12، ‏wheelهای بک‌اند برای cp312 و cp313 (`runtime\wheels` ← ‏`pip --no-index`)، رابط وبِ ازپیش‌ساخته (`frontend-standalone` = ‏Next standalone، بدون `npm install`/build روی مقصد) و در صورت نیاز `seed\*.db`.
+اسکریپت‌های زمان نصب/اجرا: ‏`installer\install.ps1` (venv + نصب آفلاین + seed + migrate + میان‌برها)، ‏`start.ps1` (بک‌اند + ‏`node frontend-standalone\server.js` روی 127.0.0.1)، ‏`stop.ps1`، ‏`uninstall.ps1`. نصب بی‌صدا برای تست: ‏`Setup.exe /silent /dir=D:\some-folder /noshortcut /nolaunch /noregistry` (لاگ در `run\setup.log`).
+فایل‌های Node/Python باید در `D:\seo-brain-dist\runtime` باشند (`node-v*-win-x64.zip` و `python-3.*-amd64.exe`).

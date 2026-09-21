@@ -79,3 +79,31 @@ def save_draft(site_id: str, body: SaveDraftBody, w: ContentTestWorkspace = Depe
 @router.get("/history")
 def history(site_id: str, limit: int = 20, w: ContentTestWorkspace = Depends(ws)) -> list[dict]:
     return w.history(site_id, limit)
+
+
+class AssistBody(BaseModel):
+    markdown: str = Field(default="", max_length=200_000)
+    message: str = Field(default="", max_length=4000)
+    mode: str = "chat"
+    title: str | None = Field(default=None, max_length=300)
+    keyword: str | None = Field(default=None, max_length=200)
+    history: list[dict[str, Any]] = Field(default_factory=list)
+    provider: str | None = None
+    model: str | None = None
+
+
+@router.post("/assist")
+def assist(site_id: str, body: AssistBody, g: Gateway = Depends(gateway)) -> dict:
+    """Editor chat: SEO review / rewrite / shorten / expand / FAQ / free question about the article in the editor.
+    Runs through the same Gateway path (ledger, budget, fallbacks); nothing is saved — the user applies the result."""
+    from ...brain.generation.assist import MODES, EditorAssistant
+    if body.mode not in MODES:
+        raise ApiError(422, f"حالت نامعتبر: {body.mode}", code="validation_error", details={"allowed": list(MODES)})
+    try:
+        out = EditorAssistant(g.engine, g).run(site_id, markdown=body.markdown, message=body.message, mode=body.mode, title=body.title or "", keyword=body.keyword or "",
+                                               history=body.history[-8:], provider=body.provider, model=body.model)
+    except BudgetExceeded as e:
+        raise ApiError(409, str(e), code="budget_exceeded")
+    if not out.get("ok"):
+        raise ApiError(502, f"دستیار پاسخ نداد: {out.get('error')}", code="assist_failed")
+    return out

@@ -1,5 +1,17 @@
 import { NavGroup } from '@/types';
 
+// Hidden from the sidebar and command palette for now; the pages stay reachable by URL.
+export const hiddenNavUrls = new Set([
+  '/dashboard/keywords',
+  '/dashboard/content',
+  '/dashboard/content-planner',
+  '/dashboard/ai-content-test',
+  '/dashboard/ai-studio',
+  '/dashboard/ai-models',
+  '/dashboard/internal-linking',
+  '/dashboard/opportunities'
+]);
+
 /**
  * SEO Brain navigation — one entry per product area (docs/seo-brain/01-architecture.md §5).
  * Titles are Persian (RTL UI). `description` feeds tooltips / help (Phase 18).
@@ -18,7 +30,7 @@ export const navGroups: NavGroup[] = [
     ]
   },
   {
-    label: 'دانش و کلمات کلیدی',
+    label: 'دانش',
     items: [
       { title: 'گراف دانش', url: '/dashboard/graph', icon: 'graph', shortcut: ['g', 'g'], items: [],
         description: 'گراف صفحات، کوئری‌ها، موجودیت‌ها و اسکیما (فاز ۴)' },
@@ -29,12 +41,12 @@ export const navGroups: NavGroup[] = [
   {
     label: 'محتوا',
     items: [
-      { title: 'برنامه‌ریز محتوا', url: '/dashboard/content-planner', icon: 'planner', items: [],
-        description: 'جدول برنامه‌ریزی، کانبان، تقویم، دسته‌ها، نگاشت کلمات و پیشنهادهای مغز (فاز ۸.۵)' },
+      { title: 'تقویم محتوا', url: '/dashboard/calendar', icon: 'calendar', items: [],
+        description: 'برنامه‌ریزی، نوشتن با هوش مصنوعی و انتشار زمان‌بندی‌شده در وردپرس — همه در یک تقویم' },
+      { title: 'برنامه‌ریز پیشرفته', url: '/dashboard/content-planner', icon: 'planner', items: [],
+        description: 'جدول برنامه‌ریزی، کانبان، دسته‌ها، نگاشت کلمات و پیشنهادهای مغز (فاز ۸.۵)' },
       { title: 'مغز محتوا', url: '/dashboard/content', icon: 'content', items: [],
-        description: 'خط لوله تولید محتوا: ایده تا انتشار (فاز ۶)' },
-      { title: 'تقویم محتوایی', url: '/dashboard/calendar', icon: 'calendar', items: [],
-        description: 'زمان‌بندی محتوا با نمای ماهانه و هفتگی (فاز ۷)' }
+        description: 'خط لوله تولید محتوا: ایده تا انتشار (فاز ۶)' }
     ]
   },
   {

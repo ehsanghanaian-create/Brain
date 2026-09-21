@@ -233,6 +233,8 @@ ai_providers = Table(
     Column("secret_ref", String),
     Column("key_hint", String),
     Column("last_test", Text),
+    Column("key_set_at", String),
+    Column("key_expires_at", String),
     Column("created_at", String, nullable=False),
     Column("updated_at", String, nullable=False),
 )

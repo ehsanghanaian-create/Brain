@@ -115,6 +115,7 @@ def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = 
                 stats["errors"].append(str(e))
                 log.error(str(e))
             stats["taxonomies"][slug] = n
+            conn.commit()      # release the write lock between network fetches — other writers wait at most one burst
 
         # post types
         types = client.public_content_types()
@@ -175,6 +176,7 @@ def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = 
             stats["types"].setdefault(row["type"], 0)
             stats["types"][row["type"]] += 1
         stats["posts"] = sum(stats["types"].values())
+        conn.commit()
 
         # media (alt text is SEO-relevant)
         _p("media")
@@ -186,9 +188,12 @@ def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = 
                     "mime_type": m.get("mime_type"), "post_wp_id": m.get("post"),
                 }, ["site_id", "wp_id"])
                 stats["media"] += 1
+                if stats["media"] % 200 == 0:
+                    conn.commit()
         except WPError as e:
             stats["errors"].append(str(e))
             log.error(str(e))
+        conn.commit()
 
         status = "completed" if not stats["errors"] else "completed_with_errors"
         conn.execute("UPDATE sync_runs SET finished_at=?, status=?, rows_written=?, notes=? WHERE run_id=?",

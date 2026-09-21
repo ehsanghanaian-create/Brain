@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 import httpx
 from sqlalchemy import Engine, and_, func, select, text
+from sqlalchemy.exc import OperationalError
 
 from ...db.repositories.base import dumps, loads, utcnow
 from ...db.tables import ai_calls, ai_models, ai_provider_health, ai_providers
@@ -26,7 +27,7 @@ from ..providers.base import EchoProvider, ProviderError
 from ..types import AIRequest, AITask
 from ..validator import ChainValidator, JsonKeysValidator, NonEmptyValidator, ValidationError
 from .adapters import HttpAdapter, make_adapter
-from .catalog import cost_usd, default_models_for, estimate_tokens, guess_tier
+from .catalog import cost_usd, default_models_for, estimate_tokens, guess_tier, is_chat_model
 
 log = logging.getLogger("ai.gateway")
 
@@ -121,7 +122,7 @@ class Gateway:
                 cx.execute(ai_models.insert().values(provider_id=provider_id, model_id=m["model_id"], display=m.get("display"), tier=m["tier"], tags=dumps(m["tags"]), context_tokens=m.get("context_tokens"),
                                                      price_in_per_m=m["price_in_per_m"], price_out_per_m=m["price_out_per_m"], enabled=1, source="catalog", updated_at=utcnow())); n += 1; existing.add(m["model_id"])
             for mid in discovered or []:
-                if mid in existing:
+                if mid in existing or not is_chat_model(mid):
                     continue
                 tier, tags = guess_tier(mid)
                 cx.execute(ai_models.insert().values(provider_id=provider_id, model_id=mid, display=mid, tier=tier, tags=dumps(tags + (["local"] if kind == "ollama" else [])), price_in_per_m=0, price_out_per_m=0,
@@ -170,7 +171,22 @@ class Gateway:
             r = cx.execute(select(ai_provider_health.c.breaker_open_until).where(ai_provider_health.c.provider == provider)).first()
         return bool(r and r[0] and r[0] > utcnow())
 
+    def reset_breaker(self, provider: str) -> None:
+        """A successful human-triggered connection test re-closes the circuit: the failures that opened it (dead proxy,
+        transient 503s) are no longer evidence, so the next real call should try the provider again immediately."""
+        with self.engine.begin() as cx:
+            cx.execute(ai_provider_health.update().where(ai_provider_health.c.provider == provider)
+                       .values(consecutive_failures=0, breaker_open_until=None, updated_at=utcnow()))
+
     def _record_health(self, provider: str, ok: bool, latency_ms: int, error: str | None) -> None:
+        """Bookkeeping must never turn an AI call into a 500: when a sync/graph job holds the SQLite write lock longer
+        than busy_timeout, skip the health row (logged) instead of failing the request."""
+        try:
+            self._record_health_locked(provider, ok, latency_ms, error)
+        except OperationalError as e:  # noqa: BLE001
+            log.warning("ai health row for %s skipped: %s", provider, str(e).splitlines()[0][:120])
+
+    def _record_health_locked(self, provider: str, ok: bool, latency_ms: int, error: str | None) -> None:
         with self.engine.begin() as cx:
             r = cx.execute(select(ai_provider_health).where(ai_provider_health.c.provider == provider)).first()
             if not r:
@@ -249,7 +265,9 @@ class Gateway:
                 except ProviderError as e:
                     ms = int((time.perf_counter() - t0) * 1000); last_err = f"ProviderError: {e}"
                     result.attempts.append(Attempt(step.provider, step.model, False, last_err, ms))
-                    if step.provider != "echo": self._record_health(step.provider, False, ms, str(e))
+                    # a retired/mistyped model id (HTTP 404) says nothing about the provider's health — counting it would
+                    # trip the breaker for every other model of that provider
+                    if step.provider != "echo" and "(HTTP 404)" not in str(e): self._record_health(step.provider, False, ms, str(e))
                     if not e.retryable or attempt_no == 1:
                         break
                     time.sleep(0.2)
@@ -257,6 +275,13 @@ class Gateway:
         return result
 
     def _ledger(self, task: AITask, meta: CallMeta, resp, attempts: list[Attempt], ok: bool, error: str | None = None) -> None:
+        """Same rule as the health row: a locked ledger is logged, never surfaced as a failed AI call."""
+        try:
+            self._ledger_locked(task, meta, resp, attempts, ok, error)
+        except OperationalError as e:  # noqa: BLE001
+            log.warning("ai ledger row skipped (run %s): %s", meta.run_id, str(e).splitlines()[0][:120])
+
+    def _ledger_locked(self, task: AITask, meta: CallMeta, resp, attempts: list[Attempt], ok: bool, error: str | None = None) -> None:
         with self.engine.begin() as cx:
             cx.execute(ai_calls.insert().values(site_id=meta.site_id, run_id=meta.run_id, content_id=meta.content_id, agent=meta.agent, task_kind=task.kind.value if hasattr(task.kind, "value") else str(task.kind),
                                                 provider=resp.provider if resp else (attempts[-1].provider if attempts else "?"), model=resp.model if resp else (attempts[-1].model if attempts else "?"),

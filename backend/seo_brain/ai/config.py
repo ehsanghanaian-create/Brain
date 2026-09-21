@@ -19,15 +19,22 @@ log = logging.getLogger("ai.config")
 
 PROVIDER_KINDS: dict[str, dict[str, Any]] = {
     "anthropic": {"label": "Claude (Anthropic)", "base_url": "https://api.anthropic.com", "models": ["claude-sonnet-5", "claude-opus-5", "claude-haiku-4-5", "claude-opus-4-8", "claude-sonnet-4-6", "claude-fable-5"], "needs_key": True,
+                  "env_key": "ANTHROPIC_API_KEY", "env_model": "ANTHROPIC_MODEL",
+                  "capabilities": ["content_generation", "seo_analysis", "content_rewrite", "structured_output", "long_context"],
                   "setup": {"console_url": "https://platform.claude.com/settings/keys", "key_prefix": "sk-ant-", "docs": "https://platform.claude.com/docs/en/get-started",
                             "fa": "کلید API را از کنسول Anthropic (Settings → API keys) بسازید و همین‌جا وارد کنید. کلید فقط یک‌بار ارسال می‌شود، با DPAPI روی همین دستگاه رمزنگاری می‌شود و هرگز در پاسخ API، لاگ یا دیتابیس ظاهر نمی‌شود."}},
     "openai": {"label": "ChatGPT (OpenAI)", "base_url": "https://api.openai.com/v1", "models": ["gpt-5", "gpt-5-mini", "gpt-4.1", "gpt-4o"], "needs_key": True},
-    "google": {"label": "Gemini (Google)", "base_url": "https://generativelanguage.googleapis.com/v1beta", "models": ["gemini-3.6-flash", "gemini-2.5-pro", "gemini-2.5-flash"], "needs_key": True,
+    "google": {"label": "Gemini (Google)", "base_url": "https://generativelanguage.googleapis.com/v1beta", "models": ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash"], "needs_key": True,
                # env fallback only — the primary path stays UI → SecretStore; the env var is read, never stored or logged
                "env_key": "GEMINI_API_KEY", "env_model": "GEMINI_MODEL",
                "capabilities": ["content_generation", "seo_analysis", "content_rewrite", "structured_output", "long_context"],
                "setup": {"console_url": "https://aistudio.google.com/apikey", "key_prefix": "AIza", "docs": "https://ai.google.dev/gemini-api/docs",
-                         "fa": "کلید API را از Google AI Studio (aistudio.google.com/apikey) بسازید و همین‌جا وارد کنید. کلید با DPAPI روی همین دستگاه رمزنگاری می‌شود و هرگز در پاسخ API، لاگ یا دیتابیس ظاهر نمی‌شود. مدل پیش‌فرض Gemini 3.6 Flash است (متن بلند، خروجی JSON، فارسی)."}},
+                         "fa": "کلید API را از Google AI Studio (aistudio.google.com/apikey) بسازید و همین‌جا وارد کنید. کلید با DPAPI روی همین دستگاه رمزنگاری می‌شود و هرگز در پاسخ API، لاگ یا دیتابیس ظاهر نمی‌شود. مدل پیش‌فرض Gemini 3.5 Flash است (سطح رایگان، متن بلند، خروجی JSON، فارسی)؛ نسخه‌های 3.6/3.8 در سطح رایگان اغلب «شلوغ» (HTTP 503) هستند."}},
+    "xai": {"label": "Grok (xAI)", "base_url": "https://api.x.ai/v1", "models": ["grok-4", "grok-4-fast-reasoning", "grok-4-fast-non-reasoning", "grok-3-mini"], "needs_key": True,
+            "env_key": "XAI_API_KEY", "env_model": "XAI_MODEL",
+            "capabilities": ["content_generation", "seo_analysis", "content_rewrite", "structured_output", "long_context"],
+            "setup": {"console_url": "https://console.x.ai", "key_prefix": "xai-", "docs": "https://docs.x.ai/docs",
+                      "fa": "کلید API را از کنسول xAI (console.x.ai → API Keys) بسازید و همین‌جا وارد کنید. Grok نویسندهٔ جایگزین است: اگر Claude در دسترس نباشد یا خطا بدهد، مقاله با Grok نوشته می‌شود. کلید فقط رمزنگاری‌شده ذخیره می‌شود و هرگز در پاسخ API، لاگ یا دیتابیس ظاهر نمی‌شود."}},
     "openrouter": {"label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "models": [], "needs_key": True},
     "groq": {"label": "Groq Cloud (سهمیه رایگان)", "base_url": "https://api.groq.com/openai/v1",
              "models": ["qwen/qwen3.6-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"], "needs_key": True,
@@ -45,6 +52,7 @@ PROVIDER_KINDS: dict[str, dict[str, Any]] = {
                             "fa": "OmniRoute یک گیت‌وی متن‌باز است که Claude/OpenAI/Gemini و صدها ارائه‌دهنده دیگر را پشت یک endpoint سازگار با OpenAI قرار می‌دهد (پیش‌فرض http://127.0.0.1:20128/v1؛ نصب: npm i -g omniroute). کلید API اختیاری است (Dashboard → Endpoints) و فقط در SecretStore نگهداری می‌شود. Gateway خود SEO Brain (بودجه، دفتر مصرف، اعتبارسنجی، مسیردهی) دست‌نخورده می‌ماند."}},
 }
 KEYLESS_KINDS = ("ollama", "custom", "omniroute")      # configured without a stored key
+FALLBACK_KIND_ORDER = ("anthropic", "xai", "google", "groq", "cloudflare", "openai", "openrouter", "omniroute", "custom", "ollama")
 
 
 def env_api_key(kind: str) -> str | None:
@@ -72,24 +80,52 @@ class ProviderConfig:
     id: int | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    key_set_at: str | None = None
+    key_expires_at: str | None = None
+
+    @property
+    def key_expired(self) -> bool:
+        return bool(self.secret_ref and self.key_expires_at and self.key_expires_at <= utcnow())
+
+    @property
+    def has_usable_key(self) -> bool:
+        return bool(self.secret_ref) and not self.key_expired
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d.pop("secret_ref", None)                    # never leak the reference either
         d["has_key"] = bool(self.secret_ref)
+        d["key_expired"] = self.key_expired
+        d["key_days_left"] = _days_left(self.key_expires_at) if self.secret_ref and self.key_expires_at else None
         d["kind_label"] = PROVIDER_KINDS.get(self.kind, {}).get("label", self.kind)
         d["is_gateway"] = self.kind in GATEWAY_KINDS
         d["route_kind"] = "gateway" if self.kind in GATEWAY_KINDS else "direct"
         d["endpoint_url"] = self.base_url                # explicit alias for gateways (same column)
-        d["configured"] = bool(self.enabled and (self.secret_ref or self.kind in KEYLESS_KINDS or env_api_key(self.kind)))
-        d["key_source"] = "secret_store" if self.secret_ref else ("env" if env_api_key(self.kind) else None)
+        d["configured"] = bool(self.enabled and (self.has_usable_key or self.kind in KEYLESS_KINDS or env_api_key(self.kind)))
+        d["key_source"] = "secret_store" if self.has_usable_key else ("env" if env_api_key(self.kind) else None)
         return d
+
+
+def _days_left(expires_at: str) -> float:
+    from datetime import datetime, timezone
+    try:
+        exp = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    return round(max((exp - datetime.now(timezone.utc)).total_seconds(), 0) / 86400, 1)
+
+
+def _expiry_after(days: int | None) -> str | None:
+    from datetime import datetime, timedelta, timezone
+    if not days:
+        return None
+    return (datetime.now(timezone.utc) + timedelta(days=int(days))).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _row(m) -> ProviderConfig:
     return ProviderConfig(id=m["id"], name=m["name"], kind=m["kind"], base_url=m["base_url"], default_model=m["default_model"], models=loads(m["models"], []),
                           enabled=bool(m["enabled"]), secret_ref=m["secret_ref"], key_hint=m["key_hint"], last_test=loads(m["last_test"], None),
-                          created_at=m["created_at"], updated_at=m["updated_at"])
+                          created_at=m["created_at"], updated_at=m["updated_at"], key_set_at=m["key_set_at"], key_expires_at=m["key_expires_at"])
 
 
 def _clean_base_url(base_url: str | None, kind: str) -> str | None:
@@ -100,6 +136,11 @@ def _clean_base_url(base_url: str | None, kind: str) -> str | None:
         return None
     if not b.startswith(("http://", "https://")):
         b = "https://" + b
+    if b.startswith("http://"):
+        # stored API keys travel in headers to this host — never over plain HTTP except to a local runtime (Ollama etc.)
+        host = b[len("http://"):].split("/", 1)[0].split(":", 1)[0].lower()
+        if host not in ("localhost", "127.0.0.1", "::1", "[::1]", "host.docker.internal") and not host.endswith(".local"):
+            b = "https://" + b[len("http://"):]
     default = (PROVIDER_KINDS.get(kind, {}).get("base_url") or "").rstrip("/")
     if default:
         host = "https://" + default.split("://", 1)[-1].split("/", 1)[0]
@@ -128,7 +169,7 @@ class ProviderConfigRepository(Repository):
         return _row(r._mapping) if r else None
 
     def create(self, name: str, kind: str, api_key: str | None = None, base_url: str | None = None, default_model: str | None = None,
-               models: list[str] | None = None, enabled: bool = True) -> ProviderConfig:
+               models: list[str] | None = None, enabled: bool = True, key_ttl_days: int | None = None) -> ProviderConfig:
         if kind not in PROVIDER_KINDS:
             raise ValueError(f"unknown provider kind '{kind}'")
         if self.get_by_name(name):
@@ -144,11 +185,14 @@ class ProviderConfigRepository(Repository):
                                                           models=dumps(models if models is not None else kd["models"]), enabled=int(enabled), created_at=now, updated_at=now))
             pid = int(res.inserted_primary_key[0])
         if api_key:
-            self.set_key(pid, api_key)
+            self.set_key(pid, api_key, ttl_days=key_ttl_days)
+        else:
+            self.refresh_fallbacks()
         return self.get(pid)  # type: ignore[return-value]
 
     def update(self, pid: int, **fields) -> ProviderConfig | None:
         api_key = fields.pop("api_key", None)
+        key_ttl_days = fields.pop("key_ttl_days", None)
         allowed = {k: v for k, v in fields.items() if k in ("name", "base_url", "default_model", "models", "enabled") and v is not None}
         if "base_url" in allowed:
             p0 = self.get(pid)
@@ -169,25 +213,32 @@ class ProviderConfigRepository(Repository):
             with self.engine.begin() as cx:
                 cx.execute(ai_providers.update().where(ai_providers.c.id == pid).values(**allowed))
         if api_key:
-            self.set_key(pid, api_key)
+            self.set_key(pid, api_key, ttl_days=key_ttl_days)
+        elif "enabled" in allowed:
+            self.refresh_fallbacks()
         return self.get(pid)
 
-    def set_key(self, pid: int, api_key: str) -> None:
+    def set_key(self, pid: int, api_key: str, ttl_days: int | None = None) -> None:
+        """Store the key (encrypted) and, for time-limited keys, its expiry — after which it counts as absent."""
         api_key = api_key.strip()                                   # pasted keys often carry stray whitespace
         ref = f"ai-provider-{pid}"
         self.secrets.set(ref, api_key)
         with self.engine.begin() as cx:
-            cx.execute(ai_providers.update().where(ai_providers.c.id == pid).values(secret_ref=ref, key_hint=SecretStore.hint(api_key), updated_at=utcnow()))
+            cx.execute(ai_providers.update().where(ai_providers.c.id == pid).values(secret_ref=ref, key_hint=SecretStore.hint(api_key), key_set_at=utcnow(),
+                                                                                    key_expires_at=_expiry_after(ttl_days), updated_at=utcnow()))
+        self.refresh_fallbacks()
 
     def clear_key(self, pid: int) -> None:
         p = self.get(pid)
         if p and p.secret_ref:
             self.secrets.delete(p.secret_ref)
         with self.engine.begin() as cx:
-            cx.execute(ai_providers.update().where(ai_providers.c.id == pid).values(secret_ref=None, key_hint=None, updated_at=utcnow()))
+            cx.execute(ai_providers.update().where(ai_providers.c.id == pid).values(secret_ref=None, key_hint=None, key_set_at=None, key_expires_at=None, updated_at=utcnow()))
+        self.refresh_fallbacks()
 
     def api_key(self, p: ProviderConfig) -> str | None:
-        return (self.secrets.get(p.secret_ref) if p.secret_ref else None) or env_api_key(p.kind)
+        """Stored key unless it has expired (time-limited keys count as absent), else the optional env fallback."""
+        return (self.secrets.get(p.secret_ref) if p.has_usable_key else None) or env_api_key(p.kind)
 
     def delete(self, pid: int) -> bool:
         p = self.get(pid)
@@ -200,6 +251,7 @@ class ProviderConfigRepository(Repository):
             cx.execute(ai_routes.update().where(ai_routes.c.fallback_provider_id == pid).values(fallback_provider_id=None, fallback_model=None, updated_at=utcnow()))
             cx.execute(text("DELETE FROM ai_models WHERE provider_id=:p"), {"p": pid})          # catalog rows (FK) — phase 9 tables
             cx.execute(delete(ai_providers).where(ai_providers.c.id == pid))
+        self.refresh_fallbacks()
         return True
 
     def record_test(self, pid: int, result: dict[str, Any]) -> None:
@@ -258,8 +310,43 @@ class ProviderConfigRepository(Repository):
             cur = current.get(rec["task_kind"]) or {}
             if not overwrite and cur.get("provider_id"):
                 continue
-            applied.append(self.set_route(rec["task_kind"], pid, rec["model"], fallback_provider_id=pid if rec["fallback_model"] else None, fallback_model=rec["fallback_model"], site_id=site_id, policy="explicit"))
+            applied.append(self.set_route(rec["task_kind"], pid, rec["model"], fallback_provider_id=pid if rec["fallback_model"] else None, fallback_model=rec["fallback_model"], site_id=site_id, policy="explicit",
+                                          fallbacks=self._fallback_chain(rec["task_kind"], pid, rec["fallback_model"])))
+        self.refresh_fallbacks(site_id)
         return applied
+
+    def _fallback_chain(self, task_kind: str, pid: int, same_provider_model: str | None) -> list[dict[str, Any]]:
+        """Order of backups: the provider's own second model first, then every other configured provider."""
+        own = [{"provider_id": pid, "model": same_provider_model}] if same_provider_model else []
+        return own + self.cross_provider_fallbacks(task_kind, pid)
+
+    # ---- cross-provider fallbacks: every other configured provider backs each explicit route (Claude → Grok → …)
+    def _configured(self, p: ProviderConfig) -> bool:
+        return bool(p.enabled) and (p.has_usable_key or p.kind in KEYLESS_KINDS or bool(env_api_key(p.kind)))
+
+    def cross_provider_fallbacks(self, task_kind: str, primary_pid: int) -> list[dict[str, Any]]:
+        others = [p for p in self.list() if p.id != primary_pid and self._configured(p)]
+        others.sort(key=lambda p: FALLBACK_KIND_ORDER.index(p.kind) if p.kind in FALLBACK_KIND_ORDER else len(FALLBACK_KIND_ORDER))
+        out = []
+        for p in others:
+            rec = RECOMMENDED_ROUTES.get(p.kind, {}).get(task_kind)
+            model = (rec[0] if rec else None) or p.default_model or (p.models[0] if p.models else None)
+            if model:
+                out.append({"provider_id": p.id, "model": model})
+        return out
+
+    def refresh_fallbacks(self, site_id: str = "*") -> int:
+        """Re-derive the fallback chain of every explicit route from the providers configured right now, so a provider
+        added later (e.g. Grok after Claude) automatically becomes the backup writer."""
+        n = 0
+        for r in self.routes(None if site_id == "*" else site_id):
+            if r.get("policy") != "explicit" or not r.get("provider_id") or r.get("site_id") != site_id:
+                continue
+            own = r.get("fallback_model") if r.get("fallback_provider_id") == r["provider_id"] else None
+            self.set_route(r["task_kind"], r["provider_id"], r["model"], fallback_provider_id=r.get("fallback_provider_id"), fallback_model=r.get("fallback_model"),
+                           site_id=site_id, policy="explicit", fallbacks=self._fallback_chain(r["task_kind"], r["provider_id"], own))
+            n += 1
+        return n
 
 
 # task_kind → (primary model, fallback model) — Sonnet balanced, Opus quality, Haiku fast
@@ -269,16 +356,21 @@ RECOMMENDED_ROUTES: dict[str, dict[str, tuple[str, str | None]]] = {
     "cloudflare": {k: (("@cf/openai/gpt-oss-20b", "@cf/qwen/qwen3-30b-a3b-fp8") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic") else ("@cf/qwen/qwen3-30b-a3b-fp8", "@cf/openai/gpt-oss-20b")) for k in TASK_KINDS},
     # OmniRoute: let its own router pick upstreams; fast tasks → auto/fast; everything falls back to plain auto
     "omniroute": {k: (("auto/fast", "auto") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic") else ("auto", "auto/fast")) for k in TASK_KINDS},
+    # Grok: grok-4 writes, grok-4-fast-reasoning backs it; light tasks go to the cheap non-reasoning model
+    "xai": {k: (("grok-4-fast-non-reasoning", "grok-4-fast-reasoning") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic")
+                else ("grok-4", "grok-4-fast-reasoning")) for k in TASK_KINDS},
     "anthropic": {
-        "article_long": ("claude-sonnet-5", "claude-opus-5"), "article_section": ("claude-sonnet-5", "claude-opus-5"), "content_writing": ("claude-sonnet-5", "claude-opus-5"),
+        "article_long": ("claude-opus-5", "claude-sonnet-5"), "article_section": ("claude-opus-5", "claude-sonnet-5"), "content_writing": ("claude-opus-5", "claude-sonnet-5"),
         "seo_review": ("claude-sonnet-5", "claude-haiku-4-5"), "seo_analysis": ("claude-sonnet-5", "claude-haiku-4-5"), "fact_check": ("claude-sonnet-5", "claude-opus-5"),
         "research": ("claude-sonnet-5", "claude-haiku-4-5"), "brief": ("claude-sonnet-5", "claude-haiku-4-5"), "translation": ("claude-sonnet-5", "claude-haiku-4-5"),
         "outline": ("claude-haiku-4-5", "claude-sonnet-5"), "rewrite": ("claude-haiku-4-5", "claude-sonnet-5"), "title_meta": ("claude-haiku-4-5", "claude-sonnet-5"), "faq": ("claude-haiku-4-5", "claude-sonnet-5"),
         "internal_linking": ("claude-haiku-4-5", "claude-sonnet-5"), "schema": ("claude-haiku-4-5", "claude-sonnet-5"), "keyword_analysis": ("claude-haiku-4-5", "claude-sonnet-5"), "generic": ("claude-haiku-4-5", "claude-sonnet-5"),
     },
     # Gemini 3.6 Flash covers every task; heavier tasks fall back to 2.5 Pro, light ones to 2.5 Flash
-    "google": {k: (("gemini-3.6-flash", "gemini-2.5-flash") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic")
-                   else ("gemini-3.6-flash", "gemini-2.5-pro")) for k in TASK_KINDS},
+    # gemini-2.5-* are "no longer available to new users" (404); 3.6/3.7/3.8-flash and the pro models answer 503/429 on the
+    # free tier most of the day — 3.5-flash + 3.5-flash-lite are the ones that reliably answer (measured 2026-09-17)
+    "google": {k: (("gemini-3.5-flash-lite", "gemini-3.5-flash") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic")
+                   else ("gemini-3.5-flash", "gemini-3.5-flash-lite")) for k in TASK_KINDS},
 }
 
 
@@ -302,7 +394,7 @@ def test_provider(p: ProviderConfig, api_key: str | None, fetch: Callable[..., h
             account_id = rest.split("/", 1)[0]
             r = get(f"{root}{marker}{account_id}/tokens/verify", {"Authorization": f"Bearer {api_key}"})
             models = list(p.models or kd.get("models") or [])
-        elif p.kind in ("openai", "openrouter", "groq", "custom", "omniroute"):
+        elif p.kind in ("openai", "openrouter", "groq", "xai", "custom", "omniroute"):
             r = get(f"{base}/models", {"Authorization": f"Bearer {api_key}"} if api_key else {})
             models = [m.get("id") for m in (r.json().get("data") or [])] if r.status_code == 200 else []
         elif p.kind == "google":

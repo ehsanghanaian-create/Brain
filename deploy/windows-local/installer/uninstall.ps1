@@ -10,9 +10,13 @@ foreach ($d in @('.venv', 'frontend\node_modules', 'frontend\.next', 'run')) {
     $p = Join-Path $Root $d
     if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Host "  removed $d" }
 }
+Get-ChildItem (Join-Path $Root 'runtime') -Directory -Filter 'node-*-win-x64' | ForEach-Object { Remove-Item $_.FullName -Recurse -Force; Write-Host "  removed runtime\$($_.Name)" }
 
-$lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'SEO Brain.lnk'
-if (Test-Path $lnk) { Remove-Item $lnk -Force; Write-Host "  removed the Desktop shortcut" }
+foreach ($dir in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
+    $lnk = Join-Path $dir 'SEO Brain.lnk'
+    if (Test-Path $lnk) { Remove-Item $lnk -Force; Write-Host "  removed shortcut: $lnk" }
+}
+Remove-Item 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\SEO-Brain' -Recurse -Force
 
 Write-Host ""
 Write-Host "Your data (the 'data' folder with the SEO database) was KEPT." -ForegroundColor Yellow

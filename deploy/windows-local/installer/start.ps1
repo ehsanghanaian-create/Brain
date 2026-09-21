@@ -16,11 +16,12 @@ function Fail($msg) { Write-Host "`n[X] $msg" -ForegroundColor Red; exit 1 }
 $nodeDir = Get-ChildItem (Join-Path $Root 'runtime') -Directory -Filter 'node-*-win-x64' -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($nodeDir -and (Test-Path (Join-Path $nodeDir.FullName 'node.exe'))) { $env:Path = "$($nodeDir.FullName);$env:Path" }
 
-$venvPy  = Join-Path $Root '.venv\Scripts\python.exe'
-$nextBin = Join-Path $Root 'frontend\node_modules\next\dist\bin\next'
-$built   = Join-Path $Root 'frontend\.next\BUILD_ID'
+$venvPy     = Join-Path $Root '.venv\Scripts\python.exe'
+$standalone = Join-Path $Root 'frontend-standalone\server.js'      # prebuilt web UI (installer package)
+$nextBin    = Join-Path $Root 'frontend\node_modules\next\dist\bin\next'
+$built      = Join-Path $Root 'frontend\.next\BUILD_ID'
 if (-not (Test-Path $venvPy)) { Fail "Not installed yet - run INSTALL.bat first." }
-if (-not (Test-Path $nextBin) -or -not (Test-Path $built)) { Fail "Web UI is not built - run INSTALL.bat first." }
+if (-not (Test-Path $standalone) -and (-not (Test-Path $nextBin) -or -not (Test-Path $built))) { Fail "Web UI is not built - run INSTALL.bat first." }
 
 $env:SEO_KG_ROOT = $Root
 $env:SEO_BRAIN_API_URL = "http://127.0.0.1:$ApiPort"
@@ -61,18 +62,31 @@ if (-not $backendUp) {
 }
 Write-Host "Backend is up:  http://127.0.0.1:$ApiPort" -ForegroundColor Green
 
-# ---------------------------------------------------------------- frontend
-$webUrl = "http://localhost:$WebPort"
-$frontUp = Test-Health $webUrl 1
+# ---------------------------------------------------------------- web UI
+$webUrl    = "http://localhost:$WebPort"
+$webHealth = "http://127.0.0.1:$WebPort"
+$frontUp = Test-Health $webHealth 1
 if (-not $frontUp) {
     Write-Host "Starting the web UI (port $WebPort)..."
-    $p = Start-Process -FilePath 'node' `
-        -ArgumentList @($nextBin, 'start', '-p', "$WebPort") `
-        -WorkingDirectory (Join-Path $Root 'frontend') -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput (Join-Path $RunDir 'frontend.log') `
-        -RedirectStandardError (Join-Path $RunDir 'frontend.err.log')
+    if (Test-Path $standalone) {
+        # Next.js standalone server: port/host come from the environment; bound to loopback only (the UI has no login)
+        $env:PORT = "$WebPort"
+        $env:HOSTNAME = '127.0.0.1'
+        $env:NODE_ENV = 'production'
+        $env:NEXT_TELEMETRY_DISABLED = '1'
+        $p = Start-Process -FilePath 'node' -ArgumentList @($standalone) `
+            -WorkingDirectory (Join-Path $Root 'frontend-standalone') -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput (Join-Path $RunDir 'frontend.log') `
+            -RedirectStandardError (Join-Path $RunDir 'frontend.err.log')
+    } else {
+        $p = Start-Process -FilePath 'node' `
+            -ArgumentList @($nextBin, 'start', '-p', "$WebPort") `
+            -WorkingDirectory (Join-Path $Root 'frontend') -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput (Join-Path $RunDir 'frontend.log') `
+            -RedirectStandardError (Join-Path $RunDir 'frontend.err.log')
+    }
     Set-Content -Path (Join-Path $RunDir 'frontend.pid') -Value $p.Id
-    if (-not (Test-Health $webUrl 60)) {
+    if (-not (Test-Health $webHealth 60)) {
         Fail "Web UI did not come up. See logs: run\frontend.err.log"
     }
 }

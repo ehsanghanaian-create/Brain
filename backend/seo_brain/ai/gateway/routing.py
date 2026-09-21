@@ -72,7 +72,7 @@ class TaskRouter:
                 continue
             if p.kind in GATEWAY_KINDS and m.get("source") == "discovered":
                 continue        # gateways: auto-routing uses only the curated auto* entries; discovered provider/model ids are for explicit selection
-            out.append({**m, "provider": p.name, "kind": p.kind, "p50_ms": (h or {}).get("p50_ms"), "has_key": bool(p.secret_ref) or p.kind in KEYLESS_KINDS or bool(env_api_key(p.kind))})
+            out.append({**m, "provider": p.name, "kind": p.kind, "p50_ms": (h or {}).get("p50_ms"), "has_key": p.has_usable_key or p.kind in KEYLESS_KINDS or bool(env_api_key(p.kind))})
         return [m for m in out if m["has_key"]]
 
     def resolve(self, task_kind: str, site_id: str | None, priority: str = "normal", quality_min: str | None = None, override: dict[str, str] | None = None) -> RoutingDecision:
@@ -85,21 +85,31 @@ class TaskRouter:
         # 1) explicit route (site, then global) with fallbacks
         with self.engine.connect() as cx:
             rows = cx.execute(select(ai_routes).where(ai_routes.c.task_kind == task_kind)).all()
-        provs = {p.id: p.name for p in self.cfg.list()}
+        # only providers that can actually be called: enabled + a usable (non-expired) key, keyless kind, or env key —
+        # an explicit route whose primary lost its key (7-day Claude key expired) hands over to its configured fallbacks
+        provs = {p.id: p.name for p in self.cfg.list() if p.enabled and (p.has_usable_key or p.kind in KEYLESS_KINDS or bool(env_api_key(p.kind)))}
         for scope in ([site_id] if site_id else []) + ["*"]:
             r = next((dict(x._mapping) for x in rows if x._mapping["site_id"] == scope), None)
-            if r and r.get("provider_id") and provs.get(r["provider_id"]) and r.get("policy", "auto") in ("explicit", "auto"):
-                pname = provs[r["provider_id"]]
-                model = r.get("model") or next((m["model_id"] for m in avail if m["provider"] == pname), None)
-                if model:
-                    chain = [RouteStep(pname, model, "مسیر تنظیم‌شده توسط کاربر")]
-                    for fb in loads(r.get("fallbacks"), []) or []:
-                        fp = provs.get(fb.get("provider_id"))
-                        if fp and fb.get("model"): chain.append(RouteStep(fp, fb["model"], "جایگزین تنظیم‌شده"))
-                    if r.get("fallback_provider_id") and provs.get(r["fallback_provider_id"]):
-                        chain.append(RouteStep(provs[r["fallback_provider_id"]], r.get("fallback_model") or model, "جایگزین تنظیم‌شده"))
-                    chain += self._auto_chain(task_kind, avail, exclude={(s.provider, s.model) for s in chain})[:1]
-                    return RoutingDecision(chain, f"مسیر صریح برای «{TASK_FA.get(task_kind, task_kind)}» ({'سایت' if scope != '*' else 'سراسری'})", "explicit", avail)
+            if r and r.get("provider_id") and r.get("policy", "auto") in ("explicit", "auto"):
+                steps: list[RouteStep] = []
+                pname = provs.get(r["provider_id"])
+                model = (r.get("model") or next((m["model_id"] for m in avail if m["provider"] == pname), None)) if pname else None
+                if pname and model:
+                    steps.append(RouteStep(pname, model, "مسیر تنظیم‌شده توسط کاربر"))
+                for fb in loads(r.get("fallbacks"), []) or []:
+                    fp = provs.get(fb.get("provider_id"))
+                    if fp and fb.get("model"): steps.append(RouteStep(fp, fb["model"], "جایگزین تنظیم‌شده"))
+                fm = r.get("fallback_model") or (steps[0].model if steps else None)
+                if r.get("fallback_provider_id") and provs.get(r["fallback_provider_id"]) and fm:
+                    steps.append(RouteStep(provs[r["fallback_provider_id"]], fm, "جایگزین تنظیم‌شده"))
+                if steps:
+                    chain = steps + self._auto_chain(task_kind, avail, exclude={(s.provider, s.model) for s in steps})[:1]
+                    seen: set[tuple[str, str]] = set()
+                    chain = [s for s in chain if not ((s.provider, s.model) in seen or seen.add((s.provider, s.model)))]
+                    why = f"مسیر صریح برای «{TASK_FA.get(task_kind, task_kind)}» ({'سایت' if scope != '*' else 'سراسری'})"
+                    if not pname:
+                        why += " — ارائه‌دهندهٔ اصلی کلید معتبر ندارد (منقضی/حذف‌شده)؛ جایگزین‌ها فعال شدند"
+                    return RoutingDecision(chain, why, "explicit", avail)
         # 2) policy
         chain = self._auto_chain(task_kind, avail, priority=priority, quality_min=quality_min)
         if not chain:

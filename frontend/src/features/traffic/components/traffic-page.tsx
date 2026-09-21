@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { IpFlowGraph } from '@/features/ip-graph/components/ip-flow-graph';
 import { traffic } from '@/lib/api/client';
 import type { Site, TrafficBehavior, TrafficCalls, TrafficEntries, TrafficKeywords, TrafficOverview, TrafficPaid, TrackerSetup } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
@@ -157,6 +158,7 @@ export function TrafficPage({ sites, initialSiteId }: { sites: Site[]; initialSi
         <div className='-mx-1 overflow-x-auto px-1'>
           <TabsList variant='line'>
             <TabsTrigger value='overview'>نمای کلی</TabsTrigger>
+            <TabsTrigger value='flow'>گراف ورودی‌ها</TabsTrigger>
             <TabsTrigger value='ads'>تبلیغات</TabsTrigger>
             <TabsTrigger value='entries'>ورودی ارگانیک</TabsTrigger>
             <TabsTrigger value='calls'>تماس‌ها</TabsTrigger>
@@ -168,6 +170,9 @@ export function TrafficPage({ sites, initialSiteId }: { sites: Site[]; initialSi
 
         <TabsContent value='overview' className='pt-4'>
           <OverviewTab siteId={siteId} days={days} onSetup={() => setTab('setup')} />
+        </TabsContent>
+        <TabsContent value='flow' className='pt-4'>
+          {tab === 'flow' && <IpFlowGraph scope='seo' siteId={siteId} defaultHours={days * 24} />}
         </TabsContent>
         <TabsContent value='ads' className='pt-4'>
           <AdsTab siteId={siteId} days={days} onSetup={() => setTab('setup')} />

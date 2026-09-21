@@ -14,7 +14,7 @@ from urllib.parse import unquote, urlparse
 
 from sqlalchemy import Engine, text
 
-from ...ai.config import GATEWAY_KINDS, KEYLESS_KINDS, ProviderConfigRepository
+from ...ai.config import GATEWAY_KINDS, KEYLESS_KINDS, ProviderConfigRepository, env_api_key
 from ...ai.gateway import Gateway, TaskRouter
 from ...ai.gateway.gateway import CallMeta, RouteStep
 from ...ai.memory_pack import MemoryPackBuilder
@@ -123,7 +123,7 @@ class ContentTestWorkspace:
         health = {h["provider"]: h for h in self.gw.health()}
         models = self.gw.models(enabled_only=True)
         for p in self.cfg.list():
-            configured = bool(p.enabled and (p.secret_ref or p.kind in KEYLESS_KINDS))
+            configured = bool(p.enabled and (p.has_usable_key or p.kind in KEYLESS_KINDS or env_api_key(p.kind)))
             pm = [{"model_id": m["model_id"], "display": m.get("display") or m["model_id"], "tier": m["tier"], "price_in_per_m": m["price_in_per_m"], "price_out_per_m": m["price_out_per_m"]} for m in models if m["provider_id"] == p.id] \
                 or ([{"model_id": p.default_model, "display": p.default_model, "tier": "balanced", "price_in_per_m": 0, "price_out_per_m": 0}] if p.default_model else [])
             # default model first (Claude: Sonnet), then the rest in tier order balanced → quality → fast → reasoning
@@ -138,8 +138,11 @@ class ContentTestWorkspace:
         provs.append({"name": "echo", "kind": "echo", "kind_label": "Echo (تست آفلاین، بدون فراخوانی خارجی)", "configured": True, "route_kind": "offline", "enabled": True, "has_key": False, "default_model": "echo-1", "status": "offline_fallback", "last_test": None,
                       "models": [{"model_id": "echo-1", "display": "Echo (dev)", "tier": "fast", "price_in_per_m": 0, "price_out_per_m": 0}], "health": {}})
         auto = self.router.resolve("article_long", site_id, priority="high").to_dict()
-        default = next((p for p in provs if p["kind"] == "anthropic" and p["configured"]), None) or next((p for p in provs if p["configured"] and p["kind"] != "echo"), None) or provs[-1]
-        dmodel = default.get("default_model") or (default["models"][0]["model_id"] if default["models"] else None)
+        # the form's «پیش‌فرض» is whatever the router would actually use for a long article (explicit route or policy) —
+        # so a free Gemini route stays the default when Claude has no credits; Claude only when it is the routed writer
+        first = (auto.get("chain") or [{}])[0]
+        default = next((p for p in provs if p["name"] == first.get("provider") and p["configured"]), None)             or next((p for p in provs if p["kind"] == "anthropic" and p["configured"]), None) or next((p for p in provs if p["configured"] and p["kind"] != "echo"), None) or provs[-1]
+        dmodel = (first.get("model") if default["name"] == first.get("provider") else None) or default.get("default_model") or (default["models"][0]["model_id"] if default["models"] else None)
         return {"providers": provs, "default": {"provider": default["name"], "model": dmodel, "kind": default["kind"]}, "auto_route": auto,
                 "content_types": [{"key": k, "fa": CONTENT_TYPE_FA[k]} for k in CONTENT_TYPES], "tones": [{"key": k, "fa": TONE_FA[k]} for k in TONES],
                 "intents": list(INTENTS), "steps": [{"key": k, "fa": STEP_FA[k], "implemented": k in STEPS} for k in STEP_ORDER], "budget": self.gw.budget(site_id),
@@ -155,7 +158,10 @@ class ContentTestWorkspace:
 
     def _task(self, site_id: str, spec: ContentSpec, step: WorkspaceStep, pv: dict, system: str, user: str, run_id: str) -> AITask:
         hints = pv.get("model_hints") or {}
-        max_tokens = max(800, min(8000, int(spec.word_count * 2.2) + 600))
+        # Persian tokenises at ~3–4 tokens per word and the answer is wrapped in JSON: 2.2×words truncated 1200-word
+        # articles mid-string ("Unterminated string" → ValidationError → fallback to a smaller model). Every routed
+        # writer (Gemini Flash, Claude, Grok) accepts ≥16k output tokens.
+        max_tokens = max(1500, min(16000, int(spec.word_count * 4.5) + 1000))
         return AITask(kind=TaskKind.CONTENT_WRITING, site_id=site_id, messages=[AIMessage("system", system), AIMessage("user", user)],
                       json_schema=step.schema, max_tokens=int(hints.get("max_tokens", max_tokens)) if hints.get("max_tokens") and int(hints["max_tokens"]) >= max_tokens else max_tokens,
                       temperature=float(hints.get("temperature", 0.4)), prompt_id=pv.get("key"), prompt_version=str(pv.get("version")), run_id=run_id)
@@ -190,7 +196,7 @@ class ContentTestWorkspace:
         elapsed = int((time.perf_counter() - t0) * 1000)
         attempts = [a.__dict__ for a in res.attempts]
         if not res.ok or not res.response:
-            return {"ok": False, "run_id": run_id, "error": (res.attempts[-1].error if res.attempts else "no response"), "attempts": attempts, "prompt": {"system": system, "user": user, "ref": pv.get("ref")}, "route": [s.__dict__ for s in chain]}
+            return {"ok": False, "run_id": run_id, "error": res.error_summary, "attempts": attempts, "prompt": {"system": system, "user": user, "ref": pv.get("ref")}, "route": [s.__dict__ for s in chain]}
         r = res.response
         payload = r.parsed if isinstance(r.parsed, dict) else self._loose_json(r.text)
         placeholder = r.provider == "echo"

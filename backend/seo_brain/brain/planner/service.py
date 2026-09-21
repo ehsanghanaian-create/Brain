@@ -453,6 +453,11 @@ class PlannerService:
             raise PlannerError("این منبع غیرفعال است")
         if src["kind"] not in ("google_sheet", "csv_url"):
             raise PlannerError(f"نوع منبع «{src['kind']}» هنوز پشتیبانی نمی‌شود (آماده برای آینده)")
+        from ...common.urls import UnsafeUrlError, assert_public_http_url
+        try:
+            assert_public_http_url(src["url"])
+        except UnsafeUrlError as e:
+            raise PlannerError(str(e)) from e
         try:
             data, url = fetch_sheet(src["url"], src.get("gid"), fetch) if src["kind"] == "google_sheet" else (fetch(src["url"]) if fetch else __import__("httpx").get(src["url"], timeout=30, follow_redirects=True).content, src["url"])
         except Exception as e:  # noqa: BLE001

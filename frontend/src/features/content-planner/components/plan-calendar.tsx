@@ -14,7 +14,7 @@ import { PLAN_STATUS_COLOR, PLAN_STATUS_FA, PLAN_STATUS_ORDER, PRIORITY_COLOR, P
 type Card = { id: number; title: string; status: PlanStatus | string; publish_date: string; publish_time?: string | null; priority?: string | null; kind?: 'content_item'; category?: { name: string } | null; primary_keyword?: string | null; page_type?: string | null };
 
 /** Content calendar (month / week / list) over content plans (+ content items without a plan). Drag a card onto a day to reschedule. */
-export function PlanCalendar({ siteId, onOpenPlan, onOpenItem, refreshKey, onChanged }: { siteId: string; onOpenPlan: (pid: number) => void; onOpenItem?: (cid: number) => void; refreshKey?: number; onChanged?: () => void }) {
+export function PlanCalendar({ siteId, onOpenPlan, onOpenItem, onNewOnDay, refreshKey, onChanged }: { siteId: string; onOpenPlan: (pid: number) => void; onOpenItem?: (cid: number) => void; onNewOnDay?: (isoDay: string) => void; refreshKey?: number; onChanged?: () => void }) {
   const [anchor, setAnchor] = useState(() => new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())));
   const [view, setView] = useState<'month' | 'week' | 'list'>('month');
   const [cal, setCal] = useState<Awaited<ReturnType<typeof endpoints.planCalendar>> | null>(null);
@@ -46,8 +46,14 @@ export function PlanCalendar({ siteId, onOpenPlan, onOpenItem, refreshKey, onCha
     </button>
   );
   const dayCell = (d: Date, tall?: boolean) => { const day = iso(d); const items = (cal?.days[day] ?? []) as Card[]; const j = jalali(d); return (
-    <div key={day} className={`bg-card rounded border p-1 text-start ${tall ? 'min-h-40' : 'min-h-24'} ${day === today ? 'border-primary' : ''}`} onDragOver={(e) => e.preventDefault()} onDrop={() => { if (drag) reschedule(drag, day); setDrag(null); }}>
-      <div className='text-muted-foreground flex justify-between text-[10px]'><span>{faNum.format(j.d)} {tall ? JMONTHS[j.m - 1] : ''}</span><span dir='ltr'>{day.slice(5)}</span></div>
+    <div key={day} className={`group bg-card rounded border p-1 text-start ${tall ? 'min-h-40' : 'min-h-24'} ${day === today ? 'border-primary' : ''}`} onDragOver={(e) => e.preventDefault()} onDrop={() => { if (drag) reschedule(drag, day); setDrag(null); }}>
+      <div className='text-muted-foreground flex items-center justify-between text-[10px]'>
+        <span>{faNum.format(j.d)} {tall ? JMONTHS[j.m - 1] : ''}</span>
+        <span className='flex items-center gap-1'>
+          {onNewOnDay && <button type='button' title='مقاله جدید در این روز' aria-label='مقاله جدید در این روز' className='hover:bg-accent rounded px-1 leading-none opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100' onClick={() => onNewOnDay(day)}>+</button>}
+          <span dir='ltr'>{day.slice(5)}</span>
+        </span>
+      </div>
       <div className='mt-1 flex flex-col gap-0.5'>{items.map((c) => <CardBtn key={`${c.kind ?? 'p'}-${c.id}`} c={c} full />)}</div>
     </div>); };
   return (

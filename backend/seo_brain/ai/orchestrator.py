@@ -44,6 +44,19 @@ class OrchestrationResult:
     def ok(self) -> bool:
         return self.response is not None
 
+    @property
+    def error_summary(self) -> str:
+        """Why every step failed — the FIRST step is the one the user chose, so its reason ("no credits", "unauthorized")
+        must not be hidden behind the last fallback's "circuit breaker open"."""
+        seen: list[str] = []
+        for a in self.attempts:
+            if a.ok or not a.error:
+                continue
+            line = f"{a.provider}/{a.model}: {a.error}"
+            if line not in seen:
+                seen.append(line)
+        return " ؛ ".join(seen[:3]) if seen else "no response"
+
     def to_dict(self) -> dict[str, Any]:
         return {"ok": self.ok, "route_used": self.route_used.__dict__ if self.route_used else None,
                 "memory_used": self.memory_used, "attempts": [a.__dict__ for a in self.attempts],

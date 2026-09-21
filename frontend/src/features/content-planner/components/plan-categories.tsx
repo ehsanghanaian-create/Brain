@@ -3,6 +3,7 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { safeHref } from '@/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { ApiError, endpoints, type PlanCategory } from '@/lib/api/client';
 import { useCallback, useEffect, useState } from 'react';
@@ -53,7 +54,7 @@ export function PlanCategories({ siteId, hasWp, onOpen, onChanged, refreshKey }:
       <div className='rounded-md border p-3 text-sm'>
         {!sel ? <p className='text-muted-foreground'>یک دسته انتخاب کنید تا هوش دسته (صفحات، کلمات، شکاف‌ها، اینتنت‌ها، برنامه‌ها) نمایش داده شود.</p> : (
           <div className='grid gap-2'>
-            <div className='flex flex-wrap items-center gap-2'><span className='text-base font-semibold'>{sel.name}</span><Badge variant='outline'>{sel.source_fa}</Badge>{sel.url && <a className='text-xs underline' href={sel.url} target='_blank' rel='noreferrer' dir='ltr'>{sel.url}</a>}{sel.metadata?.related_wp_category && <Badge variant='secondary'>مرتبط با دسته وردپرس: {sel.metadata.related_wp_category}</Badge>}
+            <div className='flex flex-wrap items-center gap-2'><span className='text-base font-semibold'>{sel.name}</span><Badge variant='outline'>{sel.source_fa}</Badge>{sel.url && <a className='text-xs underline' href={safeHref(sel.url)} target='_blank' rel='noreferrer' dir='ltr'>{sel.url}</a>}{sel.metadata?.related_wp_category && <Badge variant='secondary'>مرتبط با دسته وردپرس: {sel.metadata.related_wp_category}</Badge>}
               {sel.source !== 'wordpress' && <Button size='sm' variant='ghost' className='text-destructive ms-auto' onClick={async () => { if (!confirm('حذف شود؟')) return; await endpoints.planCategoryDelete(siteId, sel.id); setSel(null); load(); }}>حذف</Button>}</div>
             <div className='grid grid-cols-2 gap-2 text-xs md:grid-cols-5'>
               {[['نوشته‌های وردپرس', sel.post_count], ['صفحات نگاشت‌شده', sel.page_count], ['کلمات مرتبط', sel.keyword_count], ['برنامه‌ها', sel.plan_count], ['پوشش', sel.coverage_score != null ? `${Math.round(sel.coverage_score)}٪` : '—']].map(([k, v]) => <div key={String(k)} className='rounded border p-2'><div className='text-muted-foreground'>{k}</div><div className='text-lg font-semibold'>{typeof v === 'number' ? fa.format(v) : v}</div></div>)}

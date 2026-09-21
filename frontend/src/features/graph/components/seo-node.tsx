@@ -9,11 +9,12 @@ function SeoNodeImpl({ data, selected }: NodeProps<SeoFlowNode>) {
   const st = NODE_STYLE[data.nodeType];
   return (
     <div
-      className='bg-card text-card-foreground relative flex h-[58px] w-[210px] items-center gap-2.5 overflow-hidden rounded-xl border px-3 shadow-sm transition-[opacity,box-shadow,transform] duration-150 hover:-translate-y-0.5 hover:shadow-md'
+      className='seo-node bg-card text-card-foreground relative flex h-[58px] w-[210px] items-center gap-2.5 overflow-hidden rounded-xl border px-3 shadow-sm transition-[opacity,box-shadow,transform] duration-200 hover:-translate-y-0.5'
       style={{
+        ['--node-color' as string]: data.color,
         borderColor: selected ? data.color : `${data.color}99`,
-        boxShadow: selected ? `0 0 0 2px ${data.color}` : data.matched ? `0 0 0 2px ${data.color}66` : undefined,
-        opacity: data.dimmed ? 0.25 : 1
+        boxShadow: selected ? `0 0 0 2px ${data.color}, 0 0 26px -4px ${data.color}` : data.neighbor ? `0 0 0 1px ${data.color}88, 0 0 18px -4px ${data.color}` : data.matched ? `0 0 0 2px ${data.color}66` : undefined,
+        opacity: data.dimmed ? 0.25 : data.faded ? 0.45 : 1
       }}
       title={data.url ?? data.label}
       dir='rtl'

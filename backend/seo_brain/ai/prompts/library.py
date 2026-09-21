@@ -42,12 +42,26 @@ def variables_of(template: str) -> list[str]:
 
 class PromptLibrary(Repository):
     def seed(self) -> int:
-        """Insert built-in prompts as v1 (active + approved) when the key does not exist yet. Idempotent."""
+        """Insert built-in prompts as v1 (active + approved) when the key does not exist yet; a built-in that carries a
+        newer `version` is added as a new version and activated only if the active one is still a built-in (a version
+        the user authored or activated is never displaced). Idempotent."""
         n = 0
         with self.engine.begin() as cx:
-            existing = {r[0] for r in cx.execute(select(prompts.c.key).where(prompts.c.site_id.is_(None))).all()}
+            existing = {r[0]: r[1] for r in cx.execute(select(prompts.c.key, prompts.c.id).where(prompts.c.site_id.is_(None))).all()}
             for d in DEFAULT_PROMPTS:
                 if d["key"] in existing:
+                    pid = existing[d["key"]]
+                    seeded = cx.execute(select(func.count()).select_from(prompt_versions).where(and_(prompt_versions.c.prompt_id == pid, prompt_versions.c.created_by == "seed"))).scalar() or 0
+                    if int(d.get("version", 1)) <= seeded:
+                        continue
+                    active_by = cx.execute(select(prompt_versions.c.created_by).where(and_(prompt_versions.c.prompt_id == pid, prompt_versions.c.is_active == 1))).scalar()
+                    activate = active_by in (None, "seed")
+                    v = (cx.execute(select(func.max(prompt_versions.c.version)).where(prompt_versions.c.prompt_id == pid)).scalar() or 0) + 1
+                    if activate:
+                        cx.execute(prompt_versions.update().where(prompt_versions.c.prompt_id == pid).values(is_active=0))
+                    cx.execute(prompt_versions.insert().values(prompt_id=pid, version=v, template=d["template"], variables=dumps(d.get("variables", variables_of(d["template"]))), model_hints=dumps(d.get("model_hints", {})),
+                                                               is_active=int(activate), approval="approved", approved_by="seed", approved_at=utcnow(), changelog=f"built-in v{d.get('version', 1)}", created_by="seed", created_at=utcnow()))
+                    n += 1
                     continue
                 pid = int(cx.execute(prompts.insert().values(key=d["key"], scope=d["scope"], site_id=None, title=d["title"], description=d.get("description"), tags=dumps(d.get("tags", [])), created_at=utcnow())).inserted_primary_key[0])
                 cx.execute(prompt_versions.insert().values(prompt_id=pid, version=1, template=d["template"], variables=dumps(d.get("variables", variables_of(d["template"]))), model_hints=dumps(d.get("model_hints", {})),

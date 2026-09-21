@@ -9,6 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
 import { ApiError, endpoints, type ContentBrief, type ContentDetail, type ContentStatus, type KeywordRow, type WordPressCategory, type WordPressPublication } from '@/lib/api/client';
+import { safeHref } from '@/lib/utils';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -173,7 +174,7 @@ export function ContentEditor({ siteId, cid, onClose, onChanged }: { siteId: str
         {tab === 'publish' && d && typeof cid === 'number' && (
           <div className='grid gap-3 py-3 text-sm'>
             <div className='rounded-md border p-3'>
-              <div className='flex flex-wrap items-center gap-2'><b>اتصال انتشار وردپرس</b>{publication?.status && <Badge variant={publication.status === 'publish' ? 'default' : 'secondary'}>{publication.status === 'future' ? 'زمان‌بندی‌شده' : publication.status === 'publish' ? 'منتشرشده' : 'پیش‌نویس'}</Badge>}{publication?.url && <a href={publication.url} target='_blank' rel='noreferrer' className='ms-auto underline' dir='ltr'>مشاهده نوشته ↗</a>}</div>
+              <div className='flex flex-wrap items-center gap-2'><b>اتصال انتشار وردپرس</b>{publication?.status && <Badge variant={publication.status === 'publish' ? 'default' : 'secondary'}>{publication.status === 'future' ? 'زمان‌بندی‌شده' : publication.status === 'publish' ? 'منتشرشده' : 'پیش‌نویس'}</Badge>}{publication?.url && <a href={safeHref(publication.url)} target='_blank' rel='noreferrer' className='ms-auto underline' dir='ltr'>مشاهده نوشته ↗</a>}</div>
               <p className='text-muted-foreground mt-1 text-xs'>انتشار با Application Password انجام می‌شود. زمان‌بندی داخل خود WordPress ذخیره می‌شود و با بستن تب یا جابه‌جایی بین صفحات لغو نمی‌شود.</p>
               {publication?.scheduled_at && <p className='mt-1 text-xs' dir='ltr'>Local: {publication.scheduled_at} · UTC: {publication.scheduled_at_utc}</p>}
             </div>

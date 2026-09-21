@@ -18,6 +18,7 @@ class ProviderCreate(BaseModel):
     name: str = Field(min_length=2, max_length=60)
     kind: str
     api_key: str | None = Field(default=None, min_length=4)
+    key_ttl_days: int | None = Field(default=None, ge=1, le=365)   # time-limited keys (e.g. 7-day Claude keys) expire → next provider takes over
     base_url: str | None = None
     default_model: str | None = None
     models: list[str] | None = None
@@ -27,6 +28,7 @@ class ProviderCreate(BaseModel):
 class ProviderUpdate(BaseModel):
     name: str | None = None
     api_key: str | None = Field(default=None, min_length=4)
+    key_ttl_days: int | None = Field(default=None, ge=1, le=365)
     base_url: str | None = None
     default_model: str | None = None
     models: list[str] | None = None
@@ -69,7 +71,7 @@ def list_provider_configs(repo: ProviderConfigRepository = Depends(cfg_repo)) ->
 @router.post("/provider-configs", status_code=201)
 def create_provider_config(body: ProviderCreate, repo: ProviderConfigRepository = Depends(cfg_repo)) -> dict:
     try:
-        p = repo.create(body.name, body.kind, body.api_key, body.base_url, body.default_model, body.models, body.enabled)
+        p = repo.create(body.name, body.kind, body.api_key, body.base_url, body.default_model, body.models, body.enabled, key_ttl_days=body.key_ttl_days)
         try:
             from ..deps import gateway as _gw
             _gw().seed_catalog(p.id, p.kind); _gw().invalidate()
@@ -119,12 +121,17 @@ def test_provider_config(pid: int, repo: ProviderConfigRepository = Depends(cfg_
             models = [m for m in (r.get("models") or []) if m]
             if r.get("ok"):
                 res = {"ok": True, "status": "ok", "message": f"اتصال برقرار است — {len(models)} مدل در دسترس", "models_found": models[:50], "tested_at": utcnow()}
+                try:
+                    g.reset_breaker(p.name)          # a working connection re-closes an open circuit breaker
+                except Exception:  # noqa: BLE001 — bookkeeping must never fail the test
+                    pass
                 if p.default_model and models and p.default_model not in models and p.kind not in ("cloudflare", "omniroute"):
                     res["default_model_missing"] = True
                     res["message"] += f" · مدل انتخاب‌شده ({p.default_model}) دیگر در فهرست ارائه‌دهنده نیست — مدل دیگری انتخاب کنید"
             else:
                 err = str(r.get("error", ""))
                 fa = ("کلید API اشتباه است — لطفاً کلید را بررسی کنید" if "unauthorized" in err
+                      else "اعتبار حساب ارائه‌دهنده تمام شده است — در Plans & Billing اعتبار بخرید" if "no credits" in err or "credit balance" in err
                       else "محدودیت درخواست ارائه‌دهنده فعال شده است — کمی بعد دوباره تلاش کنید" if "429" in err or "busy" in err
                       else "اتصال برقرار نشد — اینترنت و تنظیمات شبکه را بررسی کنید" if "network" in err or "timeout" in err.lower()
                       else "مدل یا آدرس سرویس پیدا نشد" if "404" in err

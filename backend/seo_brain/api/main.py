@@ -15,7 +15,7 @@ from ..automation import get_job_queue
 from ..common.config import env
 from .deps import require_token
 from .errors import install_error_handlers
-from .routers import ads_data, ai, ai_config, ai_gateway, ai_workspace, content, content_plans, generation, graph, health, jobs, keywords, knowledge, links, memory, portfolio, reports, site_security, sites, tracker, traffic
+from .routers import ads_data, ai, ai_config, ai_gateway, ai_workspace, content, content_plans, generation, graph, health, ip_graph, jobs, keywords, knowledge, links, memory, network, ops, portfolio, reports, site_media, site_security, sites, tracker, traffic
 
 API_PREFIX = "/api/v1"
 
@@ -130,6 +130,9 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def _lifespan(app_: FastAPI):
         sched = None
+        if not env("API_TOKEN") and any(not o.startswith(("http://localhost", "http://127.0.0.1")) for o in origins):
+            import logging
+            logging.getLogger("api").warning("API_TOKEN is not set while FRONTEND_ORIGIN is not local — the API is running WITHOUT authentication")
         from ..automation.scheduler import SyncScheduler
         if SyncScheduler.enabled():
             from ..automation.queue import get_job_queue
@@ -151,7 +154,7 @@ def create_app() -> FastAPI:
     from .routers import google as google_router_mod
     app.include_router(google_router_mod.callback_router, prefix=API_PREFIX)     # Google's browser redirect cannot send X-API-Token; guarded by the state nonce
     app.include_router(tracker.router, prefix=API_PREFIX)   # عمومی — امنیتش با write-key سایت است، نه X-API-Token
-    for r in (portfolio.router, ads_data.router, sites.router, sites.gsc_router, google_router_mod.router, graph.router, memory.router, knowledge.router, site_security.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router, reports.router, traffic.router):
+    for r in (portfolio.router, ads_data.router, sites.router, sites.gsc_router, google_router_mod.router, graph.router, memory.router, knowledge.router, site_security.router, site_media.router, network.router, ip_graph.router, ops.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router, reports.router, traffic.router):
         app.include_router(r, prefix=API_PREFIX, dependencies=deps)
 
     # legacy dashboard (v0.1) mounted read-only until UI parity

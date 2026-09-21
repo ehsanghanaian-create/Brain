@@ -7,10 +7,37 @@ URL (a username, an Application Password, a bare token) end up as the hostname.
 """
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
 from urllib.parse import urlsplit, urlunsplit
 
 _SCHEME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://")
+
+
+class UnsafeUrlError(ValueError):
+    """A URL the backend must not fetch on a panel user's behalf (non-http scheme, loopback/private/metadata host)."""
+
+
+def assert_public_http_url(raw: str | None) -> str:
+    """SSRF guard for panel-supplied fetch targets: http(s) only, and every address the host resolves to must be
+    globally routable (rejects loopback, RFC1918, link-local/cloud-metadata and docker/local names)."""
+    url = (raw or "").strip()
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if parts.scheme not in ("http", "https") or not host:
+        raise UnsafeUrlError("آدرس منبع باید با http:// یا https:// شروع شود")
+    if host in ("localhost", "host.docker.internal") or host.endswith((".localhost", ".internal", ".local")):
+        raise UnsafeUrlError("آدرس‌های محلی یا داخلی به‌عنوان منبع مجاز نیستند")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as e:
+        raise UnsafeUrlError("نام دامنهٔ منبع قابل تفکیک نیست") from e
+    for info in infos:
+        ip = ipaddress.ip_address(str(info[4][0]).split("%", 1)[0])
+        if not ip.is_global:
+            raise UnsafeUrlError("آدرس منبع به یک شبکهٔ داخلی اشاره می‌کند و مجاز نیست")
+    return url
 
 
 class InvalidWordPressUrlError(ValueError):

@@ -1,0 +1,237 @@
+/* SEO Brain "Neon Glass" — dark-first glassmorphism with neon blue / purple accents (light variant kept usable). */
+[data-theme='neon'] {
+  --neon-blue: oklch(0.72 0.19 250);
+  --neon-purple: oklch(0.68 0.24 300);
+  --neon-cyan: oklch(0.85 0.14 200);
+  --background: oklch(0.985 0.006 260);
+  --foreground: oklch(0.2 0.03 265);
+  --card: oklch(1 0 0 / 0.72);
+  --card-foreground: oklch(0.2 0.03 265);
+  --popover: oklch(1 0 0 / 0.92);
+  --popover-foreground: oklch(0.2 0.03 265);
+  --primary: oklch(0.58 0.2 262);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.94 0.03 285);
+  --secondary-foreground: oklch(0.3 0.08 290);
+  --muted: oklch(0.95 0.01 260);
+  --muted-foreground: oklch(0.48 0.03 265);
+  --accent: oklch(0.93 0.05 290);
+  --accent-foreground: oklch(0.3 0.1 290);
+  --destructive: oklch(0.63 0.21 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.86 0.02 265);
+  --input: oklch(0.92 0.015 265);
+  --ring: oklch(0.65 0.2 262);
+  --chart-1: oklch(0.65 0.2 262);
+  --chart-2: oklch(0.66 0.24 300);
+  --chart-3: oklch(0.78 0.14 200);
+  --chart-4: oklch(0.72 0.2 350);
+  --chart-5: oklch(0.8 0.17 140);
+  --sidebar: oklch(0.975 0.01 262 / 0.8);
+  --sidebar-foreground: oklch(0.25 0.03 265);
+  --sidebar-primary: oklch(0.58 0.2 262);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.92 0.05 285);
+  --sidebar-accent-foreground: oklch(0.28 0.1 290);
+  --sidebar-border: oklch(0.88 0.02 265);
+  --sidebar-ring: oklch(0.65 0.2 262);
+  --font-sans: var(--font-vazirmatn), 'Vazirmatn Variable', Vazirmatn, 'Segoe UI', Tahoma, system-ui, sans-serif;
+  --font-serif: Georgia, serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+  --radius: 0.75rem;
+  --shadow-x: 0px;
+  --shadow-y: 8px;
+  --shadow-blur: 24px;
+  --shadow-spread: -6px;
+  --shadow-opacity: 0.12;
+  --shadow-color: oklch(0.4 0.15 265);
+  --shadow-2xs: 0 1px 2px oklch(0.4 0.15 265 / 0.06);
+  --shadow-xs: 0 1px 3px oklch(0.4 0.15 265 / 0.08);
+  --shadow-sm: 0 2px 6px oklch(0.4 0.15 265 / 0.1);
+  --shadow: 0 4px 12px -2px oklch(0.4 0.15 265 / 0.12);
+  --shadow-md: 0 8px 20px -6px oklch(0.4 0.15 265 / 0.16);
+  --shadow-lg: 0 14px 32px -10px oklch(0.4 0.15 265 / 0.2);
+  --shadow-xl: 0 22px 44px -12px oklch(0.4 0.15 265 / 0.24);
+  --shadow-2xl: 0 30px 60px -14px oklch(0.4 0.15 265 / 0.3);
+  --tracking-normal: 0em;
+  --spacing: 0.25rem;
+}
+
+[data-theme='neon'].dark {
+  --background: oklch(0.14 0.025 272);
+  --foreground: oklch(0.95 0.01 260);
+  --card: oklch(0.21 0.03 272 / 0.62);
+  --card-foreground: oklch(0.95 0.01 260);
+  --popover: oklch(0.2 0.03 272 / 0.94);
+  --popover-foreground: oklch(0.95 0.01 260);
+  --primary: oklch(0.74 0.18 250);
+  --primary-foreground: oklch(0.13 0.03 265);
+  --secondary: oklch(0.3 0.06 290);
+  --secondary-foreground: oklch(0.93 0.03 290);
+  --muted: oklch(0.25 0.03 270);
+  --muted-foreground: oklch(0.72 0.03 265);
+  --accent: oklch(0.32 0.09 295);
+  --accent-foreground: oklch(0.95 0.02 290);
+  --destructive: oklch(0.68 0.2 22);
+  --destructive-foreground: oklch(0.13 0 0);
+  --border: oklch(0.42 0.06 275 / 0.45);
+  --input: oklch(0.28 0.04 272 / 0.8);
+  --ring: oklch(0.74 0.18 250);
+  --chart-1: oklch(0.74 0.18 250);
+  --chart-2: oklch(0.7 0.24 300);
+  --chart-3: oklch(0.85 0.14 200);
+  --chart-4: oklch(0.75 0.2 350);
+  --chart-5: oklch(0.82 0.18 140);
+  --sidebar: oklch(0.17 0.03 272 / 0.72);
+  --sidebar-foreground: oklch(0.92 0.01 260);
+  --sidebar-primary: oklch(0.74 0.18 250);
+  --sidebar-primary-foreground: oklch(0.13 0.03 265);
+  --sidebar-accent: oklch(0.3 0.08 290 / 0.8);
+  --sidebar-accent-foreground: oklch(0.96 0.02 290);
+  --sidebar-border: oklch(0.42 0.06 275 / 0.35);
+  --sidebar-ring: oklch(0.74 0.18 250);
+  --shadow-color: oklch(0.1 0.05 270);
+  --shadow-2xs: 0 1px 2px oklch(0 0 0 / 0.3);
+  --shadow-xs: 0 1px 3px oklch(0 0 0 / 0.35);
+  --shadow-sm: 0 2px 8px oklch(0 0 0 / 0.35);
+  --shadow: 0 6px 16px -4px oklch(0 0 0 / 0.45);
+  --shadow-md: 0 10px 24px -8px oklch(0 0 0 / 0.5);
+  --shadow-lg: 0 16px 36px -12px oklch(0 0 0 / 0.55);
+  --shadow-xl: 0 24px 48px -14px oklch(0 0 0 / 0.6);
+  --shadow-2xl: 0 32px 64px -16px oklch(0 0 0 / 0.65);
+}
+
+[data-theme='neon'] {
+  @theme inline {
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+    --color-chart-1: var(--chart-1);
+    --color-chart-2: var(--chart-2);
+    --color-chart-3: var(--chart-3);
+    --color-chart-4: var(--chart-4);
+    --color-chart-5: var(--chart-5);
+    --color-sidebar: var(--sidebar);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-neon-blue: var(--neon-blue);
+    --color-neon-purple: var(--neon-purple);
+    --color-neon-cyan: var(--neon-cyan);
+    --font-sans: var(--font-sans);
+    --font-mono: var(--font-mono);
+    --font-serif: var(--font-serif);
+    --radius-sm: calc(var(--radius) - 4px);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+    --shadow-2xs: var(--shadow-2xs);
+    --shadow-xs: var(--shadow-xs);
+    --shadow-sm: var(--shadow-sm);
+    --shadow: var(--shadow);
+    --shadow-md: var(--shadow-md);
+    --shadow-lg: var(--shadow-lg);
+    --shadow-xl: var(--shadow-xl);
+    --shadow-2xl: var(--shadow-2xl);
+  }
+}
+
+/* Glass surfaces, ambient glow background and neon hover/motion — only under the neon theme. */
+@layer components {
+  [data-theme='neon'] body {
+    background-color: var(--background);
+    background-image:
+      radial-gradient(60rem 40rem at 110% -10%, oklch(0.6 0.2 262 / 0.16), transparent 60%),
+      radial-gradient(50rem 36rem at -20% 110%, oklch(0.65 0.24 300 / 0.14), transparent 60%),
+      radial-gradient(30rem 24rem at 40% 40%, oklch(0.8 0.14 200 / 0.06), transparent 60%);
+    background-attachment: fixed;
+  }
+  [data-theme='neon'].dark body {
+    background-image:
+      radial-gradient(60rem 40rem at 110% -10%, oklch(0.6 0.2 262 / 0.28), transparent 60%),
+      radial-gradient(50rem 36rem at -20% 110%, oklch(0.62 0.24 300 / 0.24), transparent 60%),
+      radial-gradient(30rem 24rem at 40% 40%, oklch(0.8 0.14 200 / 0.08), transparent 60%);
+  }
+  [data-theme='neon'] [data-slot='card'],
+  [data-theme='neon'] [data-slot='sheet-content'],
+  [data-theme='neon'] [data-slot='dialog-content'],
+  [data-theme='neon'] [data-slot='popover-content'],
+  [data-theme='neon'] [data-slot='dropdown-menu-content'],
+  [data-theme='neon'] [data-sidebar='sidebar'] {
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border-color: var(--border);
+  }
+  [data-theme='neon'] [data-slot='card'] {
+    @apply shadow transition-[transform,box-shadow,border-color] duration-300;
+    background-image: linear-gradient(135deg, oklch(1 0 0 / 0.06), transparent 45%);
+  }
+  [data-theme='neon'] [data-slot='card']:hover {
+    transform: translateY(-2px);
+    border-color: oklch(from var(--primary) l c h / 0.5);
+    box-shadow: 0 0 0 1px oklch(from var(--primary) l c h / 0.25), 0 12px 34px -12px oklch(from var(--primary) l c h / 0.45), var(--shadow-lg);
+  }
+  [data-theme='neon'] [data-slot='button'][data-variant='default'],
+  [data-theme='neon'] [data-slot='button']:not([data-variant]) {
+    background-image: linear-gradient(120deg, var(--neon-blue), var(--neon-purple));
+    color: oklch(0.12 0.03 265);
+    box-shadow: 0 6px 18px -8px oklch(from var(--neon-blue) l c h / 0.7);
+  }
+  [data-theme='neon'] [data-slot='button']:hover {
+    box-shadow: 0 0 0 1px oklch(from var(--neon-blue) l c h / 0.5), 0 10px 26px -10px oklch(from var(--neon-purple) l c h / 0.75);
+    transform: translateY(-1px);
+  }
+  [data-theme='neon'] [data-sidebar='menu-button'] {
+    @apply transition-[background-color,transform,box-shadow] duration-200;
+  }
+  [data-theme='neon'] [data-sidebar='menu-button']:hover {
+    transform: translateX(-2px);
+  }
+  [data-theme='neon'] [data-sidebar='menu-button'][data-active='true'] {
+    background-image: linear-gradient(90deg, oklch(from var(--neon-blue) l c h / 0.22), oklch(from var(--neon-purple) l c h / 0.14));
+    box-shadow: inset 2px 0 0 var(--neon-blue);
+  }
+  [data-theme='neon'] [data-slot='badge'] { @apply backdrop-blur-sm; }
+  [data-theme='neon'] [data-slot='input']:focus-visible,
+  [data-theme='neon'] [data-slot='textarea']:focus-visible,
+  [data-theme='neon'] [data-slot='native-select']:focus-visible {
+    box-shadow: 0 0 0 3px oklch(from var(--neon-blue) l c h / 0.25), 0 0 18px -4px oklch(from var(--neon-blue) l c h / 0.6);
+  }
+  [data-theme='neon'] .neon-text {
+    background-image: linear-gradient(90deg, var(--neon-blue), var(--neon-purple), var(--neon-cyan));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  [data-theme='neon'] .glass {
+    background: var(--card);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid var(--border);
+  }
+  [data-theme='neon'] .glow-hover { @apply transition-[box-shadow,transform] duration-300; }
+  [data-theme='neon'] .glow-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 0 1px oklch(from var(--neon-blue) l c h / 0.35), 0 12px 30px -10px oklch(from var(--neon-purple) l c h / 0.6);
+  }
+}

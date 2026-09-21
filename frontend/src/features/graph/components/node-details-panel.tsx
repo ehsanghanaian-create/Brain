@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import type { NodeDetails } from '@/lib/api/client';
+import { safeHref } from '@/lib/utils';
 import { IconClick, IconFocus2, IconSearch } from '@tabler/icons-react';
 import { CONTENT_STATUS_FA, NODE_STYLE, RELATION_FA, SEVERITY_FA } from '../constants';
 
@@ -56,7 +57,7 @@ export function NodeDetailsPanel({
               </div>
               <h3 className='mt-1 truncate text-sm font-semibold' title={details.label}>{details.label}</h3>
               {details.url && (
-                <a href={details.url} target='_blank' rel='noreferrer' className='text-muted-foreground block truncate text-xs hover:underline' dir='ltr'>
+                <a href={safeHref(details.url)} target='_blank' rel='noreferrer' className='text-muted-foreground block truncate text-xs hover:underline' dir='ltr'>
                   {details.url}
                 </a>
               )}

@@ -272,8 +272,20 @@ def sources(site_id: str, s: PlannerService = Depends(svc)) -> list[dict]:
     return s.repo.list_sources(site_id)
 
 
+def _check_source_url(url: str | None) -> None:
+    """Sources are fetched server-side later, so the URL is validated at entry (SSRF guard)."""
+    if url is None:
+        return
+    from ...common.urls import UnsafeUrlError, assert_public_http_url
+    try:
+        assert_public_http_url(url)
+    except UnsafeUrlError as e:
+        raise ApiError(422, str(e), code="unsafe_url") from e
+
+
 @router.post("/sources", status_code=201)
 def create_source(site_id: str, body: SourceBody, s: PlannerService = Depends(svc)) -> dict:
+    _check_source_url(body.url)
     return s.repo.save_source(site_id, None, **{k: v for k, v in body.model_dump().items() if v is not None})
 
 
@@ -281,6 +293,7 @@ def create_source(site_id: str, body: SourceBody, s: PlannerService = Depends(sv
 def patch_source(site_id: str, sid: int, body: SourceBody, s: PlannerService = Depends(svc)) -> dict:
     if not s.repo.get_source(site_id, sid):
         raise HTTPException(404, "source not found")
+    _check_source_url(body.url)
     return s.repo.save_source(site_id, sid, **{k: v for k, v in body.model_dump().items() if v is not None})
 
 

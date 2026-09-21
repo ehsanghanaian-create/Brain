@@ -106,16 +106,14 @@ def finish(code: str, state: str | None, redirect_uri: str | None = None) -> dic
     verifier = record.get("code_verifier")
     if verifier:
         flow.code_verifier = verifier
-    old_refresh = None
-    try:                                                       # reconnect: remember the previous grant to revoke it
-        old = json.loads(read_token_json() or "null")
-        old_refresh = (old or {}).get("refresh_token")
-    except ValueError:
-        pass
     flow.fetch_token(code=code)
     creds = flow.credentials
-    if old_refresh and old_refresh != creds.refresh_token:
-        _revoke(old_refresh)                                   # best-effort: no orphaned grants left on the Google account
+    # Google's revocation endpoint revokes the whole project grant, including
+    # newly issued tokens. Reconnecting must never revoke the previous token.
+    # Revocation belongs exclusively to the explicit disconnect action.
+    # https://developers.google.com/identity/protocols/oauth2/web-server#tokenrevoke
+    if not creds.refresh_token:
+        raise GscAuthError("گوگل دسترسی تمدید خودکار صادر نکرد؛ اتصال قبلی حفظ شد. دوباره اتصال حساب گوگل را انجام دهید و دسترسی آفلاین را تأیید کنید.")
     write_token_json(creds.to_json())                          # same format get_credentials() reads (SecretStore, encrypted)
     tp = token_path()
     tp.parent.mkdir(parents=True, exist_ok=True)

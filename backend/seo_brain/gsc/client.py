@@ -119,6 +119,7 @@ def get_gsc_credentials(interactive: bool = True):
 
 
 def get_credentials(interactive: bool = True):
+    from google.auth.exceptions import RefreshError, TransportError
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     creds = None
@@ -129,12 +130,22 @@ def get_credentials(interactive: bool = True):
     if creds and creds.valid:
         return creds
     if creds and creds.expired and creds.refresh_token:
-        try:
-            creds.refresh(Request())
+        for attempt in range(3):
+            try:
+                creds.refresh(Request())
+            except (RefreshError, TransportError) as exc:
+                retryable = isinstance(exc, TransportError) or getattr(exc, "retryable", False)
+                if not retryable:
+                    raise GscAuthError("Google authorization is no longer valid; reconnect the Google account in the connection center") from exc
+                if attempt == 2:
+                    # A network outage is not revoked consent. Keep the stored grant
+                    # and let the next sync retry without asking for another login.
+                    raise RuntimeError("Google token refresh temporarily unavailable; stored authorization retained; retry later") from exc
+                log.warning("Google token refresh temporarily failed; retry %s/2", attempt + 1)
+                time.sleep(2 ** attempt)
+                continue
             write_token_json(creds.to_json())
             return creds
-        except Exception as e:  # noqa: BLE001
-            log.warning(f"token refresh failed ({e.__class__.__name__}); re-authorization required")
     _client_config()  # raises a precise error if the OAuth client is not configured
     if not interactive:
         raise GscAuthError("no valid GSC token; run: python scripts/sync-gsc.py --auth-only")

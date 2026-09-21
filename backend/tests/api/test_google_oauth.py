@@ -183,7 +183,7 @@ def test_token_migrates_from_plaintext_file_to_secret_store(env):
     assert env["client"].get("/api/v1/connections/google/status").json()["connected"] is True
 
 
-def test_reconnect_revokes_previous_grant(env, monkeypatch):
+def test_reconnect_preserves_google_grant_and_disconnect_revokes(env, monkeypatch):
     c = env["client"]
     revoked: list[str] = []
     monkeypatch.setattr(google_oauth, "_revoke", lambda tok: revoked.append(tok) or True)
@@ -207,9 +207,30 @@ def test_reconnect_revokes_previous_grant(env, monkeypatch):
 
         monkeypatch.setattr(google_oauth, "_flow", lambda ru, f=_Flow: f())
         assert c.get("/api/v1/connections/google/callback", params={"code": f"c{n}", "state": state}).status_code == 200
-    assert revoked == ["rt-1"]                                    # the old grant was revoked exactly once
+    assert revoked == []  # Google revokes the entire project grant, not just one token.
     from seo_brain.gsc.client import read_token_json
     assert json.loads(read_token_json())["refresh_token"] == "rt-2"
+    assert c.delete("/api/v1/connections/google").json()["revoked"] is True
+    assert revoked == ["rt-2"]
+
+
+def test_reconnect_without_refresh_token_preserves_stored_credentials(env, monkeypatch):
+    from seo_brain.gsc.client import read_token_json, write_token_json
+    existing = json.dumps({"token": "old-access", "refresh_token": "old-refresh"})
+    write_token_json(existing)
+    state = google_oauth.begin()["state"]
+
+    class Flow:
+        credentials = type("Credentials", (), {"refresh_token": None})()
+
+        def fetch_token(self, code=None):
+            pass
+
+    monkeypatch.setattr(google_oauth, "_flow", lambda ru: Flow())
+    monkeypatch.setattr(google_oauth, "_revoke", lambda token: pytest.fail("Reconnect must not revoke grants"))
+    with pytest.raises(google_oauth.GscAuthError, match="تمدید خودکار"):
+        google_oauth.finish("code", state)
+    assert read_token_json() == existing
 
 
 def test_no_cli_hints_in_user_facing_messages():

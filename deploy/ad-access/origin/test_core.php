@@ -3,7 +3,7 @@ require __DIR__.'/core.php';
 $temp=sys_get_temp_dir().'/ead-test-'.bin2hex(random_bytes(6));mkdir($temp);mkdir($temp.'/public_html');mkdir($temp.'/ead-access');
 $cfg=array('site'=>'modirankhodro-emdad.com','secret'=>str_repeat('x',40),'enforcement_enabled'=>true,
  'root'=>$temp.'/public_html','private_dir'=>$temp.'/ead-access','protected_ips'=>array('8.8.8.8'),'protected_ranges'=>array('9.9.9.0/24'));
-$old="# existing manual rules\r\nDeny from 1.2.3.4\r\n# WordPress\nRewriteRule . /index.php [L]\n";
+$old="# BEGIN EAD CUSTOM 403\nErrorDocument 403 \"A private page\"\n# END EAD CUSTOM 403\n# existing manual rules\r\nDeny from 1.2.3.4\r\n# WordPress\nRewriteRule . /index.php [L]\n";
 file_put_contents($cfg['root'].'/.htaccess',$old);$core=new EADAccess($cfg);$checks=0;$counter=0;
 function ok($v,$msg) {global $checks;if(!$v) throw new Exception($msg);$checks++;}
 function request($action,$ip='8.8.4.4',$id='decision_000000001',$extra=array()) {global $counter;return array_merge(array('site'=>'modirankhodro-emdad.com','action'=>$action,'ip'=>$ip,'decision_id'=>$id,'ts'=>1000,'nonce'=>'nonce_'.str_pad(++$counter,20,'0',STR_PAD_LEFT)),$extra);}

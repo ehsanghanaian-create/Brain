@@ -1,5 +1,25 @@
 # Permanent repeated Ads entry rule — deployed 2026-09-14
 
+## Custom blocked-access response — 2026-09-24
+
+Both site origins now have the three-line fragment from
+`origin/custom-403.htaccess` outside the automatically owned rule sections in
+their document-root `.htaccess`. It supplies a self-contained Persian responsive
+HTML page for Apache/LiteSpeed-generated 403 responses, including the existing
+`RewriteRule ... [F,L]` IP bans. The HTTP status remains 403; the block rules,
+WordPress redirect rules and ban lists are unchanged. Inline HTML avoids an
+error-page internal redirect that would itself be denied for a blocked IP.
+
+On the Iran origin, a request for `/.htaccess` returned the custom body with
+HTTP 403 while `/` remained 200. On Europe, a temporary exact-path `[F,L]`
+probe returned the same custom body with HTTP 403; that probe was removed and
+the path reverted to 404 while `/` remained 200. The Europe nginx front end
+generates its own 403 for direct requests to dotfiles, so those errors still
+show its stock page; site IP bans are handled by the tested rewrite layer.
+The page has no external assets or links, so it cannot create a route around
+the ban. Both the EAD and WordPress writer regression tests check that their
+separate `.htaccess` updates preserve the custom fragment.
+
 Production service `ead-access.service` is enabled and running on `gearbox`.
 Activated prospectively at 12:37 UTC; existing visitor history was skipped.
 The existing Netafraz token was reused successfully; no new token is needed.

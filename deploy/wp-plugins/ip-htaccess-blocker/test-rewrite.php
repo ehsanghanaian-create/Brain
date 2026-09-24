@@ -20,7 +20,7 @@ $plugin = IHB_IP_Htaccess_Blocker::instance();
 $GLOBALS['test_dir'] = sys_get_temp_dir() . '/ihb-block-test-' . getmypid();
 mkdir( $GLOBALS['test_dir'] );
 $test_path = get_home_path() . '.htaccess';
-file_put_contents( $test_path, "# BEGIN EAD PERMANENT ACCESS\nRewriteEngine On\n# END EAD PERMANENT ACCESS\n<IfModule mod_rewrite.c>\nRewriteRule . /index.php [L]\n</IfModule>\n" );
+file_put_contents( $test_path, "# BEGIN EAD PERMANENT ACCESS\nRewriteEngine On\n# END EAD PERMANENT ACCESS\n# BEGIN EAD CUSTOM 403\nErrorDocument 403 \"A private page\"\n# END EAD CUSTOM 403\n<IfModule mod_rewrite.c>\nRewriteRule . /index.php [L]\n</IfModule>\n" );
 $write = new ReflectionMethod( $plugin, 'write_htaccess' );
 $write->setAccessible( true );
 $save = new ReflectionMethod( $plugin, 'save_ips' );
@@ -30,6 +30,10 @@ $GLOBALS['option_writes'] = 0;
 $write->invoke( $plugin, array( '78.129.155.177', '2001:db8::5', '192.0.2.0/24' ) );
 $rules = implode( "\n", $GLOBALS['rendered'] );
 $file_rules = file_get_contents( $test_path );
+if ( strpos( $file_rules, 'ErrorDocument 403 "A private page"' ) === false ) {
+	fwrite( STDERR, "Custom error document must survive plugin rewrites\n" );
+	exit( 1 );
+}
 if ( ! ( strpos( $file_rules, '# END EAD PERMANENT ACCESS' ) < strpos( $file_rules, '# BEGIN IP Htaccess Blocker' ) && strpos( $file_rules, '# BEGIN IP Htaccess Blocker' ) < strpos( $file_rules, 'RewriteRule . /index.php [L]' ) ) ) {
 	fwrite( STDERR, "Block marker must precede WordPress rewrite rules\n" );
 	exit( 1 );

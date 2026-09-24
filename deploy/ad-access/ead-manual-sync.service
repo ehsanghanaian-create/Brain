@@ -1,0 +1,10 @@
+[Unit]
+Description=Reconcile WordPress manual IP blocks across site origins
+After=docker.service network-online.target ead-access.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/ead-access
+ExecStart=/usr/bin/flock -n /var/lib/ead-access/manual-sync.lock /usr/bin/python3 /opt/ead-access/manual_sync.py
+TimeoutStartSec=600

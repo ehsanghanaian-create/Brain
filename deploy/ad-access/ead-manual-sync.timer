@@ -1,0 +1,11 @@
+[Unit]
+Description=Keep WordPress IP blocks active on both site origins
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=ead-manual-sync.service
+
+[Install]
+WantedBy=timers.target

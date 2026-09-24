@@ -3,7 +3,7 @@
  * Plugin Name: IP htaccess Blocker
  * Plugin URI:  https://emdad.local
  * Description: مسدودسازی مستقیم IP ها در فایل .htaccess با مدیریت کامل (افزودن/حذف) از پنل تنظیمات.
- * Version:     1.2.0
+ * Version:     1.2.2
  * Author:      Emdad
  * License:     GPL-2.0+
  * Text Domain: ip-htaccess-blocker
@@ -20,7 +20,7 @@ class IHB_IP_Htaccess_Blocker {
 	const NONCE      = 'ihb_manage_ips';
 	const META_KEY   = 'ihb_blocked_meta';
 	const LOG_KEY    = 'ihb_rest_log';
-	const VERSION    = '1.2.0';
+	const VERSION    = '1.2.2';
 
 	private static $instance = null;
 
@@ -66,8 +66,11 @@ class IHB_IP_Htaccess_Blocker {
 
 	private function save_ips( array $ips ) {
 		$ips = array_values( array_unique( $ips ) );
+		if ( ! $this->write_htaccess( $ips ) ) {
+			return false;
+		}
 		update_option( self::OPTION_KEY, $ips, false );
-		return $this->write_htaccess( $ips );
+		return true;
 	}
 
 	/**
@@ -134,6 +137,21 @@ class IHB_IP_Htaccess_Blocker {
 		$lines = array();
 
 		if ( ! empty( $ips ) ) {
+			// LiteSpeed reliably applies mod_rewrite before serving cached/static files.
+			// Keep the legacy authorization rules below for Apache and CIDR entries.
+			$exact_ips = array_values( array_filter( $ips, function ( $ip ) {
+				return (bool) filter_var( $ip, FILTER_VALIDATE_IP );
+			} ) );
+			if ( ! empty( $exact_ips ) ) {
+				$lines[] = '<IfModule mod_rewrite.c>';
+				$lines[] = 'RewriteEngine On';
+				$last = count( $exact_ips ) - 1;
+				foreach ( $exact_ips as $index => $ip ) {
+					$lines[] = 'RewriteCond %{REMOTE_ADDR} ^' . preg_quote( $ip, '/' ) . '$' . ( $index < $last ? ' [OR]' : '' );
+				}
+				$lines[] = 'RewriteRule ^ - [F,L]';
+				$lines[] = '</IfModule>';
+			}
 			// آپاچی 2.4 به بالا
 			$lines[] = '<IfModule mod_authz_core.c>';
 			$lines[] = "\t<RequireAll>";
@@ -154,7 +172,31 @@ class IHB_IP_Htaccess_Blocker {
 			$lines[] = '</IfModule>';
 		}
 
-		return insert_with_markers( $path, self::MARKER, $lines );
+		if ( ! insert_with_markers( $path, self::MARKER, $lines ) ) {
+			return false;
+		}
+
+		// WordPress's terminal rewrite rules can stop processing before a marker
+		// appended by insert_with_markers. Keep our block ahead of WordPress on
+		// every update, while leaving the separate EAD access block first.
+		$content = file_get_contents( $path );
+		if ( false === $content ) {
+			return false;
+		}
+		$begin = '# BEGIN ' . self::MARKER;
+		$end   = '# END ' . self::MARKER;
+		$start = strpos( $content, $begin );
+		$finish = strpos( $content, $end );
+		if ( false === $start || false === $finish || $finish < $start ) {
+			return false;
+		}
+		$finish += strlen( $end );
+		$block = substr( $content, $start, $finish - $start );
+		$other = substr( $content, 0, $start ) . substr( $content, $finish );
+		$ead_end = strpos( $other, '# END EAD PERMANENT ACCESS' );
+		$position = false === $ead_end ? 0 : $ead_end + strlen( '# END EAD PERMANENT ACCESS' );
+		$new_content = substr( $other, 0, $position ) . "\n" . $block . "\n" . ltrim( substr( $other, $position ), "\r\n" );
+		return false !== file_put_contents( $path, $new_content, LOCK_EX );
 	}
 
 	/* ---------------------------------------------------------------------
@@ -294,6 +336,11 @@ class IHB_IP_Htaccess_Blocker {
 			'callback'            => array( $this, 'rest_blocked' ),
 			'permission_callback' => array( $this, 'rest_can_manage' ),
 		) );
+		register_rest_route( 'seo-brain/v1', '/security/reconcile', array(
+			'methods'             => 'POST',
+			'callback'            => array( $this, 'rest_reconcile' ),
+			'permission_callback' => array( $this, 'rest_can_manage' ),
+		) );
 		register_rest_route( 'seo-brain/v1', '/security/block-ip', array(
 			'methods'             => 'POST',
 			'callback'            => array( $this, 'rest_block_ip' ),
@@ -365,6 +412,14 @@ class IHB_IP_Htaccess_Blocker {
 		return rest_ensure_response( array( 'items' => $items ) );
 	}
 
+	public function rest_reconcile() {
+		$ips = $this->get_ips();
+		if ( ! $this->write_htaccess( $ips ) ) {
+			return new WP_Error( 'htaccess_not_writable', 'The blocked IP rules could not be written.', array( 'status' => 500 ) );
+		}
+		return rest_ensure_response( array( 'success' => true, 'count' => count( $ips ), 'version' => self::VERSION ) );
+	}
+
 	public function rest_block_ip( WP_REST_Request $request ) {
 		$ip     = trim( sanitize_text_field( (string) $request->get_param( 'ip' ) ) );
 		$reason = sanitize_text_field( (string) $request->get_param( 'reason' ) );
@@ -393,7 +448,7 @@ class IHB_IP_Htaccess_Blocker {
 		$this->rest_log( 'block', $ip, false !== $ok, false !== $ok ? '' : 'htaccess not writable' );
 
 		if ( false === $ok ) {
-			return new WP_Error( 'htaccess_not_writable', 'IP saved to the list but .htaccess is not writable.', array( 'status' => 500 ) );
+			return new WP_Error( 'htaccess_not_writable', 'The IP block could not be applied to .htaccess.', array( 'status' => 500 ) );
 		}
 		return rest_ensure_response( array( 'success' => true, 'ip' => $ip, 'status' => 'blocked' ) );
 	}
@@ -423,7 +478,7 @@ class IHB_IP_Htaccess_Blocker {
 		$this->rest_log( 'unblock', $ip, false !== $ok );
 
 		if ( false === $ok ) {
-			return new WP_Error( 'htaccess_not_writable', 'IP removed from the list but .htaccess is not writable.', array( 'status' => 500 ) );
+			return new WP_Error( 'htaccess_not_writable', 'The IP unblock could not be applied to .htaccess.', array( 'status' => 500 ) );
 		}
 		return rest_ensure_response( array( 'success' => true, 'ip' => $ip, 'status' => 'unblocked' ) );
 	}

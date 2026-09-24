@@ -31,6 +31,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { toast } from 'sonner';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createIpBlockController } from './ip-blocking';
+import { AccessBadge, AccessOverview, matchAccess, useAccessStatus } from './access-status';
 
 type Summary = {
   generated_at: string;
@@ -510,9 +511,14 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
   const ipBlockController = useMemo(() => createIpBlockController(siteId, endpoints), [siteId]);
   const ipBlockState = useSyncExternalStore(ipBlockController.subscribe, ipBlockController.getSnapshot, ipBlockController.getSnapshot);
   const blockedIps = ipBlockState.blockedIps;
+  const accessStatus = useAccessStatus(siteId);
+  function isBlocked(ip: string, gclid: string | null, confidence: string) {
+    return blockedIps.has(ip) || matchAccess(accessStatus, ip, gclid, confidence === 'trusted_proxy' || confidence === 'direct_peer')?.status === 'blocked';
+  }
   useEffect(() => {
     void ipBlockController.load();
-    return () => ipBlockController.dispose();
+    const timer = setInterval(() => void ipBlockController.refresh(), 15_000);
+    return () => { clearInterval(timer); ipBlockController.dispose(); };
   }, [ipBlockController]);
   async function toggleIpBlock(ip: string) {
     const result = await ipBlockController.toggle(ip);
@@ -928,7 +934,8 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
                 <Badge className='border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'>
                   <span className='me-1.5 size-2 animate-pulse rounded-full bg-emerald-500' />دریافت زنده فعال
                 </Badge>
-                <Badge variant='outline'>فقط پایش؛ مسدودسازی خاموش</Badge>
+                <AccessOverview status={accessStatus} />
+                {ipBlockState.status === 'ready' && <Badge variant='outline'>{fa.format(blockedIps.size)} IP در فهرست افزونهٔ سایت</Badge>}
               </div>
               <h1 className='text-2xl font-bold tracking-tight sm:text-3xl'>پایش ورود، تماس و رفتار کاربران</h1>
               <div className='text-muted-foreground mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs sm:text-sm'>
@@ -963,7 +970,7 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
           </div>
           <div className='border-border/70 bg-muted/35 flex items-start gap-2 border-t px-5 py-3 text-xs leading-5 sm:px-6'>
             <IconInfoCircle className='text-muted-foreground mt-0.5 size-4 shrink-0' />
-            <p><span className='font-medium'>اعتبار IP:</span> فقط رکورد دارای برچسب سبز «تأییدشده» برای تحلیل IP استفاده می‌شود. رکوردهای قبل از اصلاح CDN با برچسب قرمز نگه داشته شده‌اند اما در امتیاز ریسک دخالت ندارند. سیستم فعلاً کسی را خودکار مسدود نمی‌کند.</p>
+            <p><span className='font-medium'>اعتبار IP:</span> فقط رکورد دارای برچسب سبز «تأییدشده» برای تحلیل IP استفاده می‌شود. رکوردهای قبل از اصلاح CDN با برچسب قرمز نگه داشته شده‌اند اما در امتیاز ریسک دخالت ندارند. قانون ورود تکراری Ads برای IPهای تأییدشده فعال است؛ وضعیت اعمال روی هاست‌ها در بالای صفحه نمایش داده می‌شود.</p>
           </div>
         </section>
 
@@ -1049,7 +1056,7 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
                   </div>
                   <Badge className='w-fit border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'>
                     <span className='me-1.5 size-2 animate-pulse rounded-full bg-emerald-500' />
-                    {fa.format(sessions.filter((s) => sessionIsOnline(s.last_seen)).length)} نفر همین حالا آنلاین
+                    {fa.format(sessions.filter((s) => !isBlocked(s.ip_address, s.gclid, s.ip_confidence) && sessionIsOnline(s.last_seen)).length)} نشست با فعالیت در ۶۰ ثانیهٔ اخیر
                   </Badge>
                 </div>
               </CardHeader>
@@ -1057,23 +1064,25 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
                 {sessions.length ? (
                   <div className='space-y-2.5'>
                     {sessions.map((s) => {
-                      const online = sessionIsOnline(s.last_seen);
+                      const blocked = isBlocked(s.ip_address, s.gclid, s.ip_confidence);
+                      const online = !blocked && sessionIsOnline(s.last_seen);
                       const risk = riskInfo(s.risk_score);
                       const ua = parseUserAgent(s.user_agent);
                       const place = [s.geo_country, s.geo_city].filter(Boolean).join(' · ');
                       return (
-                        <button key={s.person_key} type='button' onClick={() => setSelectedSession(s)} className='hover:border-primary/50 hover:bg-muted/30 block w-full rounded-xl border p-3 text-start transition-colors sm:p-4'>
+                        <button key={s.person_key} type='button' onClick={() => setSelectedSession(s)} className={`hover:border-primary/50 hover:bg-muted/30 block w-full rounded-xl border p-3 text-start transition-colors sm:p-4 ${blocked ? 'border-destructive/40 bg-destructive/10' : ''}`}>
                           <div className='flex flex-col gap-3 lg:flex-row lg:items-center'>
                             <div className='flex min-w-0 flex-1 items-center gap-3'>
                               <span className='relative flex size-2.5 shrink-0'>
                                 {online && <span className='absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75' />}
-                                <span className={`relative inline-flex size-2.5 rounded-full ${online ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
+                                <span className={`relative inline-flex size-2.5 rounded-full ${blocked ? 'bg-destructive' : online ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
                               </span>
                               <div className='min-w-0'>
                                 <div className='flex flex-wrap items-center gap-2'>
                                   <span className='font-mono text-sm font-semibold' dir='ltr'>{s.ip_address}</span>
+                                  {blocked && <AccessBadge status={accessStatus} ip={s.ip_address} gclid={s.gclid} trustedIp={s.ip_confidence === 'trusted_proxy' || s.ip_confidence === 'direct_peer'} legacyBlocked={blockedIps.has(s.ip_address)} />}
                                   <Badge variant='outline' className={`text-[10px] ${risk.badge}`}>{risk.label}</Badge>
-                                  {online && <span className='text-[10px] text-emerald-600 dark:text-emerald-400'>آنلاین</span>}
+                                  {online && <span className='text-[10px] text-emerald-600 dark:text-emerald-400'>فعالیت اخیر</span>}
                                 </div>
                                 <p className='mt-0.5 truncate text-[11px]'><span aria-hidden='true'>{flagEmoji(s.geo_country_code)} </span>{place || 'موقعیت نامشخص'}{s.geo_asname ? <span className='text-muted-foreground'> · {s.geo_asname}</span> : null}</p>
                                 {s.utm_term && <p className='text-primary mt-0.5 truncate text-[11px]' title={s.utm_term}><span className='text-muted-foreground'>کلمهٔ کلیدی: </span>{s.utm_term}</p>}
@@ -1437,10 +1446,10 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
                     <thead className='bg-muted/60 text-muted-foreground sticky top-0 z-10 border-y text-xs'><tr>{['زمان و رفتار', 'کاربر', 'IP و وضعیت', 'منبع ورود', 'صفحه', 'نشانه مهم', ''].map((heading) => <th key={heading} className='px-4 py-3 text-start font-medium'>{heading}</th>)}</tr></thead>
                     <tbody>{visibleEvents.map((row) => {
                       const user = logUsers.get(logIdentity(row))!;
-                      return <tr key={row.id} className={`hover:bg-muted/40 align-top border-b transition-colors last:border-0 ${blockedIps.has(row.ip_address) ? 'bg-destructive/10 hover:bg-destructive/15' : logRowTone(row)}`}>
+                      return <tr key={row.id} className={`hover:bg-muted/40 align-top border-b transition-colors last:border-0 ${isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'bg-destructive/10 hover:bg-destructive/15' : logRowTone(row)}`}>
                       <td className='sticky right-0 z-[1] bg-background/95 px-4 py-3 backdrop-blur'><Badge variant='outline'>{EVENT_FA[row.event_type] ?? row.event_type}</Badge><p className='mt-2 whitespace-nowrap text-xs'>{time.format(new Date(row.received_at))}</p><p className='text-muted-foreground mt-1 font-mono text-[10px]' dir='ltr'>ID: {row.id}</p></td>
-                      <td className='max-w-56 px-4 py-3 text-[11px]'><Badge variant='outline' className={blockedIps.has(row.ip_address) ? 'border-destructive/40 bg-destructive/15 text-destructive' : user.color.badge}><span className={`me-1.5 size-2 rounded-full ${blockedIps.has(row.ip_address) ? 'bg-destructive' : user.color.dot}`} />{user.label}</Badge><p className='text-muted-foreground mt-1'>{fa.format(user.count)} رویداد در این صفحه</p><p className='text-muted-foreground mt-2 truncate font-mono' dir='ltr'>session: {row.session_id ?? '—'}</p></td>
-                      <td className='px-4 py-3 text-xs'><p className='font-mono font-semibold' dir='ltr'>{row.ip_address}</p><Badge variant='outline' className={`mt-2 text-[10px] ${confidenceInfo(row.ip_confidence).className}`}>{confidenceInfo(row.ip_confidence).label}</Badge></td>
+                      <td className='max-w-56 px-4 py-3 text-[11px]'><Badge variant='outline' className={isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'border-destructive/40 bg-destructive/15 text-destructive' : user.color.badge}><span className={`me-1.5 size-2 rounded-full ${isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'bg-destructive' : user.color.dot}`} />{user.label}</Badge><p className='text-muted-foreground mt-1'>{fa.format(user.count)} رویداد در این صفحه</p><p className='text-muted-foreground mt-2 truncate font-mono' dir='ltr'>session: {row.session_id ?? '—'}</p></td>
+                      <td className='px-4 py-3 text-xs'><p className='font-mono font-semibold' dir='ltr'>{row.ip_address}</p><Badge variant='outline' className={`mt-2 text-[10px] ${confidenceInfo(row.ip_confidence).className}`}>{confidenceInfo(row.ip_confidence).label}</Badge>{isBlocked(row.ip_address, row.gclid, row.ip_confidence) && <div className='mt-1'><AccessBadge status={accessStatus} ip={row.ip_address} gclid={row.gclid} trustedIp={row.ip_confidence === 'trusted_proxy' || row.ip_confidence === 'direct_peer'} legacyBlocked={blockedIps.has(row.ip_address)} /></div>}</td>
                       <td className='max-w-56 px-4 py-3 text-xs'><Badge variant='outline' className={eventAdsInfo(row).className}>{eventAdsInfo(row).label}</Badge><p className='text-muted-foreground mt-2 truncate font-mono' dir='ltr'>{row.utm_source || row.referrer || 'ورود مستقیم'}</p></td>
                       <td className='max-w-72 px-4 py-3 font-mono text-[11px]' dir='ltr'><p className='break-all'>{row.page_path || row.landing_path || '—'}</p></td>
                       <td className='max-w-64 px-4 py-3 text-[11px]'>{row.gclid || row.gbraid || row.wbraid ? <><p className='font-medium'>شناسه تبلیغ ثبت شده</p><p className='text-muted-foreground mt-1 truncate font-mono' dir='ltr'>{row.gclid || row.gbraid || row.wbraid}</p></> : row.utm_campaign || row.campaign_id ? <><p className='font-medium'>کمپین ثبت شده</p><p className='text-muted-foreground mt-1 truncate font-mono' dir='ltr'>{row.utm_campaign || row.campaign_id}</p></> : <span className='text-muted-foreground'>بدون دادهٔ تبلیغاتی</span>}</td>
@@ -1451,7 +1460,7 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
                 <div className='divide-y md:hidden'>
                   {visibleEvents.map((row) => {
                     const user = logUsers.get(logIdentity(row))!;
-                    return <div key={row.id} className={`hover:bg-muted/40 w-full p-4 text-start ${blockedIps.has(row.ip_address) ? 'bg-destructive/10' : logRowTone(row)}`}><div className='flex items-center justify-between gap-3'><div className='flex flex-wrap gap-1'><Badge variant='outline' className={blockedIps.has(row.ip_address) ? 'border-destructive/40 bg-destructive/15 text-destructive' : user.color.badge}><span className={`me-1.5 size-2 rounded-full ${blockedIps.has(row.ip_address) ? 'bg-destructive' : user.color.dot}`} />{user.label}</Badge><Badge variant='outline'>{EVENT_FA[row.event_type] ?? row.event_type}</Badge><Badge variant='outline' className={eventAdsInfo(row).className}>{eventAdsInfo(row).label}</Badge></div><span className='text-muted-foreground text-[11px]'>{time.format(new Date(row.received_at))}</span></div><p className='mt-3 font-mono text-sm font-semibold' dir='ltr'>{row.ip_address}</p><p className='text-muted-foreground mt-1 text-[11px]'>{fa.format(user.count)} رویداد از همین کاربر در این صفحه</p><Badge variant='outline' className={`mt-2 text-[10px] ${confidenceInfo(row.ip_confidence).className}`}>{confidenceInfo(row.ip_confidence).label}</Badge><div className='text-muted-foreground mt-2 space-y-1 font-mono text-[11px]' dir='ltr'><p className='truncate'>page: {row.page_path ?? '—'}</p><p className='truncate'>campaign: {row.utm_campaign ?? row.campaign_id ?? '—'}</p><p className='truncate'>gclid: {row.gclid ?? '—'}</p><p className='truncate'>session: {row.session_id ?? '—'}</p></div><div className='mt-3 flex flex-wrap items-center gap-2'>{ipBlockControl(row.ip_address)}<Button size='sm' variant='outline' onClick={() => setSelectedEvent(row)}>جزئیات کامل <IconChevronLeft className='size-4' /></Button></div></div>})}
+                    return <div key={row.id} className={`hover:bg-muted/40 w-full p-4 text-start ${isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'bg-destructive/10' : logRowTone(row)}`}><div className='flex items-center justify-between gap-3'><div className='flex flex-wrap gap-1'><Badge variant='outline' className={isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'border-destructive/40 bg-destructive/15 text-destructive' : user.color.badge}><span className={`me-1.5 size-2 rounded-full ${isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'bg-destructive' : user.color.dot}`} />{user.label}</Badge><Badge variant='outline'>{EVENT_FA[row.event_type] ?? row.event_type}</Badge><Badge variant='outline' className={eventAdsInfo(row).className}>{eventAdsInfo(row).label}</Badge></div><span className='text-muted-foreground text-[11px]'>{time.format(new Date(row.received_at))}</span></div><p className='mt-3 font-mono text-sm font-semibold' dir='ltr'>{row.ip_address}</p><p className='text-muted-foreground mt-1 text-[11px]'>{fa.format(user.count)} رویداد از همین کاربر در این صفحه</p><Badge variant='outline' className={`mt-2 text-[10px] ${confidenceInfo(row.ip_confidence).className}`}>{confidenceInfo(row.ip_confidence).label}</Badge><div className='text-muted-foreground mt-2 space-y-1 font-mono text-[11px]' dir='ltr'><p className='truncate'>page: {row.page_path ?? '—'}</p><p className='truncate'>campaign: {row.utm_campaign ?? row.campaign_id ?? '—'}</p><p className='truncate'>gclid: {row.gclid ?? '—'}</p><p className='truncate'>session: {row.session_id ?? '—'}</p></div><div className='mt-3 flex flex-wrap items-center gap-2'>{ipBlockControl(row.ip_address)}<Button size='sm' variant='outline' onClick={() => setSelectedEvent(row)}>جزئیات کامل <IconChevronLeft className='size-4' /></Button></div></div>})}
                 </div>
                 {!visibleEvents.length && <EmptyState title='لاگی مطابق این فیلتر نیست' description='بازه زمانی را روی «همه داده‌ها» بگذارید یا جست‌وجو و نوع رفتار را تغییر دهید.' />}
                 <div className='flex flex-col items-center justify-between gap-3 border-t p-4 sm:flex-row'>
@@ -1601,11 +1610,12 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
               <SheetHeader className='border-b p-5 pe-14'>
                 <div className='mb-2 flex flex-wrap items-center gap-2'>
                   <Badge variant='outline' className={riskInfo(selectedSession.risk_score).badge}>{riskInfo(selectedSession.risk_score).label}</Badge>
-                  {sessionIsOnline(selectedSession.last_seen) && <Badge className='border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'><span className='me-1 size-1.5 animate-pulse rounded-full bg-emerald-500' />آنلاین</Badge>}
+                  {isBlocked(selectedSession.ip_address, selectedSession.gclid, selectedSession.ip_confidence) ? <AccessBadge status={accessStatus} ip={selectedSession.ip_address} gclid={selectedSession.gclid} trustedIp={selectedSession.ip_confidence === 'trusted_proxy' || selectedSession.ip_confidence === 'direct_peer'} legacyBlocked={blockedIps.has(selectedSession.ip_address)} /> : sessionIsOnline(selectedSession.last_seen) && <Badge className='border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'><span className='me-1 size-1.5 animate-pulse rounded-full bg-emerald-500' />فعالیت اخیر</Badge>}
                   <Badge variant='outline' className={adsInfo(selectedSession.ads_attribution).className}>{adsInfo(selectedSession.ads_attribution).label}</Badge>
                 </div>
                 <SheetTitle className='font-mono text-lg' dir='ltr'>{selectedSession.ip_address}</SheetTitle>
                 <SheetDescription>سفر کامل این بازدیدکننده در سایت</SheetDescription>
+                <div className='mt-2'>{ipBlockControl(selectedSession.ip_address)}</div>
               </SheetHeader>
 
               <div className='space-y-5 p-5'>

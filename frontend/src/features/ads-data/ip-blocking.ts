@@ -43,6 +43,18 @@ export function createIpBlockController(domain: string, api: SecurityApi) {
         if (request === generation) update({ status: 'error', message: 'وضعیت بلاک IP دریافت نشد؛ دوباره تلاش کنید.' });
       }
     },
+    async refresh() {
+      if (!state.siteId || state.status === 'loading' || state.pendingIps.size) return;
+      const request = generation;
+      try {
+        const result = await api.securityBlocked(state.siteId);
+        if (request !== generation || state.pendingIps.size) return;
+        if (!result.connected) throw new Error(result.message || 'unavailable');
+        update({ status: 'ready', blockedIps: new Set(result.items.map((item) => item.ip)), message: '' });
+      } catch {
+        if (request === generation) update({ status: 'error', message: 'وضعیت تازهٔ بلاک دریافت نشد؛ دوباره تلاش کنید.' });
+      }
+    },
     async toggle(ip: string): Promise<BlockResult | null> {
       if (!ip || state.status !== 'ready' || !state.siteId || state.pendingIps.has(ip)) return null;
       const request = generation;

@@ -62,6 +62,22 @@ describe('shared site IP blocking', () => {
     expect(controller.getSnapshot().blockedIps.has('192.0.2.2')).toBe(true);
   });
 
+  it('refreshes blocks made outside this dashboard without clearing a pending mutation', async () => {
+    const { api, controller } = setup();
+    await controller.load();
+    api.securityBlocked.mockResolvedValue({ connected: true, items: [{ ip: '192.0.2.2' }] });
+    await controller.refresh();
+    expect(controller.getSnapshot().blockedIps.has('192.0.2.2')).toBe(true);
+    let finish!: (value: { success: boolean }) => void;
+    api.securityBlock.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const pending = controller.toggle('192.0.2.3');
+    await controller.refresh();
+    expect(api.securityBlocked).toHaveBeenCalledTimes(2);
+    finish({ success: true });
+    await pending;
+    expect(controller.getSnapshot().blockedIps.has('192.0.2.3')).toBe(true);
+  });
+
   it('disables mutations before loading and on disconnected sites', async () => {
     const { api, controller } = setup();
     expect(await controller.toggle('192.0.2.2')).toBeNull();

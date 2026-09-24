@@ -2,23 +2,29 @@
 
 ## Custom blocked-access response — 2026-09-24
 
-Both site origins now have the three-line fragment from
-`origin/custom-403.htaccess` outside the automatically owned rule sections in
-their document-root `.htaccess`. It supplies a self-contained Persian responsive
-HTML page for Apache/LiteSpeed-generated 403 responses, including the existing
-`RewriteRule ... [F,L]` IP bans. The HTTP status remains 403; the block rules,
-WordPress redirect rules and ban lists are unchanged. Inline HTML avoids an
-error-page internal redirect that would itself be denied for a blocked IP.
+Both origins serve `origin/_ead_blocked.php` through the local 403 error
+document in `origin/custom-403.htaccess`. PHP reads only the web server's
+`REMOTE_ADDR`, escapes it, and renders a self-contained, responsive Persian
+notice with a conditional legal warning. It always sends HTTP 403, no-store,
+noindex and a restrictive content security policy. It does not infer a person's
+identity or a crime from an IP address or repeated ad visits.
 
-On the Iran origin, a request for `/.htaccess` returned the custom body with
-HTTP 403 while `/` remained 200. On Europe, a temporary exact-path `[F,L]`
-probe returned the same custom body with HTTP 403; that probe was removed and
-the path reverted to 404 while `/` remained 200. The Europe nginx front end
-generates its own 403 for direct requests to dotfiles, so those errors still
-show its stock page; site IP bans are handled by the tested rewrite layer.
-The page has no external assets or links, so it cannot create a route around
-the ban. Both the EAD and WordPress writer regression tests check that their
-separate `.htaccess` updates preserve the custom fragment.
+The EAD-owned block must remain the first section of each document-root
+`.htaccess`: `core.php::render()` requires its begin marker at byte zero.
+Its first rewrite rule is now `RewriteRule ^_ead_blocked\.php$ - [END]`, before
+all IP deny rules. The 403 ErrorDocument fragment goes after the EAD-owned
+block. On the Iran WordPress origin only, place
+`origin/iran-403-file-access.htaccess` after the IP Htaccess Blocker section.
+That `<Files>` permission lets an internally redirected error document run;
+the PHP handler itself still returns 403. All other paths remain blocked.
+Deploy the updated private `core.php` together with these changes so a later
+ban sync does not remove the handler rule.
+
+Both origins were tested with a temporary exact-IP deny: an ordinary path
+returned the dynamic page with HTTP 403 and the observed client IP. The deny
+and test route were removed. Iran also passed a temporary WordPress authz deny.
+Normal robots.txt then returned 200 on each origin. Europe nginx generates its
+own 403 for direct dotfile requests before Apache, outside this handler.
 
 Production service `ead-access.service` is enabled and running on `gearbox`.
 Activated prospectively at 12:37 UTC; existing visitor history was skipped.

@@ -36,7 +36,8 @@ class EADAccess {
             $original=substr($original,$after);
         }
         $ips=array_values(array_unique($ips));sort($ips,SORT_STRING);
-        $block=self::BEGIN."\nRewriteEngine On\n";
+        // The error handler must run for denied IPs, but it always returns 403 itself.
+        $block=self::BEGIN."\nRewriteEngine On\nRewriteRule ^_ead_blocked\\.php$ - [END]\n";
         foreach($ips as $i=>$ip) $block.='RewriteCond %{REMOTE_ADDR} ^'.preg_quote(self::ip($ip),'~').'$'.($i<count($ips)-1?' [OR]':'')."\n";
         if($ips) $block.="RewriteRule ^ - [F,L]\n";
         return $block.self::END."\n".$original;

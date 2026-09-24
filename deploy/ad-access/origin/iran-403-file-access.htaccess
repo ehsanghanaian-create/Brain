@@ -1,0 +1,5 @@
+# BEGIN EAD 403 FILE ACCESS
+<Files "_ead_blocked.php">
+Require all granted
+</Files>
+# END EAD 403 FILE ACCESS

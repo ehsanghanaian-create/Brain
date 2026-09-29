@@ -5666,6 +5666,10 @@ export interface components {
             status: string;
             /** Rollback */
             rollback: boolean;
+            /** Access */
+            access: {
+                [key: string]: string;
+            };
         };
         /** RemediationProposalOut */
         RemediationProposalOut: {

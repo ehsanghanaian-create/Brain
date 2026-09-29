@@ -178,6 +178,7 @@ class RemediationService:
         post = evidence.get("post")
         wp_connected = bool(resolve_auth(site_id))
         candidates = evidence.get("link_candidates") or []
+        access_cache: dict[tuple[str, int], tuple[str, dict]] = {}
         methods = []
         for template in templates:
             suggestion = suggestions.get(template["id"], {})
@@ -239,11 +240,24 @@ class RemediationService:
             if evidence["rendered"].get("error"):
                 uncertain = True
                 reason = "صفحهٔ زنده هنگام پیشنهاد در دسترس نبود؛ پیش از اجرا دوباره بررسی می‌شود. " + reason
+            access = {"status": "not_checked", "reason": "این روش به پیش‌بررسی وردپرس نیاز ندارد."}
+            if owner == "wordpress" and kind.startswith("wp_"):
+                target_post = post if source_url == issue["url"] else next(
+                    (c for c in candidates if c["source_url"] == source_url), None)
+                if not wp_connected:
+                    access = {"status": "needs_connection", "reason": "رمز برنامهٔ وردپرس برای این سایت ثبت نشده است."}
+                elif target_post and available:
+                    access = self._probe_wp_access(site_id, kind, target_post, access_cache)
+                    if access["status"] != "ready":
+                        available, block_status = False, "needs_connection"
+                        reason = access["reason"] + " " + reason
+                elif not target_post:
+                    access = {"status": "needs_connection", "reason": "این URL به رکورد وردپرس نگاشت نشده است."}
             affected = [] if owner == "frontend" else ([source_url, issue["url"]] if source_url and source_url != issue["url"] else [issue["url"]])
             methods.append({**template, "value": value, "source_url": source_url, "affected_urls": affected,
                             "owner": owner, "impact_unknown": owner == "frontend",
                             "confidence": confidence, "uncertain": uncertain, "uncertainty_reason": uncertainty_reason, "reason": reason, "available": available,
-                            "status": "ready" if available else block_status, "rollback": owner != "frontend"})
+                            "status": "ready" if available else block_status, "rollback": owner != "frontend", "access": access})
         pid = "proposal-" + uuid.uuid4().hex[:20]
         now = datetime.now(timezone.utc)
         proposal = {"id": pid, "site_id": site_id, "issue_key": key, "problem_type": issue["problem_type"], "url": issue["url"],
@@ -289,6 +303,12 @@ class RemediationService:
         status = "queued" if method["available"] else "needs_connection"
         if status == "queued" and method["kind"].startswith("wp_") and not resolve_auth(site_id):
             status = "needs_connection"
+        if status == "queued" and method["owner"] == "wordpress":
+            target = method.get("source_url") or proposal["url"]
+            post = proposal["evidence"].get("post") if target == proposal["url"] else next(
+                (c for c in proposal["evidence"].get("link_candidates", []) if c["source_url"] == target), None)
+            if not post or self._probe_wp_access(site_id, method["kind"], post, {})["status"] != "ready":
+                status = "needs_connection"
         rid = "rem-" + uuid.uuid4().hex[:20]
         now = utcnow()
         values = {"id": rid, "proposal_id": pid, "site_id": site_id, "issue_key": proposal["issue_key"], "method_id": method_id,
@@ -337,6 +357,9 @@ class RemediationService:
         owned = evidence.get("post") if target == proposal["url"] else next((c for c in evidence.get("link_candidates", []) if c["source_url"] == target), None)
         if not owned:
             raise RemediationError("wordpress_owner_missing", "این URL به محتوای قابل ویرایش وردپرس نگاشت نشده؛ پیشنهاد تازه بگیرید.")
+        access = self._probe_wp_access(site_id, method["kind"], owned, {})
+        if access["status"] != "ready":
+            raise RemediationError("wordpress_access_required", access["reason"])
         issue = self._issue(site_id, run["issue_key"])
         if _hash(self._evidence(site_id, issue)) != proposal["evidence_hash"]:
             raise RemediationError("issue_changed", "دادهٔ مشکل تغییر کرده؛ روش‌ها را دوباره بررسی کنید.")
@@ -380,6 +403,12 @@ class RemediationService:
             response = client.request(method, url, json=payload)
         except httpx.HTTPError as exc:
             raise RemediationError("wordpress_unreachable", f"ارتباط وردپرس برقرار نشد: {exc.__class__.__name__}", 502) from exc
+        if response.status_code == 401:
+            raise RemediationError("wordpress_auth_invalid", "احراز هویت وردپرس رد شد؛ نام کاربری و رمز برنامهٔ این سایت را بررسی کنید.")
+        if response.status_code == 403:
+            raise RemediationError("wordpress_permission_denied", "وردپرس دسترسی به این محتوا یا فیلد را رد کرد؛ مجوز نقش کاربر و تنظیمات REST را بررسی کنید.")
+        if response.status_code == 404:
+            raise RemediationError("wordpress_resource_unavailable", "این نوع محتوا یا شناسه در REST وردپرس در دسترس نیست.")
         if response.status_code >= 400:
             raise RemediationError("wordpress_error", f"وردپرس درخواست را نپذیرفت (HTTP {response.status_code}).", 502)
         try:
@@ -404,6 +433,34 @@ class RemediationService:
         if remote.get("id") != int(post["wp_id"]) or remote.get("type") != typ or (post.get("slug") and remote.get("slug") != post["slug"]):
             raise RemediationError("wordpress_identity_mismatch", "شناسهٔ محتوای وردپرس تغییر کرده است.")
         return endpoint, remote
+
+    @staticmethod
+    def _check_wp_field(kind: str, remote: dict) -> None:
+        if kind in WP_META_FIELDS or kind == "wp_noindex_off":
+            field = WP_META_FIELDS.get(kind, "emdad_noindex")
+            if field not in (remote.get("meta") or {}):
+                raise RemediationError("wordpress_meta_unavailable", f"فیلد {field} در REST این نوع محتوا دیده نمی‌شود؛ ثبت و مجوز ویرایش آن را بررسی کنید.")
+        elif kind == "wp_title" and (not isinstance(remote.get("title"), dict) or "raw" not in remote["title"]):
+            raise RemediationError("wordpress_title_unavailable", "فیلد عنوان در نمای ویرایش REST این محتوا دیده نمی‌شود.")
+        elif kind in WP_CONTENT_KINDS and (not isinstance(remote.get("content"), dict) or "raw" not in remote["content"]):
+            raise RemediationError("wordpress_content_unavailable", "فیلد بدنه در نمای ویرایش REST این محتوا دیده نمی‌شود.")
+
+    def _probe_wp_access(self, site_id: str, kind: str, post: dict,
+                         cache: dict[tuple[str, int], tuple[str, dict]]) -> dict:
+        """Read-only, per-resource capability check; the write is checked again at execution."""
+        try:
+            site = self._site(site_id)
+            if not site.get("wp_url"):
+                raise RemediationError("wordpress_url_missing", "آدرس وردپرس برای این سایت ثبت نشده است.")
+            cache_key = (str(post["type"]), int(post["wp_id"]))
+            if cache_key not in cache:
+                with self._wp_client(site_id, site["wp_url"]) as client:
+                    cache[cache_key] = self._wp_resource(client, site, post)
+            self._check_wp_field(kind, cache[cache_key][1])
+        except (RemediationError, ValueError, KeyError, TypeError) as exc:
+            reason = str(exc) if isinstance(exc, RemediationError) else "شناسهٔ محتوای وردپرس معتبر نیست."
+            return {"status": "needs_connection", "reason": reason}
+        return {"status": "ready", "reason": "نمای ویرایش همین محتوا و فیلد لازم در REST وردپرس تأیید شد؛ مجوز نوشتن هنگام اجرا دوباره بررسی می‌شود."}
 
     @staticmethod
     def _edit_body(content: str, method: dict, target_url: str) -> str:
@@ -566,6 +623,7 @@ class RemediationService:
                 self._preflight(method["kind"], before_rendered)
             with self._wp_client(site_id, site["wp_url"]) as client:
                 endpoint, remote = self._wp_resource(client, site, post)
+                self._check_wp_field(method["kind"], remote)
                 if run["after_snapshot"]:
                     if remote.get("modified_gmt") != run["after_snapshot"].get("modified_gmt"):
                         raise RemediationError("write_state_unknown", "محتوا پس از اجرا تغییر کرده و اجرای مجدد متوقف شد.")
@@ -611,7 +669,11 @@ class RemediationService:
             self.verify_run(site_id, run_id)
         except RemediationError as exc:
             wrote = bool(self.get_run(site_id, run_id)["after_snapshot"])
-            self.update_run(run_id, status="needs_review" if wrote else "failed", error=f"{exc.code}: {exc}")
+            access_errors = {"wordpress_auth_required", "wordpress_auth_invalid", "wordpress_permission_denied",
+                             "wordpress_resource_unavailable", "wordpress_type_unavailable", "wordpress_meta_unavailable",
+                             "wordpress_title_unavailable", "wordpress_content_unavailable", "wordpress_unreachable"}
+            status = "needs_review" if wrote else "needs_connection" if exc.code in access_errors else "failed"
+            self.update_run(run_id, status=status, error=f"{exc.code}: {exc}")
         except Exception as exc:  # avoid leaking credentials or response bodies into job logs
             wrote = bool(self.get_run(site_id, run_id)["after_snapshot"])
             self.update_run(run_id, status="needs_review" if wrote else "failed", error=f"unexpected: {exc.__class__.__name__}")

@@ -109,6 +109,7 @@ def service(tmp_path, monkeypatch):
     svc = RemediationService(engine)
     import seo_brain.remediation.service as module
     monkeypatch.setattr(module, "resolve_auth", lambda site_id: object())
+    monkeypatch.setattr(svc, "_probe_wp_access", lambda *_args: {"status": "ready", "reason": "test edit access"})
     monkeypatch.setattr(svc, "_rendered", lambda *_args: {"status": 200, "url": "https://pilot.example/a", "title": "A", "h1": ["A"],
                                                       "description": "", "canonical": "", "robots": "", "x_robots_tag": "", "links": [], "images": [],
                                                       "images_missing_alt": 0, "word_count": 20})
@@ -189,6 +190,57 @@ def test_body_edits_are_exact_and_bounded():
     assert '<a href="https://pilot.example/target">گیربکس</a>' in edited
     with pytest.raises(RemediationError):
         RemediationService._edit_body(before, {"kind": "wp_insert_link", "value": "عبارت ناموجود"}, "https://pilot.example/target")
+
+
+@pytest.mark.parametrize(("post_status", "meta", "expected"), [
+    (403, {"emdad_meta_description": ""}, "needs_connection"),
+    (200, {}, "needs_connection"),
+    (200, {"emdad_meta_description": ""}, "ready"),
+])
+def test_wordpress_preflight_checks_target_permission_and_meta(service, monkeypatch, post_status, meta, expected):
+    import seo_brain.remediation.service as module
+
+    class Auth:
+        basic = httpx.BasicAuth("seo-bot", "test-password")
+
+    monkeypatch.setattr(module, "resolve_auth", lambda _site: Auth())
+
+    def handler(request):
+        if request.url.path.endswith("/types/post"):
+            return httpx.Response(200, json={"rest_base": "posts"})
+        return httpx.Response(post_status, json={"id": 7, "type": "post", "slug": "a", "meta": meta,
+                                                  "content": {"raw": "<p>text</p>"}, "title": {"raw": "A"}})
+
+    monkeypatch.setattr(service, "_wp_client", lambda *_args: httpx.Client(transport=httpx.MockTransport(handler)))
+    monkeypatch.setattr(service, "_probe_wp_access", RemediationService._probe_wp_access.__get__(service))
+    access = service._probe_wp_access("gearboxemdad", "wp_meta_description", {"wp_id": 7, "type": "post"}, {})
+    assert access["status"] == expected
+    if post_status == 403:
+        assert "مجوز" in access["reason"] or "دسترسی" in access["reason"]
+    elif not meta:
+        assert "emdad_meta_description" in access["reason"]
+
+
+def test_proposal_and_queue_preserve_permission_block(service, monkeypatch):
+    key = service.list_issues("gearboxemdad")["items"][0]["issue_key"]
+    monkeypatch.setattr(service, "_probe_wp_access", lambda *_args: {
+        "status": "needs_connection", "reason": "وردپرس ویرایش این پست را رد کرد."})
+    blocked = service.propose("gearboxemdad", key)
+    method = blocked["methods"][0]
+    assert not method["available"] and method["status"] == "needs_connection"
+    assert "وردپرس ویرایش" in method["reason"] and method["access"]["status"] == "needs_connection"
+    run = service.create_run("gearboxemdad", blocked["id"], method["id"], blocked["evidence_hash"], "permission-block-123", True)
+    assert run["status"] == "needs_connection"
+
+    monkeypatch.setattr(service, "_probe_wp_access", lambda *_args: {"status": "ready", "reason": "ok"})
+    ready = service.propose("gearboxemdad", key)
+    monkeypatch.setattr(service, "_probe_wp_access", lambda *_args: {
+        "status": "needs_connection", "reason": "دسترسی پس گرفته شد."})
+    # Finish the first run to release the per-site active-run guard.
+    service.update_run(run["id"], status="failed")
+    revoked = service.create_run("gearboxemdad", ready["id"], ready["methods"][0]["id"],
+                                 ready["evidence_hash"], "permission-revoked-123", True)
+    assert revoked["status"] == "needs_connection"
 
 
 def test_recrawl_replaces_removed_source_links(service, tmp_path):

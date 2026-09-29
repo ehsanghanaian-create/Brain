@@ -68,6 +68,7 @@ class RemediationMethodOut(BaseModel):
     available: bool
     status: str
     rollback: bool
+    access: dict[str, str]
 
 
 class RemediationProposalOut(BaseModel):

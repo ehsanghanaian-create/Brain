@@ -104,6 +104,9 @@ export function RemediationAction({ siteId, issueKey }: { siteId: string; issueK
         <div>اطمینان: {method.confidence === 'high' ? 'بالا' : method.confidence === 'medium' ? 'متوسط' : 'پایین'}{method.uncertain ? ' · نیازمند تأیید دوم' : ''}</div>
         {method.uncertain && <div className='text-amber-700'>علت عدم‌اطمینان: {method.uncertainty_reason}</div>}
         <div>بازگردانی: {method.rollback ? 'ممکن' : 'پس از اتصال انتشار تعیین می‌شود'}</div>
+        {method.access?.status !== 'not_checked' && <div className={method.access?.status === 'ready' ? 'text-emerald-700' : 'text-amber-700'}>
+          دسترسی ویرایش: {method.access?.reason}
+        </div>}
         {method.available || method.status === 'needs_connection'
           ? confirmId === method.id
             ? <div className='space-y-1 rounded border border-amber-500 p-2'>

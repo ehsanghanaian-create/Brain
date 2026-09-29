@@ -231,6 +231,7 @@ def test_proposal_and_queue_preserve_permission_block(service, monkeypatch):
     assert "وردپرس ویرایش" in method["reason"] and method["access"]["status"] == "needs_connection"
     run = service.create_run("gearboxemdad", blocked["id"], method["id"], blocked["evidence_hash"], "permission-block-123", True)
     assert run["status"] == "needs_connection"
+    assert "وردپرس ویرایش" in service.get_run("gearboxemdad", run["id"])["error"]
 
     monkeypatch.setattr(service, "_probe_wp_access", lambda *_args: {"status": "ready", "reason": "ok"})
     ready = service.propose("gearboxemdad", key)
@@ -241,6 +242,7 @@ def test_proposal_and_queue_preserve_permission_block(service, monkeypatch):
     revoked = service.create_run("gearboxemdad", ready["id"], ready["methods"][0]["id"],
                                  ready["evidence_hash"], "permission-revoked-123", True)
     assert revoked["status"] == "needs_connection"
+    assert revoked["error"] == "دسترسی پس گرفته شد."
 
 
 def test_recrawl_replaces_removed_source_links(service, tmp_path):

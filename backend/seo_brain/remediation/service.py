@@ -301,21 +301,26 @@ class RemediationService:
         if method["uncertain"] and not confirmed:
             raise RemediationError("second_confirmation_required", "این روش نامطمئن است و پیش از اجرا تأیید دوم لازم دارد.")
         status = "queued" if method["available"] else "needs_connection"
+        connection_error = method.get("reason") if status == "needs_connection" else None
         if status == "queued" and method["kind"].startswith("wp_") and not resolve_auth(site_id):
             status = "needs_connection"
+            connection_error = "رمز برنامهٔ وردپرس برای این سایت ثبت نشده است."
         if status == "queued" and method["owner"] == "wordpress":
             target = method.get("source_url") or proposal["url"]
             post = proposal["evidence"].get("post") if target == proposal["url"] else next(
                 (c for c in proposal["evidence"].get("link_candidates", []) if c["source_url"] == target), None)
-            if not post or self._probe_wp_access(site_id, method["kind"], post, {})["status"] != "ready":
+            access = self._probe_wp_access(site_id, method["kind"], post, {}) if post else {
+                "status": "needs_connection", "reason": "این URL به محتوای وردپرس نگاشت نشده است."}
+            if access["status"] != "ready":
                 status = "needs_connection"
+                connection_error = access["reason"]
         rid = "rem-" + uuid.uuid4().hex[:20]
         now = utcnow()
         values = {"id": rid, "proposal_id": pid, "site_id": site_id, "issue_key": proposal["issue_key"], "method_id": method_id,
-                  "idempotency_key": idempotency_key, "status": status, "created_at": now, "updated_at": now}
+                  "idempotency_key": idempotency_key, "status": status, "error": connection_error, "created_at": now, "updated_at": now}
         try:
             with self.engine.begin() as cx:
-                inserted = cx.execute(text("INSERT INTO seo_remediation_runs(id,proposal_id,site_id,issue_key,method_id,idempotency_key,status,created_at,updated_at) VALUES (:id,:proposal_id,:site_id,:issue_key,:method_id,:idempotency_key,:status,:created_at,:updated_at) ON CONFLICT(site_id,idempotency_key) DO NOTHING"), values)
+                inserted = cx.execute(text("INSERT INTO seo_remediation_runs(id,proposal_id,site_id,issue_key,method_id,idempotency_key,status,error,created_at,updated_at) VALUES (:id,:proposal_id,:site_id,:issue_key,:method_id,:idempotency_key,:status,:error,:created_at,:updated_at) ON CONFLICT(site_id,idempotency_key) DO NOTHING"), values)
                 if not inserted.rowcount:
                     old = cx.execute(text("SELECT * FROM seo_remediation_runs WHERE site_id=:s AND idempotency_key=:k"), {"s": site_id, "k": idempotency_key}).mappings().first()
                     if old and (old["proposal_id"] != pid or old["method_id"] != method_id):
@@ -365,7 +370,7 @@ class RemediationService:
             raise RemediationError("issue_changed", "دادهٔ مشکل تغییر کرده؛ روش‌ها را دوباره بررسی کنید.")
         try:
             with self.engine.begin() as cx:
-                changed = cx.execute(text("UPDATE seo_remediation_runs SET status='queued', updated_at=:t WHERE id=:r AND site_id=:s AND status='needs_connection'"),
+                changed = cx.execute(text("UPDATE seo_remediation_runs SET status='queued', error=NULL, updated_at=:t WHERE id=:r AND site_id=:s AND status='needs_connection'"),
                                      {"t": utcnow(), "r": run_id, "s": site_id})
                 if not changed.rowcount:
                     raise RemediationError("resume_unavailable", "این اجرا قبلاً ادامه داده شده است.")

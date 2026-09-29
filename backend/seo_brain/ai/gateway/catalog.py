@@ -31,6 +31,7 @@ DEFAULT_CATALOG: dict[str, list[dict[str, Any]]] = {
         {"model_id": "gemini-3.1-pro-preview", "display": "Gemini 3.1 Pro (preview)", "tier": "reasoning", "tags": ["reasoning", "long_form", "json", "translation"], "context_tokens": 1000000, "price_in_per_m": 1.25, "price_out_per_m": 10.0},
     ],
     "openrouter": [],
+    "atria": [{"model_id": "Atria-Dawn-Preview", "display": "Atria Dawn Preview", "tier": "balanced", "tags": ["persian", "long_form"], "context_tokens": 256000, "price_in_per_m": 0.0, "price_out_per_m": 0.0}],
     # xAI list prices (USD / 1M tokens) as of 2026-09 — indicative, user-editable; real ids are discovered from /v1/models
     "xai": [
         {"model_id": "grok-4", "display": "Grok 4", "tier": "quality", "tags": ["persian", "long_form", "reasoning", "json"], "context_tokens": 256000, "price_in_per_m": 3.0, "price_out_per_m": 15.0},

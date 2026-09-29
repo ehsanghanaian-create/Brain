@@ -61,7 +61,9 @@ export const navGroups: NavGroup[] = [
       { title: 'لینک‌سازی داخلی', url: '/dashboard/internal-linking', icon: 'linking', items: [],
         description: 'پیشنهاد لینک داخلی و الگوهای یادگرفته‌شده (فاز ۱۳–۱۴)' },
       { title: 'فرصت‌های سئو', url: '/dashboard/opportunities', icon: 'opportunities', items: [],
-        description: 'صفحات جایگاه ۵–۲۰، CTR پایین، شکاف محتوا (فاز ۱۵)' }
+        description: 'صفحات جایگاه ۵–۲۰، CTR پایین، شکاف محتوا (فاز ۱۵)' },
+      { title: 'مشکلات سئو', url: '/dashboard/problems', icon: 'opportunities', items: [],
+        description: 'بررسی و رفع مرحله‌ای مشکلات سایت آزمایشی' }
     ]
   },
   {

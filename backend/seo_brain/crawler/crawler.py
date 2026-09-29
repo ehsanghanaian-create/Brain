@@ -199,6 +199,9 @@ class Crawler:
                     indexable, reason = 1, "indexable"
         internal, external = 0, 0
         if p is not None:
+            # A fresh crawl is authoritative for this source. Keeping old rows makes
+            # removed links look present during remediation verification.
+            conn.execute("DELETE FROM links WHERE site_id=? AND source_url=?", (self.site.site_id, res.final_url or res.url))
             html_path = self.raw_dir / (re.sub(r"[^a-z0-9]+", "_", res.url.lower())[:150] + ".html")
             html_path.write_text(res.html or "", encoding="utf-8")
             for lk in p.links:

@@ -9,12 +9,14 @@ from typing import Any
 from urllib.parse import unquote
 
 from ..db.repositories.graph import GraphRepository
+from ..remediation.service import issue_key
 from . import queries as Q
 
 PROBLEM_ACTIONS: dict[str, dict[str, str]] = {
     "orphan": {"title_fa": "صفحه یتیم", "action_fa": "حداقل ۲ لینک داخلی از صفحات مرتبط با انکرتکست معنادار به این صفحه بدهید"},
     "low_inbound_links": {"title_fa": "لینک ورودی کم", "action_fa": "از صفحات هم‌موضوع (دسته/خدمت) لینک داخلی اضافه کنید"},
     "no_body_inbound_links": {"title_fa": "فقط لینک ناوبری", "action_fa": "در متن مقالات مرتبط لینک متنی به این صفحه بگذارید"},
+    "high_outbound_links": {"title_fa": "لینک خروجی داخلی زیاد", "action_fa": "لینک‌های زائد یا فهرست قالب را بررسی کنید"},
     "missing_h1": {"title_fa": "بدون H1", "action_fa": "یک H1 یکتا شامل کلمه کلیدی اصلی اضافه کنید"},
     "multiple_h1": {"title_fa": "چند H1", "action_fa": "فقط یک H1 نگه دارید؛ بقیه را به H2 تبدیل کنید"},
     "duplicate_title": {"title_fa": "عنوان تکراری", "action_fa": "عنوان‌ها را یکتا و مطابق اینتنت هر صفحه بنویسید"},
@@ -71,7 +73,7 @@ def node_details(repo: GraphRepository, conn, site_id: str, node_id: str) -> dic
                       "inbound_sources": ((seo.get("internal_links_in") or {}).get("sources") or [])[:15],
                       "outbound_targets": (seo.get("internal_links_out") or [])[:15]},
             "gsc": gsc, "top_queries": (seo.get("top_queries") or [])[:10],
-            "problems": [{**p, **_action_for_problem(p.get("type"))} for p in seo.get("problems") or []],
+            "problems": [{**p, "issue_key": issue_key(site_id, p.get("type", ""), n.metadata.get("url") or n.id, p.get("related_url") or ""), **_action_for_problem(p.get("type"))} for p in seo.get("problems") or []],
             "opportunities": [{**o, "action_fa": OPP_ACTIONS.get(o.get("type"), "")} for o in seo.get("opportunities") or []],
             "entities": seo.get("entities") or [], "wordpress": seo.get("wordpress"),
         }
@@ -107,7 +109,7 @@ def node_details(repo: GraphRepository, conn, site_id: str, node_id: str) -> dic
         items = Q.get_seo_problems(conn, site_id, problem_type=ptype, limit=100).get("items", [])
         base["problem"] = {"issue": ptype, "severity": n.metadata.get("props", {}).get("severity") or (items[0]["severity"] if items else None),
                            "count": len(items), **_action_for_problem(ptype),
-                           "affected_pages": [{"url": i["url"], "related_url": i.get("related_url"), "detail": i.get("detail")} for i in items[:50]]}
+                           "affected_pages": [{"url": i["url"], "issue_key": issue_key(site_id, ptype, i["url"], i.get("related_url") or ""), "related_url": i.get("related_url"), "detail": i.get("detail")} for i in items[:50]]}
     elif t == "SEO_OPPORTUNITY":
         otype = n.id.split(":", 1)[1] if ":" in n.id else n.label
         items = Q.get_seo_opportunities(conn, site_id, opp_type=otype, limit=50).get("items", [])

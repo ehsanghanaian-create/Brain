@@ -5,13 +5,14 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from typing import Any, Callable
 
 import httpx
 
 from ..providers.base import ProviderError
-from ..types import AIRequest, AIResponse
+from ..types import AIMessage, AIRequest, AIResponse
 from .catalog import estimate_tokens
 
 
@@ -301,6 +302,94 @@ class OpenAICompatAdapter(HttpAdapter):
                           cost_usd=self._cost(request.model, inp, out), latency_ms=int((time.perf_counter() - t0) * 1000), raw={"id": data.get("id"), "finish_reason": choice.get("finish_reason")})
 
 
+class AtriaAdapter(OpenAICompatAdapter):
+    """Atria's documented Chat Completions wire format; /models and JSON mode are not assumed."""
+    kind = "atria"
+    _rate_lock = threading.Lock()
+    _retry_at = 0.0
+    _next_call_at = 0.0
+
+    def default_base_url(self) -> str:
+        return "https://api.atria-asi.ai/v1"
+
+    def list_models(self) -> list[str]:
+        return list(self.models or ("Atria-Dawn-Preview",))
+
+    def capabilities(self) -> dict[str, Any]:
+        return {**super().capabilities(), "json_mode": False, "dynamic_models": False}
+
+    def _post(self, url: str, body: dict, headers: dict | None = None) -> dict:
+        for attempt in range(2):
+            with self._rate_lock:
+                now = time.monotonic()
+                slot = max(now, self._retry_at, self._next_call_at)
+                type(self)._next_call_at = slot + 1.0  # conservative per-process ceiling: 60 requests/minute
+                delay = max(0.0, slot - now)
+            if delay:
+                time.sleep(delay)
+            try:
+                response = self._client.post(url, json=body, headers={**self._headers(), **(headers or {})})
+            except httpx.HTTPError as exc:
+                raise ProviderError(f"network error: {exc.__class__.__name__}", retryable=True) from exc
+            if response.status_code == 429:
+                raw = response.headers.get("Retry-After", "1")
+                try:
+                    seconds = max(1.0, float(raw))
+                except ValueError:
+                    seconds = 1.0
+                with self._rate_lock:
+                    type(self)._retry_at = max(self._retry_at, time.monotonic() + seconds)
+                if attempt == 0 and seconds <= 60:
+                    continue
+                raise ProviderError("Atria rate limited (HTTP 429)", retryable=True)
+            if response.status_code in (401, 403):
+                raise ProviderError("unauthorized", retryable=False)
+            if response.status_code >= 400:
+                raise ProviderError(f"Atria HTTP {response.status_code}", retryable=response.status_code >= 500)
+            try:
+                data = response.json()
+            except ValueError as exc:
+                raise ProviderError("invalid JSON from Atria", retryable=True) from exc
+            if not isinstance(data, dict):
+                raise ProviderError("invalid Atria response shape", retryable=False)
+            if response.headers.get("x-rpm-remaining") == "0":
+                with self._rate_lock:
+                    type(self)._retry_at = max(self._retry_at, time.monotonic() + 60)
+            return data
+        raise ProviderError("Atria rate limited", retryable=True)
+
+    def complete(self, request: AIRequest) -> AIResponse:
+        t0 = time.perf_counter()
+        messages = [{"role": m.role, "content": m.content} for m in request.messages]
+        if request.json_schema and messages:
+            messages[-1] = {**messages[-1], "content": messages[-1]["content"] + _json_instruction(request.json_schema)}
+        body = {"model": request.model, "messages": messages, "max_tokens": request.max_tokens, "temperature": request.temperature}
+        # Atria documents Chat Completions, but does not guarantee OpenAI response_format support.
+        data = self._post(f"{self.base_url}/chat/completions", body)
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+            raise ProviderError("invalid Atria completion shape", retryable=False)
+        choice = choices[0]
+        message = choice.get("message")
+        if not isinstance(message, dict):
+            raise ProviderError("invalid Atria completion shape", retryable=False)
+        content = message.get("content") or ""
+        if not isinstance(content, str) or not content.strip():
+            raise ProviderError("empty Atria completion", retryable=False)
+        usage = data.get("usage") or {}
+        inp, out = int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0)
+        return AIResponse(text=_strip_fences(content), model=data.get("model", request.model), provider=self.name,
+                          input_tokens=inp, output_tokens=out, cost_usd=self._cost(request.model, inp, out),
+                          latency_ms=int((time.perf_counter() - t0) * 1000), raw={"id": data.get("id"), "finish_reason": choice.get("finish_reason")})
+
+    def test_connection(self) -> dict:
+        try:
+            self.complete(AIRequest(model=self.list_models()[0], messages=[AIMessage(role="user", content="Reply OK")], max_tokens=8, temperature=0))
+        except ProviderError as exc:
+            return {"ok": False, "provider": self.name, "error": str(exc), "retryable": exc.retryable}
+        return {"ok": True, "provider": self.name, "models": self.list_models()}
+
+
 class CloudflareAdapter(OpenAICompatAdapter):
     """Workers AI exposes OpenAI chat completions but not ``GET /ai/v1/models``.
 
@@ -401,7 +490,7 @@ class OllamaAdapter(HttpAdapter):
                           latency_ms=int((time.perf_counter() - t0) * 1000), raw={"done_reason": data.get("done_reason")})
 
 
-ADAPTERS = {"anthropic": AnthropicAdapter, "openai": OpenAICompatAdapter, "openrouter": OpenAICompatAdapter,
+ADAPTERS = {"anthropic": AnthropicAdapter, "openai": OpenAICompatAdapter, "atria": AtriaAdapter, "openrouter": OpenAICompatAdapter,
             "groq": OpenAICompatAdapter, "xai": OpenAICompatAdapter, "cloudflare": CloudflareAdapter, "custom": OpenAICompatAdapter,
             "google": GeminiAdapter, "ollama": OllamaAdapter}
 COMPAT_DEFAULT_BASE = {"openrouter": "https://openrouter.ai/api/v1", "xai": "https://api.x.ai/v1"}

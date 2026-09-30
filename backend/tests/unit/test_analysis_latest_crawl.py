@@ -42,7 +42,7 @@ def test_paginated_archive_keeps_its_heading_without_duplicate_h1_findings(tmp_p
         ensure_site(conn, site)
         conn.execute("INSERT INTO crawl_runs(run_id,site_id,started_at,status,notes) VALUES "
                      "('crawl-current','demo','2026-09-30T10:00:00Z','completed','{\"scope\":\"site\"}')")
-        for n, url in enumerate(archive):
+        for n, url in enumerate(reversed(archive)):
             conn.execute("INSERT INTO pages(site_id,url,crawl_status,status_code,title,meta_description,h1,h1_count,"
                          "canonical,indexable,word_count,images_missing_alt,in_sitemap,last_crawled,crawl_run_id) "
                          "VALUES ('demo',?,'ok',200,?,'Useful description','[\"Articles\"]',1,?,1,500,0,1,"

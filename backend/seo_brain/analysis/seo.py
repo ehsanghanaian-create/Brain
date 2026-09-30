@@ -158,7 +158,7 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
                 _problem(conn, sid, "duplicate_title", "medium", u, {"title": t, "shared_with": [x for x in urls if x != u]}, run_id=run_id); counts["problems"] += 1
     for h, urls in h1s.items():
         unique_pages = {}
-        for u in urls:
+        for u in sorted(urls, key=lambda value: (bool(re.search(r"/page/[2-9]\d*/?$", urlsplit(value).path)), value)):
             unique_pages.setdefault(_h1_comparison_url(u), u)
         distinct_urls = list(unique_pages.values())
         if len(distinct_urls) > 1:

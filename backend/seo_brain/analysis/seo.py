@@ -61,7 +61,22 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
     conn.execute("INSERT INTO sync_runs(run_id, site_id, source, started_at, status) VALUES (?,?,?,?,?)",
                  (run_id, sid, "analysis", utcnow(), "running"))
     _clear(conn, sid, run_id)
-    pages = rows(conn, "SELECT * FROM pages WHERE site_id=? AND crawl_status='ok'", (sid,))
+    # Pages are retained across crawls for history and targeted verification.
+    # A full crawl must not keep reporting pages that disappeared from the
+    # sitemap/link graph or now redirect elsewhere. Targeted recrawls performed
+    # after the full crawl remain eligible through their last_crawled timestamp.
+    full_crawl = None
+    for crawl in rows(conn, "SELECT started_at,notes FROM crawl_runs WHERE site_id=? AND status IN ('completed','completed_capped') ORDER BY started_at DESC LIMIT 100", (sid,)):
+        try:
+            notes = json.loads(crawl["notes"] or "{}")
+        except (ValueError, TypeError):
+            notes = {}
+        if not isinstance(notes, dict) or notes.get("scope") != "targeted":
+            full_crawl = crawl["started_at"]
+            break
+    page_sql = "SELECT * FROM pages WHERE site_id=? AND crawl_status='ok' AND h1_count IS NOT NULL"
+    pages = rows(conn, page_sql + (" AND last_crawled>=?" if full_crawl else ""),
+                 (sid, full_crawl) if full_crawl else (sid,))
     by_url = {p["url"]: p for p in pages}
     home = site.canonical_url
     # inbound/outbound from real crawled links (distinct source pages, self-links excluded)
@@ -69,7 +84,7 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
     inbound_body = defaultdict(set)
     outbound = defaultdict(set)
     for l in rows(conn, "SELECT source_url, target_url, is_nav, anchor_text FROM links WHERE site_id=? AND is_internal=1", (sid,)):
-        if l["source_url"] == l["target_url"]:
+        if l["source_url"] not in by_url or l["source_url"] == l["target_url"]:
             continue
         outbound[l["source_url"]].add(l["target_url"])
         inbound_all[l["target_url"]].add(l["source_url"])

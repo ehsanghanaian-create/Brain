@@ -2,6 +2,38 @@
 seo.gearboxemdad.com {
 	encode zstd gzip
 
+	# Google redirects the browser here. The backend validates the one-time state.
+	@google_oauth_callback path /api/v1/connections/google/callback
+	log_skip @google_oauth_callback
+	handle @google_oauth_callback {
+		header Cache-Control "no-store, private, max-age=0"
+		header Referrer-Policy "no-referrer"
+		uri replace /api/v1/connections/google/callback /api/backend/connections/google/callback
+		reverse_proxy seo-brain-frontend:3000
+	}
+
+	@ads_collector path /api/ads-data/collect
+	handle @ads_collector {
+		header Cache-Control "no-store, private, max-age=0"
+		reverse_proxy seo-brain-frontend:3000 {
+			header_up X-Collector-Client-IP {http.request.header.X-Real-IP}
+			header_up X-Collector-XFF {http.request.header.X-Forwarded-For}
+			header_up X-Collector-Proxy-IP {remote_host}
+		}
+	}
+
+	@tracker_beacon path /api/v1/track
+	handle @tracker_beacon {
+		header Cache-Control "no-store, private, max-age=0"
+		rewrite * /api/backend/track
+		reverse_proxy seo-brain-frontend:3000
+	}
+
+	handle_path /api/v1/track/* {
+		header Cache-Control "no-store, private, max-age=0"
+		rewrite * /api/backend/track{uri}
+		reverse_proxy seo-brain-frontend:3000
+	}
 
 	handle {
 		basic_auth {

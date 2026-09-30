@@ -23,6 +23,7 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
   const previousConnection = useRef<string | null>(null);
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
+  const [editClient, setEditClient] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
@@ -88,6 +89,7 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
       toast.success(`مشخصات کلاینت گوگل ذخیره شد (${r.client_id_hint ?? ''})`);
       setClientId('');
       setClientSecret('');       // never keep the secret in component state
+      setEditClient(false);
       await load();
     } catch (e) {
       toast.error(e instanceof ApiError ? e.message : String(e));
@@ -153,14 +155,6 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
               راه‌اندازی اولیهٔ گوگل هنوز توسط مدیر انجام نشده است — از صفحهٔ هر سایت، بخش «حساب گوگل»، یک‌بار انجام می‌شود.
             </p>
           )}
-          {view.state === 'no_client' && !simple && (
-            <div className='grid gap-2 rounded-md border border-dashed p-3' data-testid='google-client-form'>
-              <p className='text-xs font-medium'>راه‌اندازی اولیه (یک‌بار): ‏Google Cloud Console → ‏APIs & Services → ‏Credentials → ‏Create OAuth client ID → نوع «Desktop app» → دو API «Search Console» و «Analytics Data/Admin» را هم Enable کنید.</p>
-              <Input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder='Client ID (…apps.googleusercontent.com)' dir='ltr' autoComplete='off' />
-              <Input type='password' value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder='Client Secret' dir='ltr' autoComplete='new-password' />
-              <Button type='button' size='sm' className='w-fit' disabled={busy || !clientId || !clientSecret} onClick={() => void saveClient()} data-testid='google-client-save'>ذخیرهٔ امن</Button>
-            </div>
-          )}
           <div className='flex flex-wrap gap-2'>
             <Button type='button' size='sm' disabled={!view.canConnect || awaiting} onClick={() => void connect()} data-testid='google-connect'>
               {awaiting ? 'در انتظار تأیید در گوگل…' : view.state === 'needs_reconnect' ? 'اتصال دوبارهٔ حساب گوگل' : 'اتصال حساب گوگل'}
@@ -172,6 +166,20 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
               </>
             )}
           </div>
+        </div>
+      )}
+      {!simple && view.state !== 'no_client' && (
+        <Button type='button' size='sm' variant='ghost' className='w-fit' onClick={() => setEditClient((value) => !value)}>
+          {editClient ? 'بستن تنظیمات OAuth Client' : 'تغییر OAuth Client'}
+        </Button>
+      )}
+      {!simple && (view.state === 'no_client' || editClient) && (
+        <div className='grid gap-2 rounded-md border border-dashed p-3' data-testid='google-client-form'>
+          <p className='text-xs font-medium'>Google Auth Platform → Clients → Create client → نوع «Web application». نشانی بازگشت زیر را دقیقاً در Authorized redirect URIs ثبت کنید.</p>
+          {status?.redirect_uri && <code className='break-all text-xs' dir='ltr'>{status.redirect_uri}</code>}
+          <Input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder='Client ID (…apps.googleusercontent.com)' dir='ltr' autoComplete='off' />
+          <Input type='password' value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} placeholder='Client Secret' dir='ltr' autoComplete='new-password' />
+          <Button type='button' size='sm' className='w-fit' disabled={busy || !clientId || !clientSecret} onClick={() => void saveClient()} data-testid='google-client-save'>ذخیرهٔ امن</Button>
         </div>
       )}
       {view.hint && <p className='text-muted-foreground text-xs'>{view.hint}</p>}

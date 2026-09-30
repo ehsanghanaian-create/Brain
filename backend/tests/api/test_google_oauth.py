@@ -38,6 +38,30 @@ def test_authorize_builds_google_url_with_existing_scopes_and_state(env):
     assert "127.0.0.1%3A8000%2Fapi%2Fv1%2Fconnections%2Fgoogle%2Fcallback" in url or "callback" in r.json()["redirect_uri"]
 
 
+def test_production_authorize_uses_public_https_web_callback(env, monkeypatch):
+    monkeypatch.setenv("FRONTEND_ORIGIN", "https://seo.example.test")
+    seen = {}
+
+    class FakeFlow:
+        code_verifier = "pkce-verifier"
+
+        def authorization_url(self, **kwargs):
+            return f"https://accounts.google.com/o/oauth2/auth?state={kwargs['state']}", kwargs["state"]
+
+    def capture_flow(config, scopes, redirect_uri):
+        seen.update(config=config, scopes=scopes, redirect_uri=redirect_uri)
+        return FakeFlow()
+
+    monkeypatch.setattr("google_auth_oauthlib.flow.Flow.from_client_config", capture_flow)
+    response = env["client"].get("/api/v1/connections/google/authorize")
+    expected = "https://seo.example.test/api/v1/connections/google/callback"
+    assert response.status_code == 200
+    assert response.json()["redirect_uri"] == expected
+    assert seen["redirect_uri"] == expected
+    assert seen["config"]["web"]["redirect_uris"] == [expected]
+    assert "installed" not in seen["config"]
+
+
 def test_callback_exchanges_code_and_writes_compatible_token(env, monkeypatch):
     c = env["client"]
     state = c.get("/api/v1/connections/google/authorize").json()["url"].split("state=")[1].split("&")[0]

@@ -68,13 +68,25 @@ def account_path() -> Path:
 
 
 def default_redirect_uri() -> str:
-    # Desktop-type Google clients accept any loopback redirect without prior registration.
-    return env("GOOGLE_OAUTH_REDIRECT", "http://127.0.0.1:8000/api/v1/connections/google/callback")
+    configured = env("GOOGLE_OAUTH_REDIRECT")
+    if configured:
+        return configured
+    origin = env("FRONTEND_ORIGIN")
+    if origin:
+        return f"{origin.rstrip('/')}/api/v1/connections/google/callback"
+    # Local development only. A deployed web app must redirect to its public HTTPS origin.
+    return "http://127.0.0.1:8000/api/v1/connections/google/callback"
 
 
 def _flow(redirect_uri: str):
     from google_auth_oauthlib.flow import Flow
-    return Flow.from_client_config(_client_config(), scopes=WEB_SCOPES, redirect_uri=redirect_uri)
+    config = _client_config()
+    if redirect_uri.startswith("https://"):
+        # Production uses a web OAuth client. The shared config shape stays compatible
+        # with older CLI consumers, while this browser flow uses the web client type.
+        client = config.get("installed") or config.get("web")
+        config = {"web": {**client, "redirect_uris": [redirect_uri]}}
+    return Flow.from_client_config(config, scopes=WEB_SCOPES, redirect_uri=redirect_uri)
 
 
 def begin(redirect_uri: str | None = None) -> dict[str, Any]:
@@ -166,6 +178,7 @@ def status() -> dict[str, Any]:
             "ads_scope": "https://www.googleapis.com/auth/adwords" in oauth_scopes,
             "client_configured": _google_client_configured() or _has_store_client(),
             "client_id_hint": client_hint(),
+            "redirect_uri": default_redirect_uri(),
             "connected_at": acct.get("connected_at")}
 
 

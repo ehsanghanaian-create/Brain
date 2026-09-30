@@ -30,7 +30,7 @@ export function googleAccountView(s: Partial<GoogleAccountStatus> | null | undef
       { key: 'ga4', fa: 'Google Analytics (فقط‌خواندنی)', granted: Boolean(s?.ga4_scope) }
     ],
     hint: state === 'no_client'
-      ? 'در Google Cloud Console یک OAuth Client از نوع «Desktop app» بسازید و شناسه‌ها را در فرم زیر ذخیره کنید — نیازی به ویرایش .env نیست'
+      ? 'در Google Auth Platform یک OAuth Client از نوع «Web application» بسازید و نشانی بازگشت نمایش‌داده‌شده را در Authorized redirect URIs ثبت کنید.'
       : state === 'needs_reconnect'
         ? 'گوگل refresh token ذخیره‌شده را رد کرد. اگر این اتفاق هر هفت روز تکرار می‌شود، وضعیت OAuth برنامه را در Google Auth Platform → Audience بررسی کنید؛ برنامهٔ Testing مجوز بلندمدت نمی‌دهد.'
       : state === 'temporary_error'

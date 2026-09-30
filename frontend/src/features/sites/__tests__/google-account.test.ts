@@ -6,7 +6,7 @@ describe('Google Account card helpers', () => {
     const v = googleAccountView({ connected: false, client_configured: false });
     expect(v.state).toBe('no_client');
     expect(v.canConnect).toBe(false);
-    expect(v.hint).toContain('Desktop app');
+    expect(v.hint).toContain('Web application');
   });
 
   it('disconnected → connect enabled; busy disables', () => {

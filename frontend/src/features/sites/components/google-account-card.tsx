@@ -120,7 +120,7 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
       badge={view.state === 'connected' ? 'متصل' : view.state === 'needs_reconnect' ? 'نیازمند اتصال دوباره'
         : view.state === 'temporary_error' ? 'خطای موقت' : view.state === 'no_client' ? 'پیکربندی ناقص' : 'متصل نیست'}
       badgeVariant={view.state === 'connected' ? 'secondary' : ['no_client', 'needs_reconnect'].includes(view.state) ? 'destructive' : 'outline'}
-      description='یک ورود گوگل برای Search Console و Google Analytics (فقط‌خواندنی) و قابلیت محدودسازی IP در Google Ads. توکن به‌صورت رمزگذاری‌شده روی سرور نگه‌داری می‌شود.'
+      description='یک ورود گوگل برای دسترسی فقط‌خواندنی به Search Console و Google Analytics. توکن به‌صورت رمزگذاری‌شده روی سرور نگه‌داری می‌شود.'
     >
       {view.state === 'connected' ? (
         <div className='grid gap-2 text-sm' data-testid='google-connected'>

@@ -33,7 +33,8 @@ def test_authorize_builds_google_url_with_existing_scopes_and_state(env):
     assert r.status_code == 200, r.text
     url = r.json()["url"]
     assert url.startswith("https://accounts.google.com/o/oauth2/auth")
-    assert "webmasters.readonly" in url and "analytics.readonly" in url          # data scopes unchanged
+    assert "webmasters.readonly" in url and "analytics.readonly" in url
+    assert "adwords" not in url
     assert "userinfo.email" in url and "access_type=offline" in url and "prompt=consent" in url and "state=" in url
     assert "127.0.0.1%3A8000%2Fapi%2Fv1%2Fconnections%2Fgoogle%2Fcallback" in url or "callback" in r.json()["redirect_uri"]
 

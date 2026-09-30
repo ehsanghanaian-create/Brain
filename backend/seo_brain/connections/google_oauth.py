@@ -4,7 +4,7 @@ Reuses everything from gsc/client.py: the OAuth client (_client_config → .env 
 token file format (`Credentials.to_json()` at GSC_TOKEN_PATH) — so the GSC/GA4 clients, the pipelines and the CLI
 keep working unchanged. Only the way consent is obtained changes: an /authorize URL + a /callback exchange instead
 of run_local_server(). `openid email` is added to the web consent so the UI can show which account is connected;
-the data scopes stay exactly as configured in the shared GSC/GA4/Ads client.
+the data scopes stay exactly as configured in the shared GSC/GA4 client.
 
 No plaintext DB storage: the refresh token is encrypted in SecretStore, with a legacy file fallback only when
 SecretStore is unavailable. The connected account label (email — not a secret) sits in tokens/google_account.json.

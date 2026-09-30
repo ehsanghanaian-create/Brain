@@ -21,12 +21,10 @@ from ..common.config import env, raw_data_dir, resolve_path
 
 log = logging.getLogger("gsc")
 
-# One shared Google token for GSC, GA4 and the manually-approved Google Ads
-# exclusion action. Adding the Ads scope requires a one-time re-consent.
+# One shared, read-only Google token for Search Console and Analytics.
 SCOPES = [
     "https://www.googleapis.com/auth/webmasters.readonly",
     "https://www.googleapis.com/auth/analytics.readonly",
-    "https://www.googleapis.com/auth/adwords",
 ]
 MAX_ROWS_PER_REQUEST = 25000
 RETRYABLE = {429, 500, 502, 503, 504}

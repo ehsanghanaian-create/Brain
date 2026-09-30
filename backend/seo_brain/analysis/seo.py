@@ -117,6 +117,8 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
         inbound_all[l["target_url"]].add(l["source_url"])
         if not l["is_nav"]:
             inbound_body[l["target_url"]].add(l["source_url"])
+    gsc_impressions = {r["page"]: r["impressions"] for r in rows(
+        conn, "SELECT page, SUM(impressions) AS impressions FROM gsc_query_page WHERE site_id=? GROUP BY page", (sid,))}
     counts = {"problems": 0, "opportunities": 0}
 
     # --- link structure ---------------------------------------------------------
@@ -158,9 +160,14 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
             _problem(conn, sid, "missing_canonical", "medium", u, {}, run_id=run_id); counts["problems"] += 1
         if p["indexable"] == 1 and not p["meta_description"]:
             _problem(conn, sid, "missing_meta_description", "low", u, {"title": p["title"]}, run_id=run_id); counts["problems"] += 1
-        if p["indexable"] == 0 and (p["in_sitemap"] or len(inbound_all[u]) >= 3):
+        # A noindex archive linked from every global menu is often intentional.
+        # Contextual links, sitemap inclusion or search impressions are stronger
+        # signals that a non-indexable page merits an explicit review.
+        if p["indexable"] == 0 and (p["in_sitemap"] or len(inbound_body[u]) >= 3 or gsc_impressions.get(u, 0) > 0):
             _problem(conn, sid, "important_non_indexable", "high", u, {"reason": p["indexability_reason"], "in_sitemap": p["in_sitemap"],
-                                                                        "inbound_links": len(inbound_all[u])}, run_id=run_id); counts["problems"] += 1
+                                                                        "inbound_links": len(inbound_all[u]),
+                                                                        "body_inbound_links": len(inbound_body[u]),
+                                                                        "gsc_impressions": gsc_impressions.get(u, 0)}, run_id=run_id); counts["problems"] += 1
         if p["indexable"] == 1 and (p["word_count"] or 0) < THIN_WORDS and "/category/" not in u and "/page/" not in u:
             _problem(conn, sid, "thin_content", "medium", u, {"word_count": p["word_count"], "threshold": THIN_WORDS}, run_id=run_id); counts["problems"] += 1
         if (p["images_missing_alt"] or 0) > 0:

@@ -27,6 +27,29 @@ def test_noindex_page_does_not_require_canonical_or_meta_description(tmp_path):
     assert "missing_meta_description" not in findings
 
 
+def test_global_navigation_alone_does_not_make_noindex_archive_important(tmp_path):
+    site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
+    target = "https://demo.example/category/cars/"
+    with db(tmp_path / "seo.db") as conn:
+        ensure_site(conn, site)
+        conn.execute("INSERT INTO crawl_runs(run_id,site_id,started_at,status,notes) VALUES "
+                     "('crawl-current','demo','2026-09-30T10:00:00Z','completed','{\"scope\":\"site\"}')")
+        for url, indexable in [(target, 0)] + [(f"https://demo.example/source-{i}/", 1) for i in range(3)]:
+            conn.execute("INSERT INTO pages(site_id,url,crawl_status,status_code,title,meta_description,h1,h1_count,"
+                         "canonical,indexable,indexability_reason,word_count,images_missing_alt,in_sitemap,last_crawled,crawl_run_id) "
+                         "VALUES ('demo',?,'ok',200,'Page','Description','[\"Page\"]',1,?,?,?,500,0,0,"
+                         "'2026-09-30T10:01:00Z','crawl-current')",
+                         (url, url, indexable, "noindex" if not indexable else None))
+        for i in range(3):
+            conn.execute("INSERT INTO links(site_id,source_url,target_url,is_internal,is_nav) VALUES "
+                         "('demo',?,?,1,1)", (f"https://demo.example/source-{i}/", target))
+        run_analysis(conn, site)
+        assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='important_non_indexable'").fetchone()[0] == 0
+        conn.execute("UPDATE links SET is_nav=0 WHERE site_id='demo' AND target_url=?", (target,))
+        run_analysis(conn, site)
+        assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='important_non_indexable'").fetchone()[0] == 1
+
+
 def test_analysis_excludes_old_pages_and_non_html_responses(tmp_path):
     site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
     with db(tmp_path / "seo.db") as conn:

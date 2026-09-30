@@ -22,6 +22,7 @@ export function RemediationAction({ siteId, issueKey }: { siteId: string; issueK
   const [pending, setPending] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const requestKeys = useRef(new Map<string, string>());
   const root = `/sites/${encodeURIComponent(siteId)}/remediation`;
 
@@ -50,7 +51,7 @@ export function RemediationAction({ siteId, issueKey }: { siteId: string; issueK
   }, [root, run]);
 
   async function loadMethods() {
-    setPending(true); setError(null); setProposal(null); setProposalJobId(null); setRun(null);
+    setPending(true); setError(null); setErrorCode(null); setProposal(null); setProposalJobId(null); setRun(null);
     try {
       const history = await api<Run[]>(`${root}/problems/${encodeURIComponent(issueKey)}/runs?limit=1`);
       if (history[0]) setRun(history[0]);
@@ -60,13 +61,14 @@ export function RemediationAction({ siteId, issueKey }: { siteId: string; issueK
       else setProposalJobId(job.run_id);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
+      setErrorCode(e instanceof ApiError ? e.code : null);
     } finally { setPending(false); }
   }
 
   async function execute(method: Method, confirmed = false) {
     if (method.uncertain && !confirmed) { setConfirmId(method.id); return; }
     if (!proposal) return;
-    setPending(true); setError(null); setConfirmId(null);
+    setPending(true); setError(null); setErrorCode(null); setConfirmId(null);
     try {
       const selection = `${proposal.id}:${method.id}`;
       if (!requestKeys.current.has(selection)) requestKeys.current.set(selection, crypto.randomUUID());
@@ -78,30 +80,31 @@ export function RemediationAction({ siteId, issueKey }: { siteId: string; issueK
       setRun(result);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
+      setErrorCode(e instanceof ApiError ? e.code : null);
     } finally { setPending(false); }
   }
 
   async function rollback() {
     if (!run) return;
-    setPending(true); setError(null);
+    setPending(true); setError(null); setErrorCode(null);
     try { setRun(await api<Run>(`${root}/runs/${encodeURIComponent(run.id)}/rollback`, { method: 'POST' })); }
-    catch (e) { setError(e instanceof ApiError ? e.message : String(e)); }
+    catch (e) { setError(e instanceof ApiError ? e.message : String(e)); setErrorCode(e instanceof ApiError ? e.code : null); }
     finally { setPending(false); }
   }
 
   async function verifyAgain() {
     if (!run) return;
-    setPending(true); setError(null);
+    setPending(true); setError(null); setErrorCode(null);
     try { setRun(await api<Run>(`${root}/runs/${encodeURIComponent(run.id)}/verify`, { method: 'POST' })); }
-    catch (e) { setError(e instanceof ApiError ? e.message : String(e)); }
+    catch (e) { setError(e instanceof ApiError ? e.message : String(e)); setErrorCode(e instanceof ApiError ? e.code : null); }
     finally { setPending(false); }
   }
 
   async function resume() {
     if (!run) return;
-    setPending(true); setError(null);
+    setPending(true); setError(null); setErrorCode(null);
     try { setRun(await api<Run>(`${root}/runs/${encodeURIComponent(run.id)}/resume`, { method: 'POST' })); }
-    catch (e) { setError(e instanceof ApiError ? e.message : String(e)); }
+    catch (e) { setError(e instanceof ApiError ? e.message : String(e)); setErrorCode(e instanceof ApiError ? e.code : null); }
     finally { setPending(false); }
   }
 
@@ -109,7 +112,8 @@ export function RemediationAction({ siteId, issueKey }: { siteId: string; issueK
     <Button size='sm' variant='outline' disabled={pending || !!proposalJobId} onClick={loadMethods}>رفع مشکل</Button>
     {(pending || proposalJobId) && <p className='text-muted-foreground'>در حال بررسی و دریافت پیشنهاد Atria…</p>}
     {error && <p className='text-destructive'>{error}</p>}
-    {error && <a className='text-primary underline' href='/dashboard/ai-models'>تنظیم مدل و مسیر Atria</a>}
+    {error && (errorCode?.startsWith('atria_') || errorCode === 'ai_budget_exceeded' || /Atria|بودجهٔ AI/.test(error))
+      && <a className='text-primary underline' href='/dashboard/ai-models'>تنظیم مدل و مسیر Atria</a>}
     {proposal && <div className='space-y-2 rounded border p-2'>
       <p className='font-medium'>روش حل را انتخاب کنید</p>
       <ol className='list-inside list-decimal space-y-1 text-muted-foreground'>{proposal.roadmap?.map((step, i) => <li key={i}>{step}</li>)}</ol>
@@ -143,7 +147,8 @@ export function RemediationAction({ siteId, issueKey }: { siteId: string; issueK
       <p>وضعیت اجرا: {statusFa[run.status] ?? run.status}</p>
       {run.error && <p className='text-destructive'>{run.error}</p>}
       {run.verification?.reason && <p>{run.verification.reason}</p>}
-      {run.status === 'needs_connection' && proposal?.methods.find((m) => m.id === run.method_id)?.owner !== 'frontend'
+      {run.status === 'needs_connection' && proposal?.id === run.proposal_id
+        && proposal.methods.find((m) => m.id === run.method_id)?.owner === 'wordpress'
         ? <Button size='sm' variant='outline' disabled={pending} onClick={resume}>بررسی اتصال و ادامه</Button>
         : null}
       {run.status === 'needs_review' && <Button size='sm' variant='outline' disabled={pending} onClick={verifyAgain}>بررسی دوبارهٔ صفحه</Button>}

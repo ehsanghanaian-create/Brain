@@ -85,8 +85,7 @@ export function RemediationAction({ siteId, issueKey }: { siteId: string; issueK
   }
 
   return <div className='mt-2 space-y-2 text-xs'>
-    <Button size='sm' variant='outline' disabled={pending || siteId !== 'gearboxemdad'} onClick={loadMethods}>رفع مشکل</Button>
-    {siteId !== 'gearboxemdad' && <p className='text-muted-foreground'>فعلاً فقط برای سایت آزمایشی gearboxemdad فعال است.</p>}
+    <Button size='sm' variant='outline' disabled={pending} onClick={loadMethods}>رفع مشکل</Button>
     {pending && <p className='text-muted-foreground'>در حال بررسی…</p>}
     {error && <p className='text-destructive'>{error}</p>}
     {error && <a className='text-primary underline' href='/dashboard/ai-models'>تنظیم مدل و مسیر Atria</a>}
@@ -98,7 +97,7 @@ export function RemediationAction({ siteId, issueKey }: { siteId: string; issueK
         <div className='text-muted-foreground'>{method.reason}</div>
         {typeof method.value === 'string' && method.value && <div className='break-words'>پیشنهاد: {method.value}</div>}
         {Array.isArray(method.value) && <div>تعداد تصاویر پیشنهادی: {method.value.length}</div>}
-        <div>محل تغییر: {method.owner === 'frontend' ? 'قالب Next.js' : method.kind === 'wp_title' ? 'عنوان محتوای وردپرس' : ['wp_meta_title', 'wp_meta_description', 'wp_canonical', 'wp_noindex_off'].includes(method.kind) ? 'فیلد SEO وردپرس' : 'بدنهٔ محتوای وردپرس'}</div>
+        <div>محل تغییر: {method.owner === 'frontend' ? 'قالب Next.js' : method.owner === 'unverified' ? 'مالک خروجی هنوز تأیید نشده' : method.kind === 'wp_title' ? 'عنوان محتوای وردپرس' : ['wp_meta_title', 'wp_meta_description', 'wp_canonical', 'wp_noindex_off'].includes(method.kind) ? 'فیلد SEO وردپرس' : 'بدنهٔ محتوای وردپرس'}</div>
         <div>نتیجهٔ مورد انتظار: {method.verify}</div>
         <div>دامنهٔ اثر: {method.impact_unknown ? 'پس از اتصال قالب و بررسی diff تعیین می‌شود' : method.affected_urls.filter(Boolean).join('، ')}</div>
         <div>اطمینان: {method.confidence === 'high' ? 'بالا' : method.confidence === 'medium' ? 'متوسط' : 'پایین'}{method.uncertain ? ' · نیازمند تأیید دوم' : ''}</div>

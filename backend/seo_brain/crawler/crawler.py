@@ -254,7 +254,8 @@ class Crawler:
         conn.execute("INSERT INTO crawl_runs(run_id, site_id, started_at, max_urls, status) VALUES (?,?,?,?,?)",
                      (run_id, self.site.site_id, utcnow(), self.max_urls, "running"))
         conn.commit()
-        stats = {"run_id": run_id, "crawled": 0, "failed": 0, "skipped": {}, "discovered": 0, "sitemap_urls": 0}
+        stats = {"run_id": run_id, "scope": "targeted" if seeds is not None else "site",
+                 "crawled": 0, "failed": 0, "skipped": {}, "discovered": 0, "sitemap_urls": 0}
         try:
             self.load_robots()
             sitemap = set(self.read_sitemaps())

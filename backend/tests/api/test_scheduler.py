@@ -13,7 +13,26 @@ from seo_brain.api.main import create_app
 from seo_brain.api.routers import sites as sites_router
 from seo_brain.automation.queue import InProcessJobQueue
 from seo_brain.automation.scheduler import (auto_sync_settings, plan_for_site, recover_stale_runs, run_tick,
-                                            save_auto_sync_settings)
+                                            save_auto_sync_settings, full_crawl_limit, latest_site_crawl)
+
+
+def test_full_crawl_limit_expands_past_old_twenty_page_cap(env):
+    _mk_site(env["client"], "large", wp_url="https://large.example/")
+    with env["eng"].begin() as cx:
+        for i in range(300):
+            cx.execute(text("INSERT INTO posts(site_id,wp_id,type,url,title) VALUES "
+                            "('large',:id,'post',:url,'test')"),
+                       {"id": i + 1, "url": f"https://large.example/{i}"})
+    assert full_crawl_limit(env["eng"], "large") >= 600
+    with env["eng"].begin() as cx:
+        cx.execute(text("INSERT INTO crawl_runs(run_id,site_id,started_at,max_urls,status,notes) "
+                        "VALUES('whole','large','2026-09-01T00:00:00Z',200,'completed_capped',:notes)"),
+                   {"notes": json.dumps({"scope": "site", "queue_remaining": 800})})
+        cx.execute(text("INSERT INTO crawl_runs(run_id,site_id,started_at,max_urls,status,notes) "
+                        "VALUES('target','large','2026-09-02T00:00:00Z',1,'completed',:notes)"),
+                   {"notes": json.dumps({"scope": "targeted", "queue_remaining": 0})})
+    assert latest_site_crawl(env["eng"], "large")["status"] == "completed_capped"
+    assert full_crawl_limit(env["eng"], "large") >= 1050
 from seo_brain.db.engine import make_engine
 from seo_brain.db.migrate import migrate
 from seo_brain.gsc.pipeline import GscPipeline
@@ -118,6 +137,22 @@ def test_tick_enqueues_existing_jobs_with_cap_and_no_duplicates(env):
     assert ("wordpress_sync", "a3") not in ran                   # already_running guard prevented a duplicate
     with eng.begin() as cx:                                       # cleanup for clarity
         cx.execute(text("UPDATE sync_runs SET status='failed' WHERE run_id=:r"), {"r": st.run_id})
+
+
+def test_tick_rotates_to_sites_beyond_per_tick_cap(env):
+    c, eng, q, ran = env["client"], env["eng"], env["q"], env["ran"]
+    for sid in ("a1", "a2", "a3"):
+        _mk_site(c, sid, wp_url=f"https://{sid}.example/")
+    run_tick(eng, q, max_sites=2)
+    assert [sid for kind, sid in ran if kind == "wordpress_sync"] == ["a1", "a2"]
+    ran.clear()
+    run_tick(eng, q, max_sites=2)
+    assert not ran  # global active-site cap keeps long crawls from accumulating
+    with eng.begin() as cx:
+        cx.execute(text("UPDATE sync_runs SET status='succeeded', finished_at=:t WHERE site_id IN ('a1','a2')"),
+                   {"t": _iso(datetime.now(timezone.utc))})
+    run_tick(eng, q, max_sites=2)
+    assert ("wordpress_sync", "a3") in ran
 
 
 def test_retry_only_transient_failures(env):

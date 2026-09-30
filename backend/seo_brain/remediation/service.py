@@ -1,4 +1,4 @@
-"""Pilot remediation: Atria proposes values; only allowlisted WordPress operations can write.
+"""Per-site remediation: Atria proposes values; only verified WordPress operations can write.
 
 The issue table is replaced by each analysis run, so proposals bind to a stable issue
 fingerprint and a snapshot of the evidence instead of the transient integer row ID.
@@ -21,7 +21,7 @@ from ..ai.config import ProviderConfigRepository
 from ..ai.gateway.gateway import BudgetExceeded, CallMeta, RouteStep
 from ..ai.types import AIMessage, AITask, TaskKind
 from ..db.repositories.base import utcnow
-from ..wordpress.auth import resolve_auth
+from ..wordpress.auth import load_site_auth, resolve_auth
 from .playbooks import ROADMAPS, VERSION, methods_for
 
 PILOT_SITE = "gearboxemdad"
@@ -83,13 +83,25 @@ class RemediationService:
     def __init__(self, engine: Engine, gateway=None):
         self.engine, self.gateway = engine, gateway
 
+    @staticmethod
+    def _write_auth(site_id: str):
+        # The legacy environment credential belongs to the original site only.
+        return resolve_auth(site_id) if site_id == PILOT_SITE else load_site_auth(site_id)
+
+    @staticmethod
+    def _body_visible(content: str, rendered_text: str) -> bool:
+        """Require a distinctive WordPress paragraph in the actual page."""
+        soup = BeautifulSoup(content or "", "html.parser")
+        samples = sorted((re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip()
+                          for node in soup.find_all(["p", "li"])), key=len, reverse=True)
+        haystack = re.sub(r"\s+", " ", rendered_text or " ").strip()
+        return any(len(sample) >= 45 and sample[:160] in haystack for sample in samples[:5])
+
     def _site(self, site_id: str) -> dict:
         with self.engine.connect() as cx:
             row = cx.execute(text("SELECT site_id, name, canonical_url, wp_url, language, gsc_property FROM sites WHERE site_id=:s"), {"s": site_id}).mappings().first()
         if not row:
             raise RemediationError("site_not_found", "سایت پیدا نشد.", 404)
-        if site_id != PILOT_SITE:
-            raise RemediationError("pilot_only", "رفع خودکار فعلاً فقط برای gearboxemdad فعال است.", 403)
         return dict(row)
 
     def _issues(self, site_id: str) -> list[dict]:
@@ -100,7 +112,21 @@ class RemediationService:
 
     def list_issues(self, site_id: str, limit: int = 50, offset: int = 0, problem_type: str | None = None) -> dict:
         issues = [i for i in self._issues(site_id) if not problem_type or i["problem_type"] == problem_type]
-        return {"total": len(issues), "items": issues[offset:offset + limit], "playbook_version": VERSION}
+        from ..automation.scheduler import full_crawl_limit, latest_site_crawl
+        crawl = latest_site_crawl(self.engine, site_id)
+        coverage = None
+        if crawl:
+            notes = crawl["parsed_notes"]
+            capped = crawl["status"] == "completed_capped" or bool(notes.get("queue_remaining"))
+            coverage = {"status": crawl["status"], "started_at": crawl["started_at"], "finished_at": crawl["finished_at"],
+                        "max_urls": crawl["max_urls"], "urls_crawled": crawl["urls_crawled"], "urls_failed": crawl["urls_failed"],
+                        "sitemap_urls": notes.get("sitemap_urls"), "queue_remaining": notes.get("queue_remaining"),
+                        "complete": (crawl["status"] == "completed" and not capped and not crawl["urls_failed"]
+                                     and (notes.get("scope") == "site" or int(crawl["max_urls"] or 0) >= 200))}
+        return {"total": len(issues), "items": issues[offset:offset + limit], "playbook_version": VERSION,
+                "coverage": {**(coverage or {}), "recommended_max_urls": full_crawl_limit(self.engine, site_id)}
+                if coverage else {"status": "never", "complete": False,
+                                  "recommended_max_urls": full_crawl_limit(self.engine, site_id)}}
 
     def _issue(self, site_id: str, key: str) -> dict:
         issue = next((i for i in self._issues(site_id) if i["issue_key"] == key), None)
@@ -176,9 +202,10 @@ class RemediationService:
             raise RemediationError("unsupported_problem", "برای این نوع مشکل روش تعریف نشده است.", 422)
         suggestions = self._atria(site_id, evidence, templates)
         post = evidence.get("post")
-        wp_connected = bool(resolve_auth(site_id))
+        wp_connected = bool(self._write_auth(site_id))
         candidates = evidence.get("link_candidates") or []
         access_cache: dict[tuple[str, int], tuple[str, dict]] = {}
+        rendered_body_cache: dict[str, dict] = {}
         methods = []
         for template in templates:
             suggestion = suggestions.get(template["id"], {})
@@ -193,6 +220,8 @@ class RemediationService:
                 source_url = None
             confidence = suggestion.get("confidence") if suggestion.get("confidence") in {"high", "medium", "low"} else "low"
             uncertain = bool(template["uncertain"] or suggestion.get("uncertain") or confidence != "high")
+            if site_id != PILOT_SITE:
+                uncertain = True
             uncertainty_reason = str(suggestion.get("uncertainty_reason") or "")[:400] if uncertain else ""
             if uncertain and not uncertainty_reason:
                 uncertainty_reason = "شواهد برای تصمیم قطعی کافی نیست؛ مقدار پیشنهادی را پیش از اجرا بررسی کنید."
@@ -200,10 +229,14 @@ class RemediationService:
             block_status = "needs_connection"
             reason = str(suggestion.get("reason") or "")[:600]
             owner = "frontend" if kind == "frontend" or _template_owns(kind, (post or {}).get("type")) else "wordpress"
+            if site_id != PILOT_SITE and kind.startswith("wp_") and kind not in WP_CONTENT_KINDS:
+                owner = "unverified"
             if kind == "frontend":
                 available, reason = False, "اتصال انتشار نسخه‌دار قالب Next.js هنوز در SEO Brain ثبت نشده است. پیشنهاد نگهداری شد. " + reason
             elif owner == "frontend":
                 available, reason = False, "این خروجی در قالب Next.js ساخته می‌شود و تغییر فیلد وردپرس آن را اصلاح نمی‌کند. پیشنهاد نگهداری شد. " + reason
+            elif owner == "unverified":
+                available, reason = False, "مالک فیلد SEO و قالب این سایت هنوز تأیید نشده است؛ روش تا ثبت نگاشت خروجی قابل اجرا نیست. " + reason
             elif kind.startswith("wp_") and not wp_connected:
                 available, reason = False, "اتصال نوشتن وردپرس ثبت نشده است. " + reason
             elif kind == "wp_insert_link" and not source_url:
@@ -237,6 +270,18 @@ class RemediationService:
                 available, reason = False, "لینک پیشنهادی در متن وردپرس پیدا نشد؛ احتمالاً در قالب است. " + reason
             if kind == "wp_image_alt" and value and not all(soup.find("img", src=item["src"]) for item in value):
                 available, reason = False, "برخی تصاویر پیشنهادی در محتوای وردپرس نیستند؛ احتمالاً قالب مالک آن‌هاست. " + reason
+            if site_id != PILOT_SITE and kind in WP_CONTENT_KINDS and available:
+                target_post = post if source_url == issue["url"] else next(
+                    (c for c in candidates if c["source_url"] == source_url), None)
+                try:
+                    if source_url not in rendered_body_cache:
+                        rendered_body_cache[source_url] = self._rendered(self._site(site_id), source_url, include_body=True)
+                    visible = bool(target_post and self._body_visible(
+                        target_post.get("content_html") or "", rendered_body_cache[source_url].get("_body_text", "")))
+                except RemediationError:
+                    visible = False
+                if not visible:
+                    available, reason = False, "نمایش همین بدنهٔ وردپرس در HTML صفحه تأیید نشد؛ مالک خروجی باید بررسی شود. " + reason
             if evidence["rendered"].get("error"):
                 uncertain = True
                 reason = "صفحهٔ زنده هنگام پیشنهاد در دسترس نبود؛ پیش از اجرا دوباره بررسی می‌شود. " + reason
@@ -253,11 +298,11 @@ class RemediationService:
                         reason = access["reason"] + " " + reason
                 elif not target_post:
                     access = {"status": "needs_connection", "reason": "این URL به رکورد وردپرس نگاشت نشده است."}
-            affected = [] if owner == "frontend" else ([source_url, issue["url"]] if source_url and source_url != issue["url"] else [issue["url"]])
+            affected = [] if owner != "wordpress" else ([source_url, issue["url"]] if source_url and source_url != issue["url"] else [issue["url"]])
             methods.append({**template, "value": value, "source_url": source_url, "affected_urls": affected,
-                            "owner": owner, "impact_unknown": owner == "frontend",
+                            "owner": owner, "impact_unknown": owner != "wordpress",
                             "confidence": confidence, "uncertain": uncertain, "uncertainty_reason": uncertainty_reason, "reason": reason, "available": available,
-                            "status": "ready" if available else block_status, "rollback": owner != "frontend", "access": access})
+                            "status": "ready" if available else block_status, "rollback": owner == "wordpress", "access": access})
         pid = "proposal-" + uuid.uuid4().hex[:20]
         now = datetime.now(timezone.utc)
         proposal = {"id": pid, "site_id": site_id, "issue_key": key, "problem_type": issue["problem_type"], "url": issue["url"],
@@ -302,7 +347,7 @@ class RemediationService:
             raise RemediationError("second_confirmation_required", "این روش نامطمئن است و پیش از اجرا تأیید دوم لازم دارد.")
         status = "queued" if method["available"] else "needs_connection"
         connection_error = method.get("reason") if status == "needs_connection" else None
-        if status == "queued" and method["kind"].startswith("wp_") and not resolve_auth(site_id):
+        if status == "queued" and method["kind"].startswith("wp_") and not self._write_auth(site_id):
             status = "needs_connection"
             connection_error = "رمز برنامهٔ وردپرس برای این سایت ثبت نشده است."
         if status == "queued" and method["owner"] == "wordpress":
@@ -353,9 +398,9 @@ class RemediationService:
         if datetime.fromisoformat(proposal["expires_at"]) < datetime.now(timezone.utc):
             raise RemediationError("proposal_expired", "پیشنهاد منقضی شده؛ روش‌ها را دوباره بررسی کنید.")
         method = next(m for m in proposal["methods"] if m["id"] == run["method_id"])
-        if method["owner"] == "frontend":
+        if method["owner"] != "wordpress":
             raise RemediationError("frontend_connector_required", "اتصال انتشار قالب هنوز آماده نیست.")
-        if not resolve_auth(site_id):
+        if not self._write_auth(site_id):
             raise RemediationError("wordpress_auth_required", "اتصال نوشتن وردپرس را ثبت کنید.")
         target = method.get("source_url") or proposal["url"]
         evidence = proposal["evidence"]
@@ -396,7 +441,7 @@ class RemediationService:
                            {"r": run_id, "t": event_type, "p": json.dumps(payload, ensure_ascii=False, default=str), "c": allowed["updated_at"]})
 
     def _wp_client(self, site_id: str, wp_url: str) -> httpx.Client:
-        auth = resolve_auth(site_id)
+        auth = self._write_auth(site_id)
         if not auth:
             raise RemediationError("wordpress_auth_required", "ابتدا اتصال نوشتن وردپرس را ثبت کنید.")
         return httpx.Client(auth=auth.basic, timeout=30, follow_redirects=False,
@@ -515,10 +560,10 @@ class RemediationService:
                 raise RemediationError("image_updates_empty", "برای تصویر توضیحی آماده نشده است.")
         return str(soup)
 
-    def _rendered(self, site: dict, url: str) -> dict:
+    def _rendered(self, site: dict, url: str, include_body: bool = False) -> dict:
         host = urlsplit(_url(site["canonical_url"])).hostname
         if urlsplit(_url(url)).hostname != host:
-            raise RemediationError("outside_site", "URL خارج از سایت آزمایشی است.")
+            raise RemediationError("outside_site", "URL خارج از این سایت است.")
         try:
             current = url
             with httpx.Client(timeout=25, follow_redirects=False, headers={"User-Agent": "SEO-Brain/0.2 remediation-verifier"}) as client:
@@ -542,7 +587,7 @@ class RemediationService:
         canonical = soup.find("link", rel=lambda value: value and "canonical" in value)
         meta = soup.find("meta", attrs={"name": "description"})
         robots = soup.find("meta", attrs={"name": "robots"})
-        return {"status": response.status_code, "url": str(response.url), "title": soup.title.get_text(" ", strip=True) if soup.title else "",
+        result = {"status": response.status_code, "url": str(response.url), "title": soup.title.get_text(" ", strip=True) if soup.title else "",
                 "h1": [h.get_text(" ", strip=True) for h in soup.find_all("h1")], "description": meta.get("content", "") if meta else "",
                 "canonical": canonical.get("href", "") if canonical else "", "robots": robots.get("content", "") if robots else "",
                 "x_robots_tag": response.headers.get("x-robots-tag", ""),
@@ -550,6 +595,9 @@ class RemediationService:
                 "images": [{"src": img.get("src", ""), "alt": img.get("alt")} for img in soup.find_all("img")],
                 "images_missing_alt": len([img for img in soup.find_all("img") if not img.has_attr("alt")]),
                 "word_count": len(soup.get_text(" ", strip=True).split())}
+        if include_body:
+            result["_body_text"] = soup.get_text(" ", strip=True)[:100000]
+        return result
 
     @staticmethod
     def _verify(kind: str, method: dict, before: dict, after: dict, target_url: str) -> dict:
@@ -613,7 +661,7 @@ class RemediationService:
         except Exception as exc:
             self.update_run(run_id, status="failed", error=f"preflight_failed: {exc.__class__.__name__}")
             return self.get_run(site_id, run_id)
-        if not site.get("wp_url") or method["owner"] == "frontend":
+        if not site.get("wp_url") or method["owner"] != "wordpress":
             self.update_run(run_id, status="needs_connection", error="اتصال انتشار قالب یا وردپرس آماده نیست.")
             return self.get_run(site_id, run_id)
         target = method.get("source_url") or issue["url"]
@@ -623,7 +671,12 @@ class RemediationService:
             return self.get_run(site_id, run_id)
         self.update_run(run_id, status="running")
         try:
-            before_rendered = self._rendered(site, target)
+            before_rendered = self._rendered(site, target, site_id != PILOT_SITE)
+            if site_id != PILOT_SITE:
+                if method["kind"] not in WP_CONTENT_KINDS or not self._body_visible(
+                        post.get("content_html") or "", before_rendered.get("_body_text", "")):
+                    raise RemediationError("owner_unverified", "نمایش بدنهٔ وردپرس در صفحهٔ زنده تأیید نشد؛ اجرا متوقف شد.")
+                before_rendered.pop("_body_text", None)
             if not run["before_snapshot"]:
                 self._preflight(method["kind"], before_rendered)
             with self._wp_client(site_id, site["wp_url"]) as client:

@@ -1,4 +1,4 @@
-"""Per-issue SEO remediation proposals and execution for the pilot site."""
+"""Per-issue SEO remediation proposals and controlled execution for connected sites."""
 from __future__ import annotations
 
 from typing import Any
@@ -49,6 +49,7 @@ class RemediationIssuesOut(BaseModel):
     total: int
     items: list[RemediationIssueOut]
     playbook_version: int
+    coverage: dict[str, Any] | None = None
 
 
 class RemediationMethodOut(BaseModel):

@@ -158,6 +158,41 @@ def test_pilot_boundary_and_unavailable_credentials(service, monkeypatch):
     assert service.resume_run("gearboxemdad", run["id"])["status"] == "queued"
 
 
+def test_other_site_requires_own_credential_and_rendered_body_owner(service, monkeypatch):
+    import seo_brain.remediation.service as module
+    body = "این متن نمونه دربارهٔ خدمات سایت است و به اندازهٔ کافی یکتا است تا مالک خروجی بررسی شود."
+    with service.engine.begin() as cx:
+        cx.execute(text("INSERT INTO sites(site_id,name,canonical_url,wp_url) VALUES "
+                        "('second','Second','https://second.example/','https://second.example/')"))
+        cx.execute(text("INSERT INTO seo_problems(site_id,problem_type,severity,url,related_url,detail) VALUES "
+                        "('second','missing_h1','medium','https://second.example/a','','{}')"))
+        cx.execute(text("INSERT INTO pages(site_id,url,status_code,h1,h1_count,images,content_hash) VALUES "
+                        "('second','https://second.example/a',200,'[]',0,'[]','hash-1')"))
+        cx.execute(text("INSERT INTO posts(site_id,wp_id,type,url,title,content_html,modified_gmt) VALUES "
+                        "('second',8,'post','https://second.example/a','A',:body,'2026-09-01T00:00:00')"),
+                   {"body": f"<p>{body}</p>"})
+    monkeypatch.setattr(service, "_rendered", lambda _site, _url, include_body=False: {
+        "status": 200, "url": "https://second.example/a", "title": "A", "h1": [], "description": "",
+        "canonical": "", "robots": "", "x_robots_tag": "", "images_missing_alt": 0, "word_count": 20,
+        **({"_body_text": body} if include_body else {})})
+    service._atria = lambda *_args: {"add_body_h1": {"id": "add_body_h1", "value": "عنوان یکتای مناسب صفحه", "confidence": "high"}}
+    key = service.list_issues("second")["items"][0]["issue_key"]
+    assert service.list_issues("second")["coverage"]["complete"] is False
+    monkeypatch.setattr(module, "load_site_auth", lambda _site: None)
+    unavailable = service.propose("second", key)
+    assert not next(m for m in unavailable["methods"] if m["id"] == "add_body_h1")["available"]
+    monkeypatch.setattr(module, "load_site_auth", lambda _site: object())
+    ready = service.propose("second", key)
+    method = next(m for m in ready["methods"] if m["id"] == "add_body_h1")
+    assert method["available"] and method["uncertain"]
+    monkeypatch.setattr(service, "_rendered", lambda _site, _url, include_body=False: {
+        "status": 200, "url": "https://second.example/a", "title": "A", "h1": [], "description": "",
+        "canonical": "", "robots": "", "x_robots_tag": "", "images_missing_alt": 0, "word_count": 20,
+        **({"_body_text": "unrelated template content"} if include_body else {})})
+    blocked = service.propose("second", key)
+    assert not next(m for m in blocked["methods"] if m["id"] == "add_body_h1")["available"]
+
+
 @pytest.mark.parametrize(("problem_type", "method_id"), [
     ("duplicate_h1", "unique_h1"),
     ("missing_canonical", "wp_canonical"),

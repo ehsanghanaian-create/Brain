@@ -44,6 +44,24 @@ def _h1_comparison_url(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}{path.rstrip('/')}/"
 
 
+def _distinct_document_urls(urls: list[str], by_url: dict) -> list[str]:
+    """Collapse archive pagination and identical canonical aliases for duplicate checks."""
+    unique_pages = {}
+    for url in sorted(urls, key=lambda value: (bool(re.search(r"/page/(?:[2-9]|[1-9]\d+)/?$", urlsplit(value).path)), value)):
+        unique_pages.setdefault(_h1_comparison_url(url), url)
+    aliases = {}
+    for url in sorted(unique_pages.values(), key=lambda value: (by_url[value]["canonical"] != value, value)):
+        page = by_url[url]
+        canonical = page["canonical"] or ""
+        content_hash = page["content_hash"] or ""
+        if canonical and content_hash and urlsplit(canonical).netloc == urlsplit(url).netloc:
+            identity = (_h1_comparison_url(canonical), content_hash)
+        else:
+            identity = (_h1_comparison_url(url), url)
+        aliases.setdefault(identity, url)
+    return list(aliases.values())
+
+
 def _clear(conn, sid, run_id):
     conn.execute("DELETE FROM seo_problems WHERE site_id=?", (sid,))
     conn.execute("DELETE FROM seo_opportunities WHERE site_id=?", (sid,))
@@ -153,24 +171,14 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
         if h1:
             h1s[h1[0].strip()].append(u)
     for t, urls in titles.items():
-        if len(urls) > 1:
-            for u in urls:
-                _problem(conn, sid, "duplicate_title", "medium", u, {"title": t, "shared_with": [x for x in urls if x != u]}, run_id=run_id); counts["problems"] += 1
+        distinct_urls = _distinct_document_urls(urls, by_url)
+        if len(distinct_urls) > 1:
+            for u in distinct_urls:
+                _problem(conn, sid, "duplicate_title", "medium", u,
+                         {"title": t, "shared_with": [x for x in distinct_urls if x != u]}, run_id=run_id)
+                counts["problems"] += 1
     for h, urls in h1s.items():
-        unique_pages = {}
-        for u in sorted(urls, key=lambda value: (bool(re.search(r"/page/(?:[2-9]|[1-9]\d+)/?$", urlsplit(value).path)), value)):
-            unique_pages.setdefault(_h1_comparison_url(u), u)
-        aliases = {}
-        for u in sorted(unique_pages.values(), key=lambda value: (by_url[value]["canonical"] != value, value)):
-            page = by_url[u]
-            canonical = page["canonical"] or ""
-            content_hash = page["content_hash"] or ""
-            if canonical and content_hash and urlsplit(canonical).netloc == urlsplit(u).netloc:
-                identity = (_h1_comparison_url(canonical), content_hash)
-            else:
-                identity = (_h1_comparison_url(u), u)
-            aliases.setdefault(identity, u)
-        distinct_urls = list(aliases.values())
+        distinct_urls = _distinct_document_urls(urls, by_url)
         if len(distinct_urls) > 1:
             for u in distinct_urls:
                 _problem(conn, sid, "duplicate_h1", "medium", u,

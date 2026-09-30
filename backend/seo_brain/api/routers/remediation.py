@@ -1,6 +1,7 @@
 """Per-issue SEO remediation proposals and controlled execution for connected sites."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -8,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Engine
 
 from ...automation import Job, JobQueue, get_job_queue
-from ...remediation.service import RemediationError, RemediationService, public_run
+from ...remediation.service import RemediationError, RemediationService, _hash, public_run
 from ...remediation.playbooks import ROADMAPS
 from ..deps import engine, gateway, job_queue, require_site
 from ..errors import ApiError
@@ -122,11 +123,29 @@ def propose(site_id: str, issue_key: str, svc: RemediationService = Depends(serv
 @router.post("/problems/{issue_key}/proposal-jobs", status_code=202)
 def start_proposal_job(site_id: str, issue_key: str, svc: RemediationService = Depends(service),
                        q: JobQueue = Depends(job_queue)) -> dict:
-    _call(lambda: svc._issue(site_id, issue_key))
-    for run in q.list(200):
-        if (run.job.type == "seo_proposal" and run.job.site_id == site_id
-                and run.job.payload.get("issue_key") == issue_key and run.status in ("queued", "running")):
+    issue = _call(lambda: svc._issue(site_id, issue_key))
+    previous = [run for run in q.list(200) if run.job.type == "seo_proposal" and run.job.site_id == site_id
+                and run.job.payload.get("issue_key") == issue_key]
+    for run in previous:
+        if run.status in ("queued", "running"):
             return run.to_dict()
+    # Reopening an issue within the proposal lifetime should not spend another
+    # slow Atria call. Only reuse it if the live evidence still matches.
+    current_hash = None
+    for run in previous:
+        proposal = run.result if run.status == "succeeded" and isinstance(run.result, dict) else None
+        if not proposal:
+            continue
+        try:
+            expires = datetime.fromisoformat(proposal["expires_at"])
+            if expires <= datetime.now(timezone.utc):
+                continue
+            if current_hash is None:
+                current_hash = _hash(svc._evidence(site_id, issue))
+            if proposal.get("evidence_hash") == current_hash:
+                return run.to_dict()
+        except (KeyError, TypeError, ValueError, RemediationError):
+            continue
     return q.enqueue(Job(type="seo_proposal", payload={"site_id": site_id, "issue_key": issue_key}, site_id=site_id)).to_dict()
 
 

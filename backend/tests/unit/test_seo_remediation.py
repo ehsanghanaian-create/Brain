@@ -360,6 +360,8 @@ def test_remediation_api_exposes_methods_and_blocks_unconnected_template(service
     queued = client.post(root + f"/problems/{key}/proposal-jobs")
     assert queued.status_code == 202 and queued.json()["status"] == "succeeded"
     assert queued.json()["result"]["issue_key"] == key
+    reused = client.post(root + f"/problems/{key}/proposal-jobs")
+    assert reused.status_code == 202 and reused.json()["run_id"] == queued.json()["run_id"]
     proposal = client.post(root + f"/problems/{key}/proposals")
     assert proposal.status_code == 200 and proposal.json()["roadmap"]
     pid = proposal.json()["id"]

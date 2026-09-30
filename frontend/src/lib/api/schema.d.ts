@@ -1063,6 +1063,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/remediation/problems/{issue_key}/proposal-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Proposal Job */
+        post: operations["start_proposal_job_api_v1_sites__site_id__remediation_problems__issue_key__proposal_jobs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites/{site_id}/remediation/problems/{issue_key}/runs": {
         parameters: {
             query?: never;
@@ -5599,6 +5616,15 @@ export interface components {
             /** Og Title */
             og_title?: string | null;
         };
+        /** RemediationGroupOut */
+        RemediationGroupOut: {
+            /** Category */
+            category: string;
+            /** Count */
+            count: number;
+            /** Types */
+            types: components["schemas"]["RemediationTypeCountOut"][];
+        };
         /** RemediationIssueOut */
         RemediationIssueOut: {
             /** Issue Key */
@@ -5627,8 +5653,14 @@ export interface components {
             total: number;
             /** Items */
             items: components["schemas"]["RemediationIssueOut"][];
+            /** Groups */
+            groups: components["schemas"]["RemediationGroupOut"][];
             /** Playbook Version */
             playbook_version: number;
+            /** Coverage */
+            coverage?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** RemediationMethodOut */
         RemediationMethodOut: {
@@ -5721,6 +5753,13 @@ export interface components {
             /** Updated At */
             updated_at: string;
             verification?: components["schemas"]["RemediationVerificationOut"] | null;
+        };
+        /** RemediationTypeCountOut */
+        RemediationTypeCountOut: {
+            /** Problem Type */
+            problem_type: string;
+            /** Count */
+            count: number;
         };
         /** RemediationVerificationOut */
         RemediationVerificationOut: {
@@ -8129,6 +8168,7 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 problem_type?: string | null;
+                category?: string | null;
             };
             header?: {
                 "x-api-token"?: string | null;
@@ -8181,6 +8221,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RemediationProposalOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_proposal_job_api_v1_sites__site_id__remediation_problems__issue_key__proposal_jobs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+                issue_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

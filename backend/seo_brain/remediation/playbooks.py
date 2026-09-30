@@ -3,6 +3,15 @@ from __future__ import annotations
 
 VERSION = 1
 
+# Every analysis problem belongs to one expandable group in the Problems UI.
+PROBLEM_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "links": ("orphan", "no_body_inbound_links", "low_inbound_links", "high_outbound_links"),
+    "headings_metadata": ("missing_h1", "multiple_h1", "duplicate_h1", "duplicate_title", "missing_meta_description"),
+    "content_media": ("thin_content", "images_missing_alt"),
+    "indexing_sitemap": ("missing_canonical", "important_non_indexable", "redirect_in_sitemap"),
+    "other": (),
+}
+
 ROADMAPS: dict[str, list[str]] = {
     "orphan": ["پوشش خزش و ایندکس‌پذیری صفحه را تأیید کن.", "صفحهٔ منبع مرتبطی که هنوز لینک نداده پیدا کن و عبارت موجود در متن را انتخاب کن.", "پس از تغییر، لینک بدنه و ورود صفحه به گراف را بسنج."],
     "no_body_inbound_links": ["منابع فعلی را از لینک ناوبری جدا کن.", "در متن صفحهٔ مرتبط لینک طبیعی بگذار.", "وجود لینک در بدنهٔ رندرشده را تأیید کن."],

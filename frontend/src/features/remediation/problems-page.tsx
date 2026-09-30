@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { IconChevronDown } from '@tabler/icons-react';
 import { Button } from '@/components/ui/button';
 import { api, endpoints, type AutoSyncPlan, type WpSyncStatus } from '@/lib/api/client';
 import type { components } from '@/lib/api/schema';
@@ -20,13 +21,21 @@ const labels: Record<string, string> = {
   missing_canonical: 'canonical ندارد', important_non_indexable: 'صفحهٔ مهم غیرقابل ایندکس',
   thin_content: 'محتوای کم', redirect_in_sitemap: 'ریدایرکت در سایت‌مپ'
 };
+const categoryLabels: Record<string, string> = {
+  links: 'لینک‌های داخلی', headings_metadata: 'تیترها و متادیتا', content_media: 'محتوا و تصاویر',
+  indexing_sitemap: 'ایندکس و سایت‌مپ', other: 'سایر مشکلات'
+};
 
 export function ProblemsPage({ sites, initialSiteId }: { sites: { site_id: string; name: string }[]; initialSiteId: string }) {
   const [siteId, setSiteId] = useState(initialSiteId);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
-  const [result, setResult] = useState<Result | null>(null);
+  const [summary, setSummary] = useState<Result | null>(null);
+  const [categoryResult, setCategoryResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(false);
   const [revision, setRevision] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<WpSyncStatus | null>(null);
@@ -49,12 +58,22 @@ export function ProblemsPage({ sites, initialSiteId }: { sites: { site_id: strin
   useEffect(() => {
     let active = true;
     setLoading(true); setError(null);
-    api<Result>(`/sites/${encodeURIComponent(siteId)}/remediation/problems?limit=30&offset=${offset}`)
-      .then((data) => { if (active) setResult(data); })
-      .catch((e) => { if (active) { setResult(null); setError(String(e?.message ?? e)); } })
+    api<Result>(`/sites/${encodeURIComponent(siteId)}/remediation/problems?limit=1`)
+      .then((data) => { if (active) setSummary(data); })
+      .catch((e) => { if (active) { setSummary(null); setError(String(e?.message ?? e)); } })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [siteId, offset, revision]);
+  }, [siteId, revision]);
+  useEffect(() => {
+    if (!activeCategory) { setCategoryResult(null); setListError(null); return; }
+    let active = true;
+    setCategoryResult(null); setListLoading(true); setListError(null);
+    api<Result>(`/sites/${encodeURIComponent(siteId)}/remediation/problems?category=${encodeURIComponent(activeCategory)}&limit=30&offset=${offset}`)
+      .then((data) => { if (active) setCategoryResult(data); })
+      .catch((e) => { if (active) setListError(String(e?.message ?? e)); })
+      .finally(() => { if (active) setListLoading(false); });
+    return () => { active = false; };
+  }, [siteId, activeCategory, offset, revision]);
   useEffect(() => {
     let active = true;
     let previousRunId: string | null = null;
@@ -85,7 +104,7 @@ export function ProblemsPage({ sites, initialSiteId }: { sites: { site_id: strin
   async function startRefresh() {
     setSyncing(true); setSyncError(null);
     try {
-      const queued = await endpoints.wpSyncStart(siteId, { crawl: true, max_urls: result?.coverage?.recommended_max_urls ?? 500 });
+      const queued = await endpoints.wpSyncStart(siteId, { crawl: true, max_urls: summary?.coverage?.recommended_max_urls ?? 500 });
       if (queued.status !== 'queued' && queued.status !== 'already_running') {
         throw new Error(queued.error ?? 'خزش شروع نشد');
       }
@@ -103,7 +122,7 @@ export function ProblemsPage({ sites, initialSiteId }: { sites: { site_id: strin
     <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-4'>
       {sites.map((site) => {
         const item = overview[site.site_id];
-        return <button key={site.site_id} type='button' onClick={() => { setSiteId(site.site_id); setOffset(0); setResult(null); }}
+        return <button key={site.site_id} type='button' onClick={() => { setSiteId(site.site_id); setOffset(0); setActiveCategory(null); setSummary(null); setCategoryResult(null); }}
           className={`rounded border p-3 text-right text-sm ${siteId === site.site_id ? 'border-primary' : ''}`}>
           <span className='block font-medium'>{site.name}</span>
           <span dir='ltr' className='block text-xs text-muted-foreground'>{site.site_id}</span>
@@ -112,7 +131,7 @@ export function ProblemsPage({ sites, initialSiteId }: { sites: { site_id: strin
       })}
     </div>
     <label className='flex items-center gap-2 text-sm'>سایت
-      <select className='rounded border bg-background p-2' value={siteId} onChange={(e) => { setSiteId(e.target.value); setOffset(0); setResult(null); setSyncStatus(null); setPlan(null); }}>
+      <select className='rounded border bg-background p-2' value={siteId} onChange={(e) => { setSiteId(e.target.value); setOffset(0); setActiveCategory(null); setSummary(null); setCategoryResult(null); setSyncStatus(null); setPlan(null); }}>
         {sites.map((s) => <option key={s.site_id} value={s.site_id}>{s.name}</option>)}
       </select>
     </label>
@@ -130,23 +149,44 @@ export function ProblemsPage({ sites, initialSiteId }: { sites: { site_id: strin
     </div>
     {loading && <p>در حال دریافت مشکلات…</p>}
     {error && <p className='text-destructive'>{error}</p>}
-    {result && <>
-      <p className='text-muted-foreground text-sm'>{result.total} مشکل ثبت‌شده</p>
-      {result.coverage && <div className={result.coverage.complete ? 'rounded border border-emerald-300 p-3 text-sm' : 'rounded border border-amber-400 p-3 text-sm'}>
-        <p>{result.coverage.status === 'never' ? 'برای این سایت هنوز خزش معتبری ثبت نشده است؛ صفر مشکل به معنی سالم بودن سایت نیست.' :
-          `آخرین خزش: ${result.coverage.urls_crawled ?? 0} صفحه، ${result.coverage.urls_failed ?? 0} خطا، ${result.coverage.sitemap_urls ?? 'نامشخص'} URL در سایت‌مپ.`}</p>
-        {!result.coverage.complete && result.coverage.status !== 'never' && <p>پوشش خزش کامل تأیید نشده است؛ فهرست مشکلات ممکن است ناقص باشد.{result.coverage.queue_remaining ? ` ${result.coverage.queue_remaining} URL در صف خزش باقی مانده بود.` : ''}</p>}
-        {result.coverage.finished_at && Date.now() - new Date(result.coverage.finished_at).getTime() > 7 * 86400000 && <p>دادهٔ این خزش بیش از هفت روز قدمت دارد.</p>}
+    {summary && <>
+      <p className='text-muted-foreground text-sm'>{summary.total} مشکل ثبت‌شده</p>
+      {summary.coverage && <div className={summary.coverage.complete ? 'rounded border border-emerald-300 p-3 text-sm' : 'rounded border border-amber-400 p-3 text-sm'}>
+        <p>{summary.coverage.status === 'never' ? 'برای این سایت هنوز خزش معتبری ثبت نشده است؛ صفر مشکل به معنی سالم بودن سایت نیست.' :
+          `آخرین خزش: ${summary.coverage.urls_crawled ?? 0} صفحه، ${summary.coverage.urls_failed ?? 0} خطا، ${summary.coverage.sitemap_urls ?? 'نامشخص'} URL در سایت‌مپ.`}</p>
+        {!summary.coverage.complete && summary.coverage.status !== 'never' && <p>پوشش خزش کامل تأیید نشده است؛ فهرست مشکلات ممکن است ناقص باشد.{summary.coverage.queue_remaining ? ` ${summary.coverage.queue_remaining} URL در صف خزش باقی مانده بود.` : ''}</p>}
+        {summary.coverage.finished_at && Date.now() - new Date(summary.coverage.finished_at).getTime() > 7 * 86400000 && <p>دادهٔ این خزش بیش از هفت روز قدمت دارد.</p>}
       </div>}
-      <div className='space-y-2'>{result.items.map((issue) => <article key={issue.issue_key} className='rounded-lg border bg-card p-4'>
-        <div className='flex items-center justify-between gap-2'><h2 className='font-semibold'>{labels[issue.problem_type] ?? issue.problem_type}</h2><span className='text-xs'>{issue.severity}</span></div>
-        <a href={issue.url} target='_blank' rel='noreferrer' dir='ltr' className='text-muted-foreground block break-all text-xs hover:underline'>{issue.url}</a>
-        <RemediationAction siteId={siteId} issueKey={issue.issue_key} />
-      </article>)}</div>
-      <div className='flex gap-2'>
-        <Button variant='outline' disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 30))}>قبلی</Button>
-        <Button variant='outline' disabled={offset + 30 >= result.total} onClick={() => setOffset(offset + 30)}>بعدی</Button>
-      </div>
+      {summary.groups.length === 0 && <p className='rounded-lg border bg-card p-4 text-sm'>مشکلی ثبت نشده است.</p>}
+      <div className='space-y-2'>{summary.groups.map((group) => {
+        const open = activeCategory === group.category;
+        return <section key={group.category} className='rounded-lg border bg-card'>
+          <button type='button' aria-expanded={open} onClick={() => { setActiveCategory(open ? null : group.category); setCategoryResult(null); setOffset(0); }}
+            className='flex w-full items-center justify-between gap-3 p-4 text-right'>
+            <span className='min-w-0 space-y-1'>
+              <span className='block font-semibold'>{categoryLabels[group.category] ?? group.category}</span>
+              <span className='block text-xs text-muted-foreground'>{group.types.map((item) => `${labels[item.problem_type] ?? item.problem_type}: ${item.count}`).join(' · ')}</span>
+            </span>
+            <span className='flex shrink-0 items-center gap-2 text-sm'><span>{group.count} مشکل</span><IconChevronDown className={`size-4 transition-transform ${open ? 'rotate-180' : ''}`} /></span>
+          </button>
+          {open && <div className='space-y-2 border-t p-3'>
+            {listLoading && <p className='text-sm'>در حال دریافت فهرست…</p>}
+            {listError && <p className='text-sm text-destructive'>{listError}</p>}
+            {categoryResult && <>
+              <p className='text-xs text-muted-foreground'>نمایش {categoryResult.total ? offset + 1 : 0} تا {Math.min(offset + categoryResult.items.length, categoryResult.total)} از {categoryResult.total}</p>
+              {categoryResult.items.map((issue) => <article key={issue.issue_key} className='rounded-lg border p-4'>
+                <div className='flex items-center justify-between gap-2'><h3 className='font-semibold'>{labels[issue.problem_type] ?? issue.problem_type}</h3><span className='text-xs'>{issue.severity}</span></div>
+                <a href={issue.url} target='_blank' rel='noreferrer' dir='ltr' className='text-muted-foreground block break-all text-xs hover:underline'>{issue.url}</a>
+                <RemediationAction siteId={siteId} issueKey={issue.issue_key} />
+              </article>)}
+              {categoryResult.total > 30 && <div className='flex gap-2'>
+                <Button variant='outline' disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 30))}>قبلی</Button>
+                <Button variant='outline' disabled={offset + 30 >= categoryResult.total} onClick={() => setOffset(offset + 30)}>بعدی</Button>
+              </div>}
+            </>}
+          </div>}
+        </section>;
+      })}</div>
     </>}
   </div>;
 }

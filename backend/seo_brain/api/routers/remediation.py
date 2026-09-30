@@ -46,9 +46,21 @@ class RemediationIssueOut(BaseModel):
     run_id: str | None = None
 
 
+class RemediationTypeCountOut(BaseModel):
+    problem_type: str
+    count: int
+
+
+class RemediationGroupOut(BaseModel):
+    category: str
+    count: int
+    types: list[RemediationTypeCountOut]
+
+
 class RemediationIssuesOut(BaseModel):
     total: int
     items: list[RemediationIssueOut]
+    groups: list[RemediationGroupOut]
     playbook_version: int
     coverage: dict[str, Any] | None = None
 
@@ -111,8 +123,9 @@ class RemediationRunOut(BaseModel):
 
 @router.get("/problems", response_model=RemediationIssuesOut)
 def problems(site_id: str, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
-             problem_type: str | None = None, svc: RemediationService = Depends(service)) -> dict:
-    return _call(lambda: svc.list_issues(site_id, limit, offset, problem_type))
+             problem_type: str | None = None, category: str | None = None,
+             svc: RemediationService = Depends(service)) -> dict:
+    return _call(lambda: svc.list_issues(site_id, limit, offset, problem_type, category))
 
 
 @router.post("/problems/{issue_key}/proposals", response_model=RemediationProposalOut)

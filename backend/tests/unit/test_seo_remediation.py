@@ -9,7 +9,7 @@ from seo_brain.ai.config import PROVIDER_KINDS, RECOMMENDED_ROUTES, TASK_KINDS
 from seo_brain.ai.types import AIMessage, AIRequest
 from seo_brain.db.engine import make_engine
 from seo_brain.db.migrate import migrate
-from seo_brain.remediation.playbooks import PLAYBOOKS
+from seo_brain.remediation.playbooks import PLAYBOOKS, PROBLEM_CATEGORIES
 from seo_brain.remediation.service import RemediationError, RemediationService, issue_key, public_run
 
 
@@ -18,6 +18,7 @@ def test_all_analysis_problem_types_have_two_bounded_methods():
                 "multiple_h1", "duplicate_h1", "duplicate_title", "missing_meta_description", "images_missing_alt",
                 "missing_canonical", "important_non_indexable", "thin_content", "redirect_in_sitemap"}
     assert set(PLAYBOOKS) == expected
+    assert {kind for kinds in PROBLEM_CATEGORIES.values() for kind in kinds} == expected
     assert all(len(methods) == 2 and len({m["id"] for m in methods}) == 2 for methods in PLAYBOOKS.values())
     assert PROVIDER_KINDS["atria"]["base_url"] == "https://api.atria-asi.ai/v1"
     assert "seo_remediation" in TASK_KINDS
@@ -171,6 +172,21 @@ def test_stable_issue_key_and_proposal_binding(service):
     with pytest.raises(RemediationError) as exc:
         service.create_run("gearboxemdad", proposal["id"], "wp_meta_description", proposal["evidence_hash"], "key-12345678", True)
     assert exc.value.code == "issue_changed"
+
+
+def test_problem_groups_cover_all_issues_before_pagination(service):
+    with service.engine.begin() as cx:
+        cx.execute(text("INSERT INTO seo_problems(site_id,problem_type,severity,url,related_url,detail) "
+                        "VALUES ('gearboxemdad','orphan','high','https://pilot.example/b','','{}')"))
+    summary = service.list_issues("gearboxemdad", limit=1)
+    assert summary["total"] == 2 and len(summary["items"]) == 1
+    assert {group["category"]: group["count"] for group in summary["groups"]} == {"links": 1, "headings_metadata": 1}
+    links = service.list_issues("gearboxemdad", category="links", limit=1)
+    assert links["total"] == 1 and links["items"][0]["problem_type"] == "orphan"
+    assert sum(group["count"] for group in links["groups"]) == 2
+    with pytest.raises(RemediationError) as exc:
+        service.list_issues("gearboxemdad", category="unknown")
+    assert exc.value.code == "invalid_category"
 
 
 def test_pilot_boundary_and_unavailable_credentials(service, monkeypatch):
@@ -356,6 +372,8 @@ def test_remediation_api_exposes_methods_and_blocks_unconnected_template(service
     root = "/api/v1/sites/gearboxemdad/remediation"
     listing = client.get(root + "/problems")
     assert listing.status_code == 200 and listing.json()["total"] == 1
+    assert listing.json()["groups"][0]["category"] == "headings_metadata"
+    assert client.get(root + "/problems?category=links").json()["total"] == 0
     key = listing.json()["items"][0]["issue_key"]
     queued = client.post(root + f"/problems/{key}/proposal-jobs")
     assert queued.status_code == 202 and queued.json()["status"] == "succeeded"

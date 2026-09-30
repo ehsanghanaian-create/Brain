@@ -9,6 +9,7 @@ import hashlib
 import json
 import re
 import uuid
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
@@ -22,7 +23,7 @@ from ..ai.gateway.gateway import BudgetExceeded, CallMeta, RouteStep
 from ..ai.types import AIMessage, AITask, TaskKind
 from ..db.repositories.base import utcnow
 from ..wordpress.auth import load_site_auth, resolve_auth
-from .playbooks import ROADMAPS, VERSION, methods_for
+from .playbooks import PROBLEM_CATEGORIES, ROADMAPS, VERSION, methods_for
 
 PILOT_SITE = "gearboxemdad"
 WP_META_FIELDS = {"wp_meta_title": "emdad_meta_title", "wp_meta_description": "emdad_meta_description", "wp_canonical": "emdad_canonical"}
@@ -110,8 +111,24 @@ class RemediationService:
             rows = cx.execute(text("SELECT problem_type, severity, url, COALESCE(related_url,'') related_url, detail, run_id FROM seo_problems WHERE site_id=:s ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, problem_type, url"), {"s": site_id}).mappings().all()
         return [{**dict(row), "detail": _json(row["detail"], {}), "issue_key": issue_key(site_id, row["problem_type"], row["url"], row["related_url"])} for row in rows]
 
-    def list_issues(self, site_id: str, limit: int = 50, offset: int = 0, problem_type: str | None = None) -> dict:
-        issues = [i for i in self._issues(site_id) if not problem_type or i["problem_type"] == problem_type]
+    def list_issues(self, site_id: str, limit: int = 50, offset: int = 0, problem_type: str | None = None,
+                    category: str | None = None) -> dict:
+        if category and category not in PROBLEM_CATEGORIES:
+            raise RemediationError("invalid_category", "دستهٔ مشکل معتبر نیست.", 422)
+        all_issues = self._issues(site_id)
+        counts = Counter(issue["problem_type"] for issue in all_issues)
+        known = {problem for problems in PROBLEM_CATEGORIES.values() for problem in problems}
+        groups = []
+        for name, problem_types in PROBLEM_CATEGORIES.items():
+            types = (sorted(counts.keys() - known) if name == "other" else problem_types)
+            breakdown = [{"problem_type": problem, "count": counts[problem]} for problem in types if counts[problem]]
+            if breakdown:
+                groups.append({"category": name, "count": sum(item["count"] for item in breakdown), "types": breakdown})
+        allowed = None
+        if category:
+            allowed = counts.keys() - known if category == "other" else set(PROBLEM_CATEGORIES[category])
+        issues = [i for i in all_issues if (allowed is None or i["problem_type"] in allowed)
+                  and (not problem_type or i["problem_type"] == problem_type)]
         from ..automation.scheduler import full_crawl_limit, latest_site_crawl
         crawl = latest_site_crawl(self.engine, site_id)
         coverage = None
@@ -123,7 +140,8 @@ class RemediationService:
                         "sitemap_urls": notes.get("sitemap_urls"), "queue_remaining": notes.get("queue_remaining"),
                         "complete": (crawl["status"] == "completed" and not capped and not crawl["urls_failed"]
                                      and (notes.get("scope") == "site" or int(crawl["max_urls"] or 0) >= 200))}
-        return {"total": len(issues), "items": issues[offset:offset + limit], "playbook_version": VERSION,
+        return {"total": len(issues), "items": issues[offset:offset + limit], "groups": groups,
+                "playbook_version": VERSION,
                 "coverage": {**(coverage or {}), "recommended_max_urls": full_crawl_limit(self.engine, site_id)}
                 if coverage else {"status": "never", "complete": False,
                                   "recommended_max_urls": full_crawl_limit(self.engine, site_id)}}

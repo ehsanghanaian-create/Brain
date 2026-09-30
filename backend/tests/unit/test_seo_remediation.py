@@ -45,10 +45,13 @@ def test_orphan_uses_related_wordpress_source_when_link_suggestions_are_empty(se
         cx.execute(text("INSERT INTO seo_problems(site_id,problem_type,severity,url,related_url,detail) "
                         "VALUES ('gearboxemdad','orphan','high',:target,'','{}')"), {"target": target})
         cx.execute(text("INSERT INTO pages(site_id,url,status_code,title,images) "
-                        "VALUES ('gearboxemdad',:target,200,'امداد جک J3','[]')"), {"target": target})
+                        "VALUES ('gearboxemdad',:target,200,'امدادرسانی جک J3 - امداد خودرو کرمان موتور','[]')"), {"target": target})
         cx.execute(text("INSERT INTO posts(site_id,wp_id,type,url,title,content_html,modified_gmt) "
                         "VALUES ('gearboxemdad',8,'post',:source,'راهنمای جک',:body,'2026-09-01T00:00:00')"),
                    {"source": source, "body": "<p>" + ("راهنمای سرویس جک برای کاربران. " * 20) + "</p>"})
+        cx.execute(text("INSERT INTO posts(site_id,wp_id,type,url,title,content_html,modified_gmt) "
+                        "VALUES ('gearboxemdad',9,'post','https://pilot.example/unrelated','امدادرسانی اسپورتیج',:body,'2026-09-01T00:00:00')"),
+                   {"body": "<p>" + ("راهنمای سرویس اسپورتیج برای کاربران. " * 20) + "</p>"})
     issue = service._issue("gearboxemdad", issue_key("gearboxemdad", "orphan", target))
     candidates = service._evidence("gearboxemdad", issue)["link_candidates"]
     assert [candidate["source_url"] for candidate in candidates] == [source]

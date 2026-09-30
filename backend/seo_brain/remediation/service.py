@@ -152,7 +152,9 @@ class RemediationService:
                 # the model must still select an exact phrase already in a source.
                 topic = (post or {}).get("title") if post else None
                 topic = topic or (page or {}).get("title") or ""
-                stop = {"برای", "امداد", "خودرو", "خدمات", "تهران", "ایران", "صفحه", "سایت", "کامل", "بررسی", "های", "در", "با", "از"}
+                topic = re.split(r"\s+[-–—]\s+", str(topic), maxsplit=1)[0]
+                stop = {"برای", "امداد", "امدادرسانی", "خودرو", "خدمات", "تعمیر", "تخصصی", "تهران", "ایران",
+                        "صفحه", "سایت", "کامل", "بررسی", "های", "در", "با", "از"}
                 terms = {w for w in re.findall(r"[^\W_]+", str(topic).replace("ي", "ی").replace("ك", "ک").lower())
                          if len(w) >= 2 and w not in stop}
                 if terms:

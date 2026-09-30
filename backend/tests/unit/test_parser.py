@@ -1,4 +1,4 @@
-from seo_brain.crawler.parser import parse_html
+from seo_brain.crawler.parser import image_needs_alt, parse_html
 
 HTML = """<!doctype html><html lang="fa-IR"><head><title> امداد   خودرو </title>
 <meta name="description" content="توضیح">
@@ -44,3 +44,12 @@ def test_schema_and_images_and_hash():
     assert p.word_count > 0 and len(p.content_hash) == 64
     p2 = parse_html(HTML.replace("متن متن متن", "متن متن متن!"), "https://example.com/")
     assert p2.content_hash != p.content_hash
+
+
+def test_explicitly_decorative_image_does_not_need_alt():
+    html = '<main><a href="/cars/"><figure aria-hidden="true"><img src="/decorative.webp" alt=""></figure><h3>خودرو</h3></a><img src="/content.jpg" alt=""><img src="/missing.jpg"></main>'
+    p = parse_html(html, "https://example.com/")
+    assert [img["decorative"] for img in p.images] == [True, False, False]
+    from bs4 import BeautifulSoup
+    images = BeautifulSoup(html, "html.parser").find_all("img")
+    assert [image_needs_alt(img) for img in images] == [False, True, True]

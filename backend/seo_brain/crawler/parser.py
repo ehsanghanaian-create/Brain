@@ -16,6 +16,18 @@ def _clean(s: str | None) -> str:
     return _WS.sub(" ", (s or "")).strip()
 
 
+def image_is_decorative(img) -> bool:
+    """Respect explicit accessibility markup on an image or its container."""
+    return any(
+        node.get("aria-hidden", "").lower() == "true" or node.get("role", "").lower() in {"presentation", "none"}
+        for node in (img, *img.parents)
+    )
+
+
+def image_needs_alt(img) -> bool:
+    return not image_is_decorative(img) and not _clean(img.get("alt"))
+
+
 @dataclass
 class LinkOut:
     href: str          # absolute, un-normalized
@@ -132,7 +144,8 @@ def parse_html(html: str, base_url: str) -> ParsedPage:
         src = img.get("src") or img.get("data-src") or ""
         if not src:
             continue
-        p.images.append({"src": urljoin(base_url, src.strip()), "alt": _clean(img.get("alt")) if img.has_attr("alt") else None})
+        p.images.append({"src": urljoin(base_url, src.strip()), "alt": _clean(img.get("alt")) if img.has_attr("alt") else None,
+                         "decorative": image_is_decorative(img)})
 
     # visible text + hash (strip boilerplate tags)
     for t in soup(["script", "style", "noscript", "template", "svg"]):

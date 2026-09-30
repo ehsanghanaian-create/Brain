@@ -242,7 +242,7 @@ class Crawler:
             "indexable": indexable, "indexability_reason": reason,
             "word_count": p.word_count if p else None, "language": p.language if p else None,
             "images": j(p.images) if p else None,
-            "images_missing_alt": sum(1 for im in p.images if not im.get("alt")) if p else None,
+            "images_missing_alt": sum(1 for im in p.images if not im.get("alt") and not im.get("decorative")) if p else None,
             "internal_links_out": internal if p else None, "external_links_out": external if p else None,
             "schema_types": j(p.schema_types) if p else None, "structured_data": j(p.ld_json) if p else None,
             "content_hash": p.content_hash if p else None, "in_sitemap": 1 if in_sitemap else 0,

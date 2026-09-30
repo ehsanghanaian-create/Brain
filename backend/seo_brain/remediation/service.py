@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from ..ai.config import ProviderConfigRepository
 from ..ai.gateway.gateway import BudgetExceeded, CallMeta, RouteStep
 from ..ai.types import AIMessage, AITask, TaskKind
+from ..crawler.parser import image_needs_alt
 from ..db.repositories.base import utcnow
 from ..wordpress.auth import load_site_auth, resolve_auth
 from .playbooks import PROBLEM_CATEGORIES, ROADMAPS, VERSION, methods_for
@@ -672,7 +673,7 @@ class RemediationService:
                 "x_robots_tag": response.headers.get("x-robots-tag", ""),
                 "links": [a.get("href") for a in soup.find_all("a", href=True)],
                 "images": [{"src": img.get("src", ""), "alt": img.get("alt")} for img in soup.find_all("img")],
-                "images_missing_alt": len([img for img in soup.find_all("img") if not img.has_attr("alt")]),
+                "images_missing_alt": sum(image_needs_alt(img) for img in soup.find_all("img")),
                 "word_count": 0}
         main = soup.find("main") or soup.find("article") or soup.body or soup
         for tag in main.find_all(["script", "style", "noscript", "template", "svg"]):

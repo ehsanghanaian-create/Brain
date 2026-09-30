@@ -27,10 +27,19 @@ from seo_brain.wordpress.auth import load_site_auth
 SITES = {
     "emdadasanmotors": ("emdadasanmotors.com", "#re-title"),
     "modiranemdad": ("modiranemdad.com", ".page-header h1"),
+    "hyundaemdad": ("hyundaemdad.com", ".elementor-widget-container > h1.elementor-heading-title"),
+    "emdadkermanmotor": ("emdadkermanmotor.com", ".re-article-hero__body > h1"),
 }
 H1_OPEN = re.compile(r"<h1\b", re.IGNORECASE)
 H1_CLOSE = re.compile(r"</h1\s*>", re.IGNORECASE)
-HEADERS = {"User-Agent": "SEO-KG-Crawler/0.1 (+local; read-only)"}
+EMPTY_H1 = re.compile(r"<h1\b[^>]*>\s*</h1\s*>", re.IGNORECASE | re.DOTALL)
+HEADERS = {"User-Agent": "SEO-Brain/0.2 remediation-verifier"}
+
+
+def transform_body_h1(raw: str) -> str:
+    """Remove empty body H1s and demote meaningful ones without rewriting other HTML."""
+    without_empty = EMPTY_H1.sub("", raw)
+    return H1_CLOSE.sub("</h2>", H1_OPEN.sub("<h2", without_empty))
 
 
 def path_key(url: str) -> str:
@@ -120,7 +129,7 @@ def run(site_id: str, apply: bool, limit: int | None) -> None:
                         f"unexpected heading ownership: live={count}, template={template_first}, "
                         f"raw={raw_open}/{raw_close}, rendered={rendered_h1}"
                     )
-                updated = H1_CLOSE.sub("</h2>", H1_OPEN.sub("<h2", raw))
+                updated = transform_body_h1(raw)
                 if not apply:
                     print(f"PLAN {site_id} post={post_id} body_h1={raw_open}", flush=True)
                     continue

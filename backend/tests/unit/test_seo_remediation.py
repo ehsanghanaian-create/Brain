@@ -354,6 +354,36 @@ def test_recrawl_replaces_removed_source_links(service, tmp_path):
         crawler.http.close()
 
 
+def test_sitemap_fetch_preserves_published_url_without_trailing_slash(tmp_path):
+    import httpx
+    from seo_brain.common.config import SiteConfig
+    from seo_brain.crawler.crawler import Crawler
+
+    class FakeHttp:
+        def get(self, url, **_kwargs):
+            if url.endswith("sitemap.xml"):
+                body = ('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                        '<url><loc>https://pilot.example/about</loc></url></urlset>')
+                return httpx.Response(200, content=body, request=httpx.Request("GET", url))
+            if url.endswith("/about/"):
+                return httpx.Response(308, headers={"location": "/about"}, request=httpx.Request("GET", url))
+            return httpx.Response(200, text="<h1>About</h1>", headers={"content-type": "text/html"},
+                                  request=httpx.Request("GET", url))
+
+    crawler = Crawler(SiteConfig(site_id="pilot", name="Pilot", canonical_url="https://pilot.example/",
+                                 wp_url="https://wp.pilot.example"))
+    crawler.raw_dir = tmp_path
+    crawler.http.close()
+    crawler.http = FakeHttp()
+    crawler.sitemap_urls = ["https://pilot.example/sitemap.xml"]
+    assert crawler.read_sitemaps() == ["https://pilot.example/about/"]
+    result = crawler.fetch("https://pilot.example/about/", 0,
+                           crawler.sitemap_sources["https://pilot.example/about/"])
+    assert result.status_code == 200
+    assert result.redirect_chain == []
+    assert result.url == "https://pilot.example/about/"
+
+
 def test_remediation_api_exposes_methods_and_blocks_unconnected_template(service):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient

@@ -61,6 +61,9 @@ class Crawler:
                                    follow_redirects=False)
         self.robots: Protego | None = None
         self.sitemap_urls: list[str] = []
+        # Keep the URL written in the sitemap separate from our database identity.
+        # Normalization may add a slash that the live site redirects away from.
+        self.sitemap_sources: dict[str, str] = {}
         self.raw_dir: Path = raw_data_dir() / "crawler" / site.site_id
         self.raw_dir.mkdir(parents=True, exist_ok=True)
 
@@ -103,6 +106,7 @@ class Crawler:
         return txt
 
     def read_sitemaps(self, limit_docs: int = 50) -> list[str]:
+        self.sitemap_sources = {}
         seen_docs, urls, queue = set(), [], deque(self.sitemap_urls)
         while queue and len(seen_docs) < limit_docs:
             sm = queue.popleft()
@@ -142,14 +146,15 @@ class Crawler:
             if n not in seen:
                 seen.add(n)
                 uniq.append(n)
+                self.sitemap_sources[n] = u
         log.info(f"sitemap inventory: {len(uniq)} URLs from {len(seen_docs)} sitemap docs")
         return uniq
 
     # -- fetch ----------------------------------------------------------------------
-    def fetch(self, url: str, depth: int) -> CrawlResult:
+    def fetch(self, url: str, depth: int, request_url: str | None = None) -> CrawlResult:
         res = CrawlResult(url=url)
         chain = []
-        cur = url
+        cur = request_url or url
         t0 = time.monotonic()
         try:
             for _ in range(6):
@@ -282,7 +287,8 @@ class Crawler:
                                        update_cols=["crawl_status", "crawl_run_id"])
                             continue
                         batch.append((url, depth, src))
-                    futures = {pool.submit(self.fetch, u, d): (u, d, s) for u, d, s in batch}
+                    futures = {pool.submit(self.fetch, u, d, self.sitemap_sources.get(u)): (u, d, s)
+                               for u, d, s in batch}
                     for fut in as_completed(futures):
                         u, d, s = futures[fut]
                         res = fut.result()

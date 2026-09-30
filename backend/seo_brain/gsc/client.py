@@ -48,7 +48,7 @@ def _client_config() -> dict:
         except Exception:  # noqa: BLE001 — store unavailable ⇒ same "missing" error below
             pass
     if not cid or not csec:
-        raise GscAuthError("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET missing in .env (create an OAuth 'Desktop app' client in Google Cloud and enable the Search Console API)")
+        raise GscAuthError("Google OAuth client missing (create a Web application client with the public HTTPS callback and enable the Search Console API)")
     return {"installed": {
         "client_id": cid, "client_secret": csec, "auth_uri": "https://accounts.google.com/o/oauth2/auth",
         "token_uri": "https://oauth2.googleapis.com/token", "redirect_uris": ["http://localhost"],

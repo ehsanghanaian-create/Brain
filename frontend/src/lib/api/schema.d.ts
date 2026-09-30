@@ -802,7 +802,7 @@ export interface paths {
         get?: never;
         /**
          * Google Client Save
-         * @description Self-service setup: store the Google OAuth client (Desktop type) in the SecretStore — no .env editing.
+         * @description Self-service setup: store the Google OAuth web client in the SecretStore — no .env editing.
          *     The secret is never returned; only `configured` + a masked client id hint.
          */
         put: operations["google_client_save_api_v1_connections_google_client_put"];

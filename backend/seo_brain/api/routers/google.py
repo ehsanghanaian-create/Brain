@@ -46,7 +46,7 @@ class GoogleClientBody(BaseModel):
 
 @router.put("/client")
 def google_client_save(body: GoogleClientBody) -> dict:
-    """Self-service setup: store the Google OAuth client (Desktop type) in the SecretStore — no .env editing.
+    """Self-service setup: store the Google OAuth web client in the SecretStore — no .env editing.
     The secret is never returned; only `configured` + a masked client id hint."""
     try:
         return google_oauth.save_client(body.client_id, body.client_secret)

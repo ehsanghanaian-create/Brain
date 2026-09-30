@@ -4,7 +4,7 @@ Reuses everything from gsc/client.py: the OAuth client (_client_config → .env 
 token file format (`Credentials.to_json()` at GSC_TOKEN_PATH) — so the GSC/GA4 clients, the pipelines and the CLI
 keep working unchanged. Only the way consent is obtained changes: an /authorize URL + a /callback exchange instead
 of run_local_server(). `openid email` is added to the web consent so the UI can show which account is connected;
-the two data scopes stay exactly as before.
+the data scopes stay exactly as configured in the shared GSC/GA4/Ads client.
 
 No plaintext DB storage: the refresh token is encrypted in SecretStore, with a legacy file fallback only when
 SecretStore is unavailable. The connected account label (email — not a secret) sits in tokens/google_account.json.
@@ -199,7 +199,7 @@ def save_client(client_id: str, client_secret: str) -> dict[str, Any]:
     from ..core.secrets import get_secret_store
     cid, csec = client_id.strip(), client_secret.strip()
     if not cid.endswith(".apps.googleusercontent.com"):
-        raise GscAuthError("Client ID باید به apps.googleusercontent.com ختم شود (OAuth Client از نوع Desktop بسازید)")
+        raise GscAuthError("Client ID باید به apps.googleusercontent.com ختم شود (برای پنل، OAuth Client از نوع Web application بسازید)")
     if len(csec) < 10:
         raise GscAuthError("Client Secret معتبر نیست")
     st = get_secret_store()

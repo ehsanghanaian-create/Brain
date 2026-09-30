@@ -73,7 +73,7 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
       previousConnection.current = status?.connected_at ?? null;
       awaitingRef.current = true;
       setAwaiting(true);
-      toast.info('در پنجرهٔ بازشده با حساب گوگل خود وارد شوید و هر دو دسترسی را تأیید کنید');
+      toast.info('در پنجرهٔ بازشده با حساب گوگل خود وارد شوید و دسترسی‌های نمایش‌داده‌شده را بررسی و تأیید کنید');
     } catch (e) {
       tab.close();
       toast.error(e instanceof ApiError ? e.message : String(e));
@@ -120,7 +120,7 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
       badge={view.state === 'connected' ? 'متصل' : view.state === 'needs_reconnect' ? 'نیازمند اتصال دوباره'
         : view.state === 'temporary_error' ? 'خطای موقت' : view.state === 'no_client' ? 'پیکربندی ناقص' : 'متصل نیست'}
       badgeVariant={view.state === 'connected' ? 'secondary' : ['no_client', 'needs_reconnect'].includes(view.state) ? 'destructive' : 'outline'}
-      description='یک ورود گوگل برای Search Console و Google Analytics — هر دو فقط‌خواندنی. توکن فقط روی همین سیستم و خارج از دیتابیس نگه‌داری می‌شود.'
+      description='یک ورود گوگل برای Search Console و Google Analytics (فقط‌خواندنی) و قابلیت محدودسازی IP در Google Ads. توکن به‌صورت رمزگذاری‌شده روی سرور نگه‌داری می‌شود.'
     >
       {view.state === 'connected' ? (
         <div className='grid gap-2 text-sm' data-testid='google-connected'>
@@ -183,6 +183,7 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
         </div>
       )}
       {view.hint && <p className='text-muted-foreground text-xs'>{view.hint}</p>}
+      <p className='text-muted-foreground text-xs'>پیش از اتصال، <a href='/privacy' target='_blank' rel='noreferrer' className='text-primary underline'>نحوهٔ استفاده و نگهداری داده‌های گوگل</a> را بخوانید.</p>
     </IntegrationCard>
   );
 }

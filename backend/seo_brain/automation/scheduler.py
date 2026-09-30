@@ -197,6 +197,8 @@ def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> 
     interval = timedelta(minutes=cfg["interval_minutes"])
     with engine.connect() as cx:
         site = cx.execute(text("SELECT wp_url, gsc_property, ga4_property FROM sites WHERE site_id=:s"), {"s": site_id}).first()
+        checks = {r[0]: (r[1], _parse(r[2])) for r in cx.execute(
+            text("SELECT kind, status, tested_at FROM site_connections WHERE site_id=:s"), {"s": site_id}).all()}
     if not site:
         return {"enabled": cfg["enabled"], "interval_minutes": cfg["interval_minutes"], "interval_hours": cfg["interval_hours"], "sources": {}}
     from ..connections.service import GA4_SCOPE, _google_client_configured, _token_info
@@ -213,15 +215,19 @@ def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> 
         nxt = (last + interval) if last else now
         # A rejected grant needs user reconnection; repeated failures must not hammer the site.
         streak, latest_started, latest_status = _failure_streak(engine, site_id, src)
-        if latest_status == "not_authorized":
-            configured[kind] = False
+        check_status, checked_at = checks.get(kind, (None, None))
+        blocked = latest_status == "not_authorized" and not (
+            check_status == "ok" and checked_at and latest_started and checked_at > latest_started)
+        if latest_status == "not_authorized" and not blocked:
+            nxt = now
         elif latest_status == "failed" and latest_started:
             delay = RETRY_AFTER_MINUTES if streak < MAX_CONSECUTIVE_FAILURES else cfg["interval_minutes"]
             retry_at = latest_started + timedelta(minutes=delay)
             nxt = retry_at if streak < MAX_CONSECUTIVE_FAILURES else max(nxt, retry_at)
         sources[kind] = {"configured": configured[kind], "last_success": _iso(last) if last else None,
-                         "next_at": _iso(nxt) if (cfg["enabled"] and configured[kind]) else None,
-                         "due": bool(cfg["enabled"] and configured[kind] and nxt <= now)}
+                         "blocked_reason": "not_authorized" if blocked else None,
+                         "next_at": _iso(nxt) if (cfg["enabled"] and configured[kind] and not blocked) else None,
+                         "due": bool(cfg["enabled"] and configured[kind] and not blocked and nxt <= now)}
     return {"enabled": cfg["enabled"], "interval_minutes": cfg["interval_minutes"], "interval_hours": cfg["interval_hours"], "sources": sources}
 
 

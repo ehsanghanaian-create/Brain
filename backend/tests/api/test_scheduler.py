@@ -186,6 +186,11 @@ def test_retry_only_transient_failures(env):
         cx.execute(text("INSERT INTO sync_runs(run_id, site_id, source, started_at, finished_at, status, notes) "
                         "VALUES('na1','r2','gsc_pipeline',:t,:t,'not_authorized','{}')"), {"t": ts})
     assert plan_for_site(eng, "r2")["sources"]["gsc"]["due"] is False
+    assert plan_for_site(eng, "r2")["sources"]["gsc"]["blocked_reason"] == "not_authorized"
+    with eng.begin() as cx:
+        cx.execute(text("INSERT INTO site_connections(site_id,kind,status,detail,tested_at) "
+                        "VALUES('r2','gsc','ok','{}',:t)"), {"t": _iso(datetime.now(timezone.utc))})
+    assert plan_for_site(eng, "r2")["sources"]["gsc"]["due"] is True
 
 
 def test_auto_sync_api(env):

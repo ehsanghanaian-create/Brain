@@ -66,7 +66,9 @@ def test_paginated_archive_keeps_its_heading_without_duplicate_h1_findings(tmp_p
                          "'2026-09-30T10:01:00Z','crawl-current')", (url, "Archive", url))
         run_analysis(conn, site)
         assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='duplicate_h1'").fetchone()[0] == 0
-        assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='duplicate_title'").fetchone()[0] == 0
+        # Pagination can share its section H1, but each indexable page still
+        # needs a distinct document title (usually including its page number).
+        assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='duplicate_title'").fetchone()[0] == 5
         other = "https://demo.example/service/"
         conn.execute("INSERT INTO pages(site_id,url,crawl_status,status_code,title,meta_description,h1,h1_count,"
                      "canonical,indexable,word_count,images_missing_alt,in_sitemap,last_crawled,crawl_run_id) "

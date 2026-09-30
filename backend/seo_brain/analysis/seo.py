@@ -44,20 +44,21 @@ def _h1_comparison_url(url: str) -> str:
     return f"{parts.scheme}://{parts.netloc}{path.rstrip('/')}/"
 
 
-def _distinct_document_urls(urls: list[str], by_url: dict) -> list[str]:
-    """Collapse archive pagination and identical canonical aliases for duplicate checks."""
+def _distinct_document_urls(urls: list[str], by_url: dict, *, collapse_pagination: bool = True) -> list[str]:
+    """Collapse identical canonical aliases; pagination may share H1 but should have unique titles."""
     unique_pages = {}
     for url in sorted(urls, key=lambda value: (bool(re.search(r"/page/(?:[2-9]|[1-9]\d+)/?$", urlsplit(value).path)), value)):
-        unique_pages.setdefault(_h1_comparison_url(url), url)
+        unique_pages.setdefault(_h1_comparison_url(url) if collapse_pagination else url, url)
     aliases = {}
     for url in sorted(unique_pages.values(), key=lambda value: (by_url[value]["canonical"] != value, value)):
         page = by_url[url]
         canonical = page["canonical"] or ""
         content_hash = page["content_hash"] or ""
         if canonical and content_hash and urlsplit(canonical).netloc == urlsplit(url).netloc:
-            identity = (_h1_comparison_url(canonical), content_hash)
+            identity = (_h1_comparison_url(canonical) if collapse_pagination else canonical.rstrip("/") + "/",
+                        content_hash)
         else:
-            identity = (_h1_comparison_url(url), url)
+            identity = (_h1_comparison_url(url) if collapse_pagination else url, url)
         aliases.setdefault(identity, url)
     return list(aliases.values())
 
@@ -171,7 +172,7 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
         if h1:
             h1s[h1[0].strip()].append(u)
     for t, urls in titles.items():
-        distinct_urls = _distinct_document_urls(urls, by_url)
+        distinct_urls = _distinct_document_urls(urls, by_url, collapse_pagination=False)
         if len(distinct_urls) > 1:
             for u in distinct_urls:
                 _problem(conn, sid, "duplicate_title", "medium", u,

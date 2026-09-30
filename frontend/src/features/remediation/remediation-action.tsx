@@ -110,9 +110,9 @@ export function RemediationAction({ siteId, issueKey }: { siteId: string; issueK
 
   return <div className='mt-2 space-y-2 text-xs'>
     <Button size='sm' variant='outline' disabled={pending || !!proposalJobId} onClick={loadMethods}>رفع مشکل</Button>
-    {(pending || proposalJobId) && <p className='text-muted-foreground'>در حال بررسی و دریافت پیشنهاد Atria…</p>}
+    {(pending || proposalJobId) && <p className='text-muted-foreground'>در حال بررسی و دریافت پیشنهاد Atria… این مرحله ممکن است چند دقیقه طول بکشد.</p>}
     {error && <p className='text-destructive'>{error}</p>}
-    {error && (errorCode?.startsWith('atria_') || errorCode === 'ai_budget_exceeded' || /Atria|بودجهٔ AI/.test(error))
+    {error && (errorCode === 'atria_not_connected' || errorCode === 'ai_budget_exceeded' || /کلید Atria|بودجهٔ AI/.test(error))
       && <a className='text-primary underline' href='/dashboard/ai-models'>تنظیم مدل و مسیر Atria</a>}
     {proposal && <div className='space-y-2 rounded border p-2'>
       <p className='font-medium'>روش حل را انتخاب کنید</p>
@@ -122,7 +122,7 @@ export function RemediationAction({ siteId, issueKey }: { siteId: string; issueK
         <div className='text-muted-foreground'>{method.reason}</div>
         {typeof method.value === 'string' && method.value && <div className='break-words'>پیشنهاد: {method.value}</div>}
         {Array.isArray(method.value) && <div>تعداد تصاویر پیشنهادی: {method.value.length}</div>}
-        <div>محل تغییر: {method.owner === 'frontend' ? 'قالب Next.js' : method.owner === 'unverified' ? 'مالک خروجی هنوز تأیید نشده' : method.kind === 'wp_title' ? 'عنوان محتوای وردپرس' : ['wp_meta_title', 'wp_meta_description', 'wp_canonical', 'wp_noindex_off'].includes(method.kind) ? 'فیلد SEO وردپرس' : 'بدنهٔ محتوای وردپرس'}</div>
+        <div>محل تغییر: {method.owner === 'frontend' ? siteId === 'gearboxemdad' ? 'قالب Next.js' : 'قالب سایت' : method.owner === 'unverified' ? 'مالک خروجی هنوز تأیید نشده' : method.kind === 'wp_title' ? 'عنوان محتوای وردپرس' : ['wp_meta_title', 'wp_meta_description', 'wp_canonical', 'wp_noindex_off'].includes(method.kind) ? 'فیلد SEO وردپرس' : 'بدنهٔ محتوای وردپرس'}</div>
         <div>نتیجهٔ مورد انتظار: {method.verify}</div>
         <div>دامنهٔ اثر: {method.impact_unknown ? 'پس از اتصال قالب و بررسی diff تعیین می‌شود' : method.affected_urls.filter(Boolean).join('، ')}</div>
         <div>اطمینان: {method.confidence === 'high' ? 'بالا' : method.confidence === 'medium' ? 'متوسط' : 'پایین'}{method.uncertain ? ' · نیازمند تأیید دوم' : ''}</div>

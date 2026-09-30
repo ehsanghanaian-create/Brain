@@ -32,3 +32,29 @@ def test_analysis_excludes_old_pages_and_non_html_responses(tmp_path):
         findings = conn.execute("SELECT problem_type,url FROM seo_problems WHERE site_id='demo'").fetchall()
     assert result["problems"] == 1
     assert [(row[0], row[1]) for row in findings] == [("orphan", target)]
+
+
+def test_paginated_archive_keeps_its_heading_without_duplicate_h1_findings(tmp_path):
+    site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
+    archive = ["https://demo.example/blog/", "https://demo.example/blog/page/2/",
+               "https://demo.example/blog/page/3/"]
+    with db(tmp_path / "seo.db") as conn:
+        ensure_site(conn, site)
+        conn.execute("INSERT INTO crawl_runs(run_id,site_id,started_at,status,notes) VALUES "
+                     "('crawl-current','demo','2026-09-30T10:00:00Z','completed','{\"scope\":\"site\"}')")
+        for n, url in enumerate(archive):
+            conn.execute("INSERT INTO pages(site_id,url,crawl_status,status_code,title,meta_description,h1,h1_count,"
+                         "canonical,indexable,word_count,images_missing_alt,in_sitemap,last_crawled,crawl_run_id) "
+                         "VALUES ('demo',?,'ok',200,?,'Useful description','[\"Articles\"]',1,?,1,500,0,1,"
+                         "'2026-09-30T10:01:00Z','crawl-current')", (url, f"Archive {n}", url))
+        run_analysis(conn, site)
+        assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='duplicate_h1'").fetchone()[0] == 0
+        other = "https://demo.example/service/"
+        conn.execute("INSERT INTO pages(site_id,url,crawl_status,status_code,title,meta_description,h1,h1_count,"
+                     "canonical,indexable,word_count,images_missing_alt,in_sitemap,last_crawled,crawl_run_id) "
+                     "VALUES ('demo',?,'ok',200,'Service','Useful description','[\"Articles\"]',1,?,1,500,0,1,"
+                     "'2026-09-30T10:01:00Z','crawl-current')", (other, other))
+        run_analysis(conn, site)
+        urls = [row[0] for row in conn.execute(
+            "SELECT url FROM seo_problems WHERE problem_type='duplicate_h1' ORDER BY url")]
+    assert urls == [archive[0], other]

@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from collections import defaultdict
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 from rapidfuzz import fuzz
 
@@ -34,6 +35,13 @@ def expected_ctr(pos: float) -> float:
         if pos <= p:
             return c
     return 0.01
+
+
+def _h1_comparison_url(url: str) -> str:
+    """Treat pages of one archive as one heading context, not competing documents."""
+    parts = urlsplit(url)
+    path = re.sub(r"/page/[2-9]\d*/?$", "/", parts.path)
+    return f"{parts.scheme}://{parts.netloc}{path.rstrip('/')}/"
 
 
 def _clear(conn, sid, run_id):
@@ -149,9 +157,15 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
             for u in urls:
                 _problem(conn, sid, "duplicate_title", "medium", u, {"title": t, "shared_with": [x for x in urls if x != u]}, run_id=run_id); counts["problems"] += 1
     for h, urls in h1s.items():
-        if len(urls) > 1:
-            for u in urls:
-                _problem(conn, sid, "duplicate_h1", "medium", u, {"h1": h, "shared_with": [x for x in urls if x != u]}, run_id=run_id); counts["problems"] += 1
+        unique_pages = {}
+        for u in urls:
+            unique_pages.setdefault(_h1_comparison_url(u), u)
+        distinct_urls = list(unique_pages.values())
+        if len(distinct_urls) > 1:
+            for u in distinct_urls:
+                _problem(conn, sid, "duplicate_h1", "medium", u,
+                         {"h1": h, "shared_with": [x for x in distinct_urls if x != u]}, run_id=run_id)
+                counts["problems"] += 1
 
     # --- GSC-driven ---------------------------------------------------------------
     qp = rows(conn, "SELECT * FROM gsc_query_page WHERE site_id=?", (sid,))

@@ -37,7 +37,8 @@ def test_analysis_excludes_old_pages_and_non_html_responses(tmp_path):
 def test_paginated_archive_keeps_its_heading_without_duplicate_h1_findings(tmp_path):
     site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
     archive = ["https://demo.example/blog/", "https://demo.example/blog/page/2/",
-               "https://demo.example/blog/page/3/"]
+               "https://demo.example/blog/page/3/", "https://demo.example/blog/page/10/",
+               "https://demo.example/blog/page/21/"]
     with db(tmp_path / "seo.db") as conn:
         ensure_site(conn, site)
         conn.execute("INSERT INTO crawl_runs(run_id,site_id,started_at,status,notes) VALUES "

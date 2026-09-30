@@ -40,7 +40,7 @@ def expected_ctr(pos: float) -> float:
 def _h1_comparison_url(url: str) -> str:
     """Treat pages of one archive as one heading context, not competing documents."""
     parts = urlsplit(url)
-    path = re.sub(r"/page/[2-9]\d*/?$", "/", unquote(parts.path))
+    path = re.sub(r"/page/(?:[2-9]|[1-9]\d+)/?$", "/", unquote(parts.path))
     return f"{parts.scheme}://{parts.netloc}{path.rstrip('/')}/"
 
 
@@ -158,7 +158,7 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
                 _problem(conn, sid, "duplicate_title", "medium", u, {"title": t, "shared_with": [x for x in urls if x != u]}, run_id=run_id); counts["problems"] += 1
     for h, urls in h1s.items():
         unique_pages = {}
-        for u in sorted(urls, key=lambda value: (bool(re.search(r"/page/[2-9]\d*/?$", urlsplit(value).path)), value)):
+        for u in sorted(urls, key=lambda value: (bool(re.search(r"/page/(?:[2-9]|[1-9]\d+)/?$", urlsplit(value).path)), value)):
             unique_pages.setdefault(_h1_comparison_url(u), u)
         aliases = {}
         for u in sorted(unique_pages.values(), key=lambda value: (by_url[value]["canonical"] != value, value)):

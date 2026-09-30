@@ -6,8 +6,8 @@ keep working unchanged. Only the way consent is obtained changes: an /authorize 
 of run_local_server(). `openid email` is added to the web consent so the UI can show which account is connected;
 the two data scopes stay exactly as before.
 
-No plaintext DB storage: the refresh token stays in the git-ignored tokens/ file (same as always); the connected
-account label (email — not a secret) sits next to it in tokens/google_account.json.
+No plaintext DB storage: the refresh token is encrypted in SecretStore, with a legacy file fallback only when
+SecretStore is unavailable. The connected account label (email — not a secret) sits in tokens/google_account.json.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import json
 import logging
 import secrets as _secrets
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -119,7 +120,7 @@ def finish(code: str, state: str | None, redirect_uri: str | None = None) -> dic
     tp.parent.mkdir(parents=True, exist_ok=True)
     email = _email_from_id_token(getattr(creds, "id_token", None))
     account_path().write_text(json.dumps({"email": email, "scopes": list(creds.scopes or []),
-                                          "connected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, ensure_ascii=False), encoding="utf-8")
+                                          "connected_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds")}, ensure_ascii=False), encoding="utf-8")
     log.info("Google account connected via web flow (token stored, git-ignored)")
     return {"connected": True, "email": email, "scopes": list(creds.scopes or [])}
 
@@ -138,7 +139,18 @@ def _email_from_id_token(id_token: str | None) -> str | None:
 
 def status() -> dict[str, Any]:
     from .service import GA4_SCOPE, _google_client_configured, _token_info
+    from ..gsc.client import get_credentials
     tok = _token_info()
+    authorization_state = "disconnected"
+    if tok.get("oauth_present"):
+        try:
+            get_credentials(interactive=False)
+            authorization_state = "valid"
+            tok = _token_info()  # an expired access token may just have been renewed
+        except (GscAuthError, ValueError, TypeError):
+            authorization_state = "needs_reconnect"
+        except RuntimeError:
+            authorization_state = "temporary_error"
     acct: dict[str, Any] = {}
     if account_path().exists():
         try:
@@ -146,7 +158,8 @@ def status() -> dict[str, Any]:
         except ValueError:
             acct = {}
     oauth_scopes = tok.get("oauth_scopes") or []
-    return {"connected": bool(tok.get("oauth_present")), "email": acct.get("email"),
+    return {"connected": authorization_state == "valid", "authorization_state": authorization_state,
+            "refresh_token_stored": bool(tok.get("oauth_present")), "email": acct.get("email"),
             "scopes": oauth_scopes, "expiry": tok.get("expiry"),
             "gsc_scope": any(s.endswith("webmasters.readonly") for s in oauth_scopes),
             "ga4_scope": GA4_SCOPE in oauth_scopes,

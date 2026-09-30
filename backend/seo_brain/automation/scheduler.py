@@ -203,12 +203,14 @@ def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> 
     if not site:
         return {"enabled": cfg["enabled"], "interval_minutes": cfg["interval_minutes"], "interval_hours": cfg["interval_hours"], "sources": {}}
     from ..connections.service import GA4_SCOPE, _google_client_configured, _token_info
+    from ..connections.service_account import sa_configured
     tok = _token_info()
-    google_ok = _google_client_configured() and tok.get("present")
+    oauth_ready = bool(_google_client_configured() and tok.get("oauth_present", tok.get("present"))
+                       and not tok.get("oauth_invalid"))
     configured = {
         "wordpress": bool(site[0]),
-        "gsc": bool(site[1] and google_ok),
-        "ga4": bool(site[2] and google_ok and GA4_SCOPE in (tok.get("scopes") or [])),
+        "gsc": bool(site[1] and tok.get("present") and (oauth_ready or sa_configured())),
+        "ga4": bool(site[2] and oauth_ready and GA4_SCOPE in (tok.get("oauth_scopes", tok.get("scopes")) or [])),
     }
     sources: dict[str, Any] = {}
     for kind, src in (("wordpress", "wordpress_pipeline"), ("gsc", "gsc_pipeline"), ("ga4", "ga4_pipeline")):

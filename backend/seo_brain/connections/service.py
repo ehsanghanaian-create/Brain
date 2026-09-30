@@ -70,7 +70,7 @@ def _google_client_configured() -> bool:
 
 def _token_info() -> dict[str, Any]:
     """Read the cached OAuth token via the shared storage helper (SecretStore-first, legacy-file fallback)."""
-    from ..gsc.client import read_token_json
+    from ..gsc.client import known_invalid_grant, read_token_json
     raw = read_token_json()
     if not raw:
         return _merge_sa({"present": False, "oauth_present": False, "scopes": [], "oauth_scopes": [],
@@ -82,7 +82,9 @@ def _token_info() -> dict[str, Any]:
                           "expiry": None, "source": None})
     oauth_scopes = list(data.get("scopes") or [])
     oauth_present = bool(data.get("refresh_token"))
-    out = {"present": oauth_present, "oauth_present": oauth_present, "scopes": oauth_scopes,
+    oauth_invalid = known_invalid_grant(raw)
+    out = {"present": oauth_present and not oauth_invalid, "oauth_present": oauth_present,
+           "oauth_invalid": oauth_invalid, "scopes": oauth_scopes,
            "oauth_scopes": oauth_scopes, "expiry": data.get("expiry"), "source": "oauth"}
     return _merge_sa(out)
 

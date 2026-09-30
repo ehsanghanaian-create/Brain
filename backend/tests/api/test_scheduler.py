@@ -126,6 +126,24 @@ def test_plan_due_logic_and_settings(env):
     assert not any(v["due"] for v in plan_for_site(eng, "s2")["sources"].values())
 
 
+def test_revoked_oauth_stops_google_sync_but_keeps_service_account_gsc(env, monkeypatch):
+    from seo_brain.connections import service
+
+    _mk_site(env["client"], "revoked", gsc_property="sc-domain:revoked.example", ga4_property="471988572")
+    monkeypatch.setattr(service, "_token_info", lambda: {
+        "present": True, "oauth_present": True, "oauth_invalid": True,
+        "scopes": [service.GSC_SCOPE, service.GA4_SCOPE],
+        "oauth_scopes": [service.GSC_SCOPE, service.GA4_SCOPE],
+    })
+    monkeypatch.setattr("seo_brain.connections.service_account.sa_configured", lambda: True)
+    sources = plan_for_site(env["eng"], "revoked")["sources"]
+    assert sources["gsc"]["due"] is True
+    assert sources["ga4"]["configured"] is False
+
+    monkeypatch.setattr("seo_brain.connections.service_account.sa_configured", lambda: False)
+    assert plan_for_site(env["eng"], "revoked")["sources"]["gsc"]["configured"] is False
+
+
 def test_tick_enqueues_existing_jobs_with_cap_and_no_duplicates(env):
     c, eng, q, ran = env["client"], env["eng"], env["q"], env["ran"]
     for sid in ("a1", "a2", "a3"):

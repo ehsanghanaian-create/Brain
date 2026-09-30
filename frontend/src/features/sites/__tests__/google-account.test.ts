@@ -34,4 +34,13 @@ describe('Google Account card helpers', () => {
     expect(v.permissions[1].granted).toBe(false);
     expect(v.hint).toContain('اتصال دوباره');
   });
+
+  it('revoked refresh grant → reconnect guidance, not connected badge', () => {
+    const v = googleAccountView({ connected: false, authorization_state: 'needs_reconnect',
+      refresh_token_stored: true, client_configured: true });
+    expect(v.state).toBe('needs_reconnect');
+    expect(v.canConnect).toBe(true);
+    expect(v.canDisconnect).toBe(true);
+    expect(v.hint).toContain('Testing');
+  });
 });

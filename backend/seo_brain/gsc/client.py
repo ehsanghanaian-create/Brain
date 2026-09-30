@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import logging
 import random
+import hashlib
+import threading
 import time
 from datetime import date, timedelta
 from pathlib import Path
@@ -54,6 +56,17 @@ def _client_config() -> dict:
 
 
 TOKEN_REF = "google-oauth-token"
+_grant_lock = threading.RLock()
+_invalid_grant_fingerprint: str | None = None
+
+
+def _fingerprint(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def known_invalid_grant(raw: str | None) -> bool:
+    """Avoid retrying a revoked grant for every site until a new token is saved."""
+    return bool(raw and _invalid_grant_fingerprint == _fingerprint(raw))
 
 
 def _store():
@@ -84,18 +97,22 @@ def read_token_json() -> str | None:
 
 def write_token_json(data: str) -> None:
     """Store the token encrypted; fall back to the legacy file only when the SecretStore is unavailable."""
+    global _invalid_grant_fingerprint
     token_path = resolve_path(env("GSC_TOKEN_PATH", "tokens/gsc_token.json"))
     try:
         _store().set(TOKEN_REF, data)
         if token_path.exists():
             token_path.unlink()
+        _invalid_grant_fingerprint = None
         return
     except Exception:  # noqa: BLE001
         token_path.parent.mkdir(parents=True, exist_ok=True)
         token_path.write_text(data, encoding="utf-8")
+        _invalid_grant_fingerprint = None
 
 
 def delete_token() -> bool:
+    global _invalid_grant_fingerprint
     removed = False
     try:
         removed = _store().delete(TOKEN_REF) or removed
@@ -105,6 +122,7 @@ def delete_token() -> bool:
     if token_path.exists():
         token_path.unlink()
         removed = True
+    _invalid_grant_fingerprint = None
     return removed
 
 
@@ -119,33 +137,39 @@ def get_gsc_credentials(interactive: bool = True):
 
 
 def get_credentials(interactive: bool = True):
+    global _invalid_grant_fingerprint
     from google.auth.exceptions import RefreshError, TransportError
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
-    creds = None
-    raw = read_token_json()
-    if raw:
-        import json as _json
-        creds = Credentials.from_authorized_user_info(_json.loads(raw), SCOPES)
-    if creds and creds.valid:
-        return creds
-    if creds and creds.expired and creds.refresh_token:
-        for attempt in range(3):
-            try:
-                creds.refresh(Request())
-            except (RefreshError, TransportError) as exc:
-                retryable = isinstance(exc, TransportError) or getattr(exc, "retryable", False)
-                if not retryable:
-                    raise GscAuthError("Google authorization is no longer valid; reconnect the Google account in the connection center") from exc
-                if attempt == 2:
-                    # A network outage is not revoked consent. Keep the stored grant
-                    # and let the next sync retry without asking for another login.
-                    raise RuntimeError("Google token refresh temporarily unavailable; stored authorization retained; retry later") from exc
-                log.warning("Google token refresh temporarily failed; retry %s/2", attempt + 1)
-                time.sleep(2 ** attempt)
-                continue
-            write_token_json(creds.to_json())
+    with _grant_lock:
+        creds = None
+        raw = read_token_json()
+        if raw:
+            creds = Credentials.from_authorized_user_info(json.loads(raw), SCOPES)
+        if creds and creds.valid:
             return creds
+        if creds and creds.expired and creds.refresh_token:
+            if known_invalid_grant(raw):
+                raise GscAuthError("Google authorization is no longer valid; reconnect the Google account in the connection center")
+            for attempt in range(3):
+                try:
+                    creds.refresh(Request())
+                except (RefreshError, TransportError) as exc:
+                    retryable = isinstance(exc, TransportError) or getattr(exc, "retryable", False)
+                    if not retryable:
+                        detail = exc.args[1] if len(exc.args) > 1 and isinstance(exc.args[1], dict) else {}
+                        if detail.get("error") == "invalid_grant" and raw:
+                            _invalid_grant_fingerprint = _fingerprint(raw)
+                        raise GscAuthError("Google authorization is no longer valid; reconnect the Google account in the connection center") from exc
+                    if attempt == 2:
+                        # A network outage is not revoked consent. Keep the stored grant
+                        # and let the next sync retry without asking for another login.
+                        raise RuntimeError("Google token refresh temporarily unavailable; stored authorization retained; retry later") from exc
+                    log.warning("Google token refresh temporarily failed; retry %s/2", attempt + 1)
+                    time.sleep(2 ** attempt)
+                    continue
+                write_token_json(creds.to_json())
+                return creds
     _client_config()  # raises a precise error if the OAuth client is not configured
     if not interactive:
         raise GscAuthError("no valid GSC token; run: python scripts/sync-gsc.py --auth-only")

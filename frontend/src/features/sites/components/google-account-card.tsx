@@ -19,6 +19,8 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
   const [busy, setBusy] = useState(false);
   const [awaiting, setAwaiting] = useState(false);
   const deadline = useRef<number>(0);
+  const awaitingRef = useRef(false);
+  const previousConnection = useRef<string | null>(null);
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -26,14 +28,13 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
   const load = useCallback(async () => {
     try {
       const s = await endpoints.googleStatus();
-      setStatus((prev) => {
-        if (prev && !prev.connected && s.connected) {
-          toast.success(`حساب گوگل متصل شد${s.email ? ` — ${s.email}` : ''}`);
-          setAwaiting(false);
-          onChange?.();
-        }
-        return s;
-      });
+      setStatus(s);
+      if (awaitingRef.current && s.connected && s.connected_at !== previousConnection.current) {
+        awaitingRef.current = false;
+        setAwaiting(false);
+        toast.success(`حساب گوگل متصل شد${s.email ? ` — ${s.email}` : ''}`);
+        onChange?.();
+      }
       return s;
     } catch {
       return null;
@@ -45,8 +46,9 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
   // while the consent tab is open, poll until the callback lands — at most 2 minutes, then give up cleanly
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
-    if (awaiting && !status?.connected) {
+    if (awaiting) {
       if (Date.now() > deadline.current) {
+        awaitingRef.current = false;
         setAwaiting(false);
         toast.error('زمان تأیید گوگل تمام شد — دوباره «اتصال حساب گوگل» را بزنید');
       } else {
@@ -59,14 +61,20 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
   const view = googleAccountView(status, { busy });
 
   async function connect() {
+    const tab = window.open('about:blank', '_blank');
+    if (!tab) { toast.error('باز شدن پنجرهٔ Google مسدود شد؛ اجازهٔ Pop-up را برای پنل فعال کنید.'); return; }
+    tab.opener = null;
     setBusy(true);
     try {
       const r = await endpoints.googleAuthorize();
-      window.open(r.url, '_blank', 'noopener');
+      tab.location.replace(r.url);
       deadline.current = Date.now() + 120_000;
+      previousConnection.current = status?.connected_at ?? null;
+      awaitingRef.current = true;
       setAwaiting(true);
       toast.info('در پنجرهٔ بازشده با حساب گوگل خود وارد شوید و هر دو دسترسی را تأیید کنید');
     } catch (e) {
+      tab.close();
       toast.error(e instanceof ApiError ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -107,8 +115,9 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
     <IntegrationCard
       kind='google-account'
       title='حساب گوگل'
-      badge={view.state === 'connected' ? 'متصل' : view.state === 'no_client' ? 'پیکربندی ناقص' : 'متصل نیست'}
-      badgeVariant={view.state === 'connected' ? 'secondary' : view.state === 'no_client' ? 'destructive' : 'outline'}
+      badge={view.state === 'connected' ? 'متصل' : view.state === 'needs_reconnect' ? 'نیازمند اتصال دوباره'
+        : view.state === 'temporary_error' ? 'خطای موقت' : view.state === 'no_client' ? 'پیکربندی ناقص' : 'متصل نیست'}
+      badgeVariant={view.state === 'connected' ? 'secondary' : ['no_client', 'needs_reconnect'].includes(view.state) ? 'destructive' : 'outline'}
       description='یک ورود گوگل برای Search Console و Google Analytics — هر دو فقط‌خواندنی. توکن فقط روی همین سیستم و خارج از دیتابیس نگه‌داری می‌شود.'
     >
       {view.state === 'connected' ? (
@@ -116,7 +125,7 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
           <div className='flex flex-wrap items-center gap-2'>
             <span className='text-muted-foreground'>حساب:</span>
             <Badge variant='outline' dir='ltr'>{view.email ?? 'ایمیل نامشخص (اتصال قدیمی از CLI)'}</Badge>
-            {!simple && status?.expiry && <span className='text-muted-foreground text-xs' dir='ltr'>expiry: {status.expiry}</span>}
+            {!simple && status?.expiry && <span className='text-muted-foreground text-xs'>زمان تمدید خودکار توکن: <span dir='ltr'>{status.expiry}</span></span>}
           </div>
           <div className='flex flex-wrap items-center gap-2 text-xs'>
             <span className='text-muted-foreground'>دسترسی‌ها:</span>
@@ -131,6 +140,14 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
         </div>
       ) : (
         <div className='grid gap-2' data-testid='google-disconnected'>
+          {view.state === 'needs_reconnect' && (
+            <div className='rounded-md border border-amber-500 p-3 text-xs'>
+              {status?.email && <p>حساب قبلی: {status.email}</p>}
+              <p>مجوز ذخیره‌شده دیگر توسط Google پذیرفته نمی‌شود. در پروژهٔ مربوط به Client ID ‏{status?.client_id_hint ?? 'فعلی'}، وضعیت برنامه را بررسی کنید.</p>
+              <a className='text-primary underline' href='https://console.cloud.google.com/auth/audience' target='_blank' rel='noreferrer'>باز کردن Google Auth Platform → Audience</a>
+            </div>
+          )}
+          {view.state === 'temporary_error' && <Button type='button' size='sm' variant='outline' className='w-fit' onClick={() => void load()}>بررسی دوبارهٔ اتصال</Button>}
           {view.state === 'no_client' && simple && (
             <p className='text-muted-foreground rounded-md border border-dashed p-3 text-xs'>
               راه‌اندازی اولیهٔ گوگل هنوز توسط مدیر انجام نشده است — از صفحهٔ هر سایت، بخش «حساب گوگل»، یک‌بار انجام می‌شود.
@@ -146,12 +163,12 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
           )}
           <div className='flex flex-wrap gap-2'>
             <Button type='button' size='sm' disabled={!view.canConnect || awaiting} onClick={() => void connect()} data-testid='google-connect'>
-              {awaiting ? 'در انتظار تأیید در گوگل…' : 'اتصال حساب گوگل'}
+              {awaiting ? 'در انتظار تأیید در گوگل…' : view.state === 'needs_reconnect' ? 'اتصال دوبارهٔ حساب گوگل' : 'اتصال حساب گوگل'}
             </Button>
             {awaiting && (
               <>
                 <Button type='button' size='sm' variant='ghost' onClick={() => void load()}>بررسی وضعیت</Button>
-                <Button type='button' size='sm' variant='outline' onClick={() => setAwaiting(false)} data-testid='google-cancel'>انصراف</Button>
+                <Button type='button' size='sm' variant='outline' onClick={() => { awaitingRef.current = false; setAwaiting(false); }} data-testid='google-cancel'>انصراف</Button>
               </>
             )}
           </div>

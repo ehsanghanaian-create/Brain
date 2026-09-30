@@ -11,7 +11,7 @@ import { IntegrationCard } from './integration-card';
 
 /**
  * Google Account card — the web replacement for `sync-gsc.py --auth-only`.
- * «اتصال حساب گوگل» opens Google's consent in a new tab (web OAuth flow); the card polls status until the
+ * «اتصال حساب گوگل» opens Google's account chooser in a new tab (web OAuth flow); the card polls status until the
  * callback stores the token, then GSC/GA4 property discovery works immediately. Token stays server-side.
  */
 export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () => void; simple?: boolean }) {
@@ -44,20 +44,37 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
 
   useEffect(() => { void load(); }, [load]);
 
-  // while the consent tab is open, poll until the callback lands — at most 2 minutes, then give up cleanly
+  // Allow time for account selection, password entry, and 2FA; match the server's 15-minute OAuth state lifetime.
   useEffect(() => {
-    if (timer.current) clearTimeout(timer.current);
-    if (awaiting) {
+    if (!awaiting) return;
+    let cancelled = false;
+    const check = async () => {
       if (Date.now() > deadline.current) {
         awaitingRef.current = false;
         setAwaiting(false);
         toast.error('زمان تأیید گوگل تمام شد — دوباره «اتصال حساب گوگل» را بزنید');
-      } else {
-        timer.current = setTimeout(() => { void load(); }, 3000);
+        return;
       }
-    }
-    return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [awaiting, status, load]);
+      await load();
+      if (!cancelled && awaitingRef.current) timer.current = setTimeout(() => { void check(); }, 5000);
+    };
+    timer.current = setTimeout(() => { void check(); }, 5000);
+    return () => { cancelled = true; if (timer.current) clearTimeout(timer.current); };
+  }, [awaiting, load]);
+
+  useEffect(() => {
+    if (!awaiting || typeof BroadcastChannel === 'undefined') return;
+    const channel = new BroadcastChannel('seo-brain-google-oauth');
+    channel.onmessage = (event: MessageEvent<{ result?: string }>) => {
+      if (event.data?.result === 'success') void load();
+      if (event.data?.result === 'error') {
+        awaitingRef.current = false;
+        setAwaiting(false);
+        toast.error('اتصال گوگل کامل نشد. نتیجه را در پنجرهٔ گوگل ببینید و دوباره تلاش کنید.');
+      }
+    };
+    return () => channel.close();
+  }, [awaiting, load]);
 
   const view = googleAccountView(status, { busy });
 
@@ -69,11 +86,11 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
     try {
       const r = await endpoints.googleAuthorize();
       tab.location.replace(r.url);
-      deadline.current = Date.now() + 120_000;
+      deadline.current = Date.now() + 900_000;
       previousConnection.current = status?.connected_at ?? null;
       awaitingRef.current = true;
       setAwaiting(true);
-      toast.info('در پنجرهٔ بازشده با حساب گوگل خود وارد شوید و دسترسی‌های نمایش‌داده‌شده را بررسی و تأیید کنید');
+      toast.info('حساب موردنظر را در صفحهٔ رسمی گوگل انتخاب کنید؛ اگر لازم بود همان‌جا وارد شوید و دسترسی‌ها را تأیید کنید');
     } catch (e) {
       tab.close();
       toast.error(e instanceof ApiError ? e.message : String(e));
@@ -139,6 +156,7 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
             <Button type='button' size='sm' variant='outline' disabled={busy} onClick={() => void connect()}>اتصال دوباره</Button>
             <Button type='button' size='sm' variant='destructive' disabled={!view.canDisconnect} onClick={() => void disconnect()} data-testid='google-disconnect'>قطع اتصال</Button>
           </div>
+          <p className='text-muted-foreground text-xs'>برای تغییر حساب، «اتصال دوباره» را بزنید و حساب دیگری را در گوگل انتخاب کنید.</p>
         </div>
       ) : (
         <div className='grid gap-2' data-testid='google-disconnected'>
@@ -166,6 +184,7 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
               </>
             )}
           </div>
+          <p className='text-muted-foreground text-xs'>حساب را در صفحهٔ رسمی گوگل انتخاب می‌کنید. رمز گوگل فقط همان‌جا وارد می‌شود و به SEO Brain داده نمی‌شود.</p>
         </div>
       )}
       {!simple && view.state !== 'no_client' && (

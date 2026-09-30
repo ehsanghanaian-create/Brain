@@ -26,7 +26,7 @@ from ..gsc.client import SCOPES, GscAuthError, _client_config, delete_token, rea
 log = logging.getLogger("google.oauth")
 
 WEB_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email", *SCOPES]
-_STATE_TTL = 600
+_STATE_TTL = 900
 _states: dict[str, dict[str, Any]] = {}
 
 
@@ -98,7 +98,10 @@ def begin(redirect_uri: str | None = None) -> dict[str, Any]:
     _load_states()
     for k in [k for k, record in _states.items() if float(record.get("expires_at", 0)) < now]:
         _states.pop(k, None)
-    url, _ = flow.authorization_url(access_type="offline", prompt="consent", include_granted_scopes="true", state=state)
+    # Let the operator choose the Google account explicitly. Re-consent is needed
+    # for an offline refresh token; omitting incremental authorization keeps old
+    # project grants (such as the retired Ads scope) out of the new token.
+    url, _ = flow.authorization_url(access_type="offline", prompt="select_account consent", state=state)
     # google-auth-oauthlib generates a PKCE verifier during authorization_url().
     # The callback creates a fresh Flow, so the verifier must survive that boundary;
     # otherwise Google correctly rejects the code exchange with invalid_grant.

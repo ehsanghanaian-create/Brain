@@ -168,8 +168,14 @@ class WordPressSyncOrchestrator:
             self._persist(st)
             if stage == "full":
                 self._step(st, "resolve", lambda: self._resolve(site_id))
-                self._wordpress_steps(st, site_id)
-                self._step(st, "category_intelligence", lambda: self._category_intelligence(site_id))
+                try:
+                    self._wordpress_steps(st, site_id)
+                except Exception:
+                    # Public crawling can still collect current SEO evidence when
+                    # the WordPress REST endpoint is unavailable or times out.
+                    self._mark(st, "category_intelligence", "skipped", {"reason": "wordpress sync failed"})
+                else:
+                    self._step(st, "category_intelligence", lambda: self._category_intelligence(site_id))
                 if crawl:
                     self._step(st, "crawl", lambda: self._crawl(site_id, max_urls))
                 else:

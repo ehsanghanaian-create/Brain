@@ -384,7 +384,8 @@ class AtriaAdapter(OpenAICompatAdapter):
 
     def test_connection(self) -> dict:
         try:
-            self.complete(AIRequest(model=self.list_models()[0], messages=[AIMessage(role="user", content="Reply OK")], max_tokens=8, temperature=0))
+            # Dawn may spend the first tokens on reasoning before producing visible content.
+            self.complete(AIRequest(model=self.list_models()[0], messages=[AIMessage(role="user", content="Reply OK")], max_tokens=256, temperature=0))
         except ProviderError as exc:
             return {"ok": False, "provider": self.name, "error": str(exc), "retryable": exc.retryable}
         return {"ok": True, "provider": self.name, "models": self.list_models()}

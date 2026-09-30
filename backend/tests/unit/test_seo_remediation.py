@@ -43,6 +43,7 @@ def test_atria_uses_documented_completion_without_models_or_json_mode():
     assert all(str(c.url) == "https://api.atria-asi.ai/v1/chat/completions" for c in calls)
     assert all(c.headers["authorization"] == "Bearer secret-test" for c in calls)
     assert all("response_format" not in json.loads(c.content) for c in calls)
+    assert json.loads(calls[0].content)["max_tokens"] == 256
 
 
 def test_atria_retries_retry_after_and_rejects_invalid_reply(monkeypatch):

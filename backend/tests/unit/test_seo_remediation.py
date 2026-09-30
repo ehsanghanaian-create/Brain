@@ -24,6 +24,36 @@ def test_all_analysis_problem_types_have_two_bounded_methods():
     assert RECOMMENDED_ROUTES["atria"] == {"seo_remediation": ("Atria-Dawn-Preview", None)}
 
 
+@pytest.mark.parametrize(("problem_type", "rendered"), [
+    ("missing_h1", {"h1": ["Current heading"]}),
+    ("multiple_h1", {"h1": ["Only heading"]}),
+    ("missing_meta_description", {"description": "Current description"}),
+    ("missing_canonical", {"canonical": "https://example.com/a"}),
+    ("images_missing_alt", {"images_missing_alt": 0}),
+    ("thin_content", {"word_count": 862}),
+])
+def test_live_resolved_issue_stops_before_atria(problem_type, rendered):
+    with pytest.raises(RemediationError) as exc:
+        RemediationService._require_live_issue({"problem_type": problem_type}, {"status": 200, **rendered})
+    assert exc.value.code == "issue_already_resolved"
+
+
+def test_orphan_uses_related_wordpress_source_when_link_suggestions_are_empty(service):
+    source = "https://pilot.example/jac-guide"
+    target = "https://pilot.example/jac-j3"
+    with service.engine.begin() as cx:
+        cx.execute(text("INSERT INTO seo_problems(site_id,problem_type,severity,url,related_url,detail) "
+                        "VALUES ('gearboxemdad','orphan','high',:target,'','{}')"), {"target": target})
+        cx.execute(text("INSERT INTO pages(site_id,url,status_code,title,images) "
+                        "VALUES ('gearboxemdad',:target,200,'امداد جک J3','[]')"), {"target": target})
+        cx.execute(text("INSERT INTO posts(site_id,wp_id,type,url,title,content_html,modified_gmt) "
+                        "VALUES ('gearboxemdad',8,'post',:source,'راهنمای جک',:body,'2026-09-01T00:00:00')"),
+                   {"source": source, "body": "<p>" + ("راهنمای سرویس جک برای کاربران. " * 20) + "</p>"})
+    issue = service._issue("gearboxemdad", issue_key("gearboxemdad", "orphan", target))
+    candidates = service._evidence("gearboxemdad", issue)["link_candidates"]
+    assert [candidate["source_url"] for candidate in candidates] == [source]
+
+
 def test_atria_uses_documented_completion_without_models_or_json_mode():
     calls = []
 

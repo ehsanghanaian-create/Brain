@@ -146,6 +146,30 @@ class RemediationService:
                 alternatives = cx.execute(text("SELECT o.url source_url, '' anchor, p.wp_id, p.type, p.slug, p.title, p.content_html, p.modified_gmt FROM seo_opportunities o JOIN posts p ON p.site_id=o.site_id AND p.url=o.url WHERE o.site_id=:s AND o.opp_type='internal_link' AND o.related_url=:u ORDER BY o.score DESC LIMIT 5"), {"s": site_id, "u": url}).mappings().all()
                 seen = {c["source_url"] for c in candidates}
                 candidates = list(candidates) + [c for c in alternatives if c["source_url"] not in seen][:5 - len(candidates)]
+            if len(candidates) < 5 and issue["problem_type"] in {"orphan", "no_body_inbound_links", "low_inbound_links"}:
+                # Link suggestions may be absent even with a complete crawl. Find
+                # WordPress sources whose titles share meaningful topic terms;
+                # the model must still select an exact phrase already in a source.
+                topic = (post or {}).get("title") if post else None
+                topic = topic or (page or {}).get("title") or ""
+                stop = {"برای", "امداد", "خودرو", "خدمات", "تهران", "ایران", "صفحه", "سایت", "کامل", "بررسی", "های", "در", "با", "از"}
+                terms = {w for w in re.findall(r"[^\W_]+", str(topic).replace("ي", "ی").replace("ك", "ک").lower())
+                         if len(w) >= 2 and w not in stop}
+                if terms:
+                    rows = cx.execute(text("SELECT url source_url, wp_id, type, slug, title, content_html, modified_gmt "
+                                           "FROM posts WHERE site_id=:s AND url<>:u AND content_html IS NOT NULL "
+                                           "AND length(content_html)>400 LIMIT 1000"), {"s": site_id, "u": url}).mappings().all()
+                    seen = {c["source_url"] for c in candidates}
+                    ranked = []
+                    for row in rows:
+                        if row["source_url"] in seen or url in (row["content_html"] or ""):
+                            continue
+                        title_terms = set(re.findall(r"[^\W_]+", str(row["title"] or "").replace("ي", "ی").replace("ك", "ک").lower()))
+                        overlap = terms & title_terms
+                        if overlap:
+                            ranked.append((len(overlap), len(row["content_html"] or ""), dict(row)))
+                    ranked.sort(key=lambda item: (-item[0], -item[1], item[2]["source_url"]))
+                    candidates = list(candidates) + [item[2] | {"anchor": ""} for item in ranked[:5 - len(candidates)]]
         safe_post = dict(post) if post else None
         if safe_post:
             safe_post["content_html"] = (safe_post.get("content_html") or "")[:14000]
@@ -162,6 +186,23 @@ class RemediationService:
                 "link_candidates": [{**dict(c), "content_html": (c["content_html"] or "")[:7000]} for c in candidates],
                 "playbook_version": VERSION}
 
+    @staticmethod
+    def _require_live_issue(issue: dict, rendered: dict) -> None:
+        """Do not spend an AI call or propose a write for a resolved crawl artifact."""
+        if rendered.get("error"):
+            raise RemediationError("verification_unreachable", "صفحهٔ زنده برای بررسی در دسترس نیست؛ بعداً دوباره تلاش کنید.", 502)
+        if rendered.get("status") != 200:
+            raise RemediationError("issue_stale", "صفحهٔ زنده پاسخ ۲۰۰ نمی‌دهد؛ خزش را تازه کنید.")
+        kind = issue["problem_type"]
+        stale = ((kind == "missing_h1" and bool(rendered.get("h1")))
+                 or (kind == "multiple_h1" and len(rendered.get("h1") or []) < 2)
+                 or (kind == "missing_meta_description" and bool(rendered.get("description")))
+                 or (kind == "missing_canonical" and bool(rendered.get("canonical")))
+                 or (kind == "images_missing_alt" and int(rendered.get("images_missing_alt") or 0) == 0)
+                 or (kind == "thin_content" and int(rendered.get("word_count") or 0) >= 300))
+        if stale:
+            raise RemediationError("issue_already_resolved", "این مشکل در صفحهٔ زنده دیگر دیده نمی‌شود؛ خزش و فهرست مشکلات را تازه کنید.")
+
     def _atria(self, site_id: str, evidence: dict, templates: list[dict]) -> dict[str, dict]:
         if self.gateway is None:
             raise RemediationError("atria_unavailable", "درگاه Atria آماده نیست.")
@@ -172,17 +213,32 @@ class RemediationService:
         if not provider or provider.kind != "atria" or not provider.enabled or not cfg.api_key(provider):
             raise RemediationError("atria_not_connected", "ابتدا کلید Atria و مسیر seo_remediation را در تنظیمات مدل‌ها ثبت کنید.")
         allowed = [{"id": m["id"], "kind": m["kind"], "title": m["title"]} for m in templates]
+        problem_type = evidence["issue"]["problem_type"]
+        # Keep the full snapshot for concurrency checks, but send only evidence
+        # relevant to this issue. A long unrelated link list can consume the
+        # model's answer budget before it emits any visible JSON.
+        model_evidence = dict(evidence)
+        if problem_type != "high_outbound_links":
+            model_evidence.pop("outbound_links", None)
+        if problem_type not in {"orphan", "no_body_inbound_links", "low_inbound_links"}:
+            model_evidence.pop("link_candidates", None)
+        else:
+            model_evidence["link_candidates"] = [dict(candidate, content_html=(candidate.get("content_html") or "")[:2500])
+                                                 for candidate in model_evidence.get("link_candidates", [])]
+        if model_evidence.get("post"):
+            model_evidence["post"] = dict(model_evidence["post"])
+            model_evidence["post"]["content_html"] = (model_evidence["post"].get("content_html") or "")[:8000]
         prompt = ("برای هر روش مجاز، مقدار پیشنهادی و دلیل کوتاه بده. فقط JSON با کلید methods برگردان. "
                   "هر عضو: id، value، reason، confidence (high|medium|low)، uncertain، uncertainty_reason، source_url، href، alt_updates. "
                   "روش جدید یا دستور اجرایی تولید نکن. ادعای تجاری بدون شاهد نساز. برای لینک، source_url فقط از link_candidates و "
                   "value عبارت دقیقِ موجود در متن همان منبع باشد. برای alt فقط از شواهد متنی استفاده کن؛ اگر تصویر نامعلوم است uncertain=true. "
                   "برای wp_image_alt فهرست alt_updates با src و alt بده؛ alt خالی فقط با decorative=true برای تصویر تزئینی. برای wp_remove_link href واقعی خروجی صفحه را بده. "
                   "برای frontend فقط شرح تغییر در value بده. اگر داده کافی نیست value را خالی و uncertain=true بگذار.\n"
-                  + json.dumps({"evidence": evidence, "roadmap": ROADMAPS[evidence["issue"]["problem_type"]], "allowed_methods": allowed}, ensure_ascii=False, default=str))
+                  + json.dumps({"evidence": model_evidence, "roadmap": ROADMAPS[problem_type], "allowed_methods": allowed}, ensure_ascii=False, default=str))
         task = AITask(kind=TaskKind.SEO_REMEDIATION, site_id=site_id,
                       messages=[AIMessage("system", "شما پیشنهاددهندهٔ اصلاح SEO هستید؛ خروجی شما فقط داده است و هرگز مجوز اجرای مستقیم ندارد."), AIMessage("user", prompt)],
                       json_schema={"type": "object", "required": ["methods"], "properties": {"methods": {"type": "array"}}},
-                      max_tokens=6144 if evidence["issue"]["problem_type"] == "thin_content" else 4096,
+                      max_tokens=8192,
                       temperature=0)
         try:
             result = self.gateway.run(task, [RouteStep(provider.name, route.get("model") or provider.default_model or "Atria-Dawn-Preview", "explicit remediation")],
@@ -198,6 +254,7 @@ class RemediationService:
     def propose(self, site_id: str, key: str) -> dict:
         issue = self._issue(site_id, key)
         evidence = self._evidence(site_id, issue)
+        self._require_live_issue(issue, evidence.get("rendered") or {})
         templates = methods_for(issue["problem_type"])
         if not templates:
             raise RemediationError("unsupported_problem", "برای این نوع مشکل روش تعریف نشده است.", 422)
@@ -233,7 +290,8 @@ class RemediationService:
             if site_id != PILOT_SITE and kind.startswith("wp_") and kind not in WP_CONTENT_KINDS:
                 owner = "unverified"
             if kind == "frontend":
-                available, reason = False, "اتصال انتشار نسخه‌دار قالب Next.js هنوز در SEO Brain ثبت نشده است. پیشنهاد نگهداری شد. " + reason
+                label = "قالب Next.js" if site_id == PILOT_SITE else "قالب سایت"
+                available, reason = False, f"اتصال انتشار نسخه‌دار {label} هنوز در SEO Brain ثبت نشده است. پیشنهاد نگهداری شد. " + reason
             elif owner == "frontend":
                 available, reason = False, "این خروجی در قالب Next.js ساخته می‌شود و تغییر فیلد وردپرس آن را اصلاح نمی‌کند. پیشنهاد نگهداری شد. " + reason
             elif owner == "unverified":
@@ -595,7 +653,12 @@ class RemediationService:
                 "links": [a.get("href") for a in soup.find_all("a", href=True)],
                 "images": [{"src": img.get("src", ""), "alt": img.get("alt")} for img in soup.find_all("img")],
                 "images_missing_alt": len([img for img in soup.find_all("img") if not img.has_attr("alt")]),
-                "word_count": len(soup.get_text(" ", strip=True).split())}
+                "word_count": 0}
+        body = soup.body or soup
+        main = body.find("main") or body.find("article") or body
+        for tag in main.find_all(["script", "style", "noscript", "template", "svg"]):
+            tag.decompose()
+        result["word_count"] = len(re.sub(r"\s+", " ", main.get_text(" ")).strip().split())
         if include_body:
             result["_body_text"] = soup.get_text(" ", strip=True)[:100000]
         return result

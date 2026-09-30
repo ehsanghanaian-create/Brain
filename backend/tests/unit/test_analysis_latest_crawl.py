@@ -1,7 +1,14 @@
 """A fresh full crawl must not report retained pages from older snapshots."""
 from seo_brain.analysis.seo import run_analysis
 from seo_brain.common.config import SiteConfig
+from seo_brain.crawler.parser import parse_html
 from seo_brain.database.db import db, ensure_site
+
+
+def test_parser_counts_main_outside_malformed_body():
+    html = "<html><body></body><main><h1>Current page</h1><p>Useful text for readers</p></main></html>"
+    parsed = parse_html(html, "https://demo.example/")
+    assert parsed.word_count == 6
 
 
 def test_analysis_excludes_old_pages_and_non_html_responses(tmp_path):

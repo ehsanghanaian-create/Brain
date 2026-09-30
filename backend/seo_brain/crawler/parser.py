@@ -137,8 +137,10 @@ def parse_html(html: str, base_url: str) -> ParsedPage:
     # visible text + hash (strip boilerplate tags)
     for t in soup(["script", "style", "noscript", "template", "svg"]):
         t.decompose()
-    body = soup.body or soup
-    main = body.find("main") or body.find("article") or body
+    # Some WordPress themes emit <main> after an accidentally closed <body>.
+    # BeautifulSoup retains the content, but body.find("main") misses it and
+    # incorrectly marks every page as zero-word thin content.
+    main = soup.find("main") or soup.find("article") or soup.body or soup
     text = _clean(main.get_text(" "))
     p.text = text
     p.word_count = len(text.split())

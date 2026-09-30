@@ -656,8 +656,7 @@ class RemediationService:
                 "images": [{"src": img.get("src", ""), "alt": img.get("alt")} for img in soup.find_all("img")],
                 "images_missing_alt": len([img for img in soup.find_all("img") if not img.has_attr("alt")]),
                 "word_count": 0}
-        body = soup.body or soup
-        main = body.find("main") or body.find("article") or body
+        main = soup.find("main") or soup.find("article") or soup.body or soup
         for tag in main.find_all(["script", "style", "noscript", "template", "svg"]):
             tag.decompose()
         result["word_count"] = len(re.sub(r"\s+", " ", main.get_text(" ")).strip().split())

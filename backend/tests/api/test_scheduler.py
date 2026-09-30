@@ -33,6 +33,9 @@ def test_full_crawl_limit_expands_past_old_twenty_page_cap(env):
                    {"notes": json.dumps({"scope": "targeted", "queue_remaining": 0})})
     assert latest_site_crawl(env["eng"], "large")["status"] == "completed_capped"
     assert full_crawl_limit(env["eng"], "large") >= 1050
+    _seed_success(env["eng"], "large", "wordpress_pipeline", hours_ago=1)
+    save_auto_sync_settings(env["eng"], "large", interval_hours=24)
+    assert plan_for_site(env["eng"], "large")["sources"]["wordpress"]["due"] is True
 from seo_brain.db.engine import make_engine
 from seo_brain.db.migrate import migrate
 from seo_brain.gsc.pipeline import GscPipeline

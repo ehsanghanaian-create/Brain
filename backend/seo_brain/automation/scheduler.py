@@ -39,6 +39,7 @@ RETRY_AFTER_MINUTES = 60          # one gentle retry per hour for transient fail
 MAX_CONSECUTIVE_FAILURES = 3      # …then back off to the normal interval (not_authorized is never retried)
 MIN_FULL_CRAWL_URLS = 200
 MAX_FULL_CRAWL_URLS = 2000
+CAPPED_RECRAWL_MINUTES = 10
 
 
 def _utcnow() -> datetime:
@@ -224,6 +225,11 @@ def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> 
             delay = RETRY_AFTER_MINUTES if streak < MAX_CONSECUTIVE_FAILURES else cfg["interval_minutes"]
             retry_at = latest_started + timedelta(minutes=delay)
             nxt = retry_at if streak < MAX_CONSECUTIVE_FAILURES else max(nxt, retry_at)
+        if kind == "wordpress" and last and latest_status in OK_STATUSES:
+            crawl = latest_site_crawl(engine, site_id)
+            if (crawl and crawl["status"] == "completed_capped"
+                    and int(crawl["max_urls"] or 0) < MAX_FULL_CRAWL_URLS):
+                nxt = min(nxt, last + timedelta(minutes=CAPPED_RECRAWL_MINUTES))
         sources[kind] = {"configured": configured[kind], "last_success": _iso(last) if last else None,
                          "blocked_reason": "not_authorized" if blocked else None,
                          "next_at": _iso(nxt) if (cfg["enabled"] and configured[kind] and not blocked) else None,

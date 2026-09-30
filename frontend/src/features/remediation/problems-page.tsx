@@ -22,7 +22,7 @@ const labels: Record<string, string> = {
   thin_content: 'محتوای کم', redirect_in_sitemap: 'ریدایرکت در سایت‌مپ'
 };
 const categoryLabels: Record<string, string> = {
-  links: 'لینک‌های داخلی', headings_metadata: 'تیترها و متادیتا', content_media: 'محتوا و تصاویر',
+  links: 'لینک‌ها', headings_metadata: 'تیترها و متادیتا', content_media: 'محتوا و تصاویر',
   indexing_sitemap: 'ایندکس و سایت‌مپ', other: 'سایر مشکلات'
 };
 

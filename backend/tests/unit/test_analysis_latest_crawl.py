@@ -11,6 +11,22 @@ def test_parser_counts_main_outside_malformed_body():
     assert parsed.word_count == 6
 
 
+def test_noindex_page_does_not_require_canonical_or_meta_description(tmp_path):
+    site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
+    with db(tmp_path / "seo.db") as conn:
+        ensure_site(conn, site)
+        conn.execute("INSERT INTO crawl_runs(run_id,site_id,started_at,status,notes) VALUES "
+                     "('crawl-current','demo','2026-09-30T10:00:00Z','completed','{\"scope\":\"site\"}')")
+        conn.execute("INSERT INTO pages(site_id,url,crawl_status,status_code,title,h1,h1_count,indexable,"
+                     "indexability_reason,word_count,images_missing_alt,in_sitemap,last_crawled,crawl_run_id) "
+                     "VALUES ('demo','https://demo.example/tag/cars/','ok',200,'Cars','[\"Cars\"]',1,0,"
+                     "'noindex',100,0,0,'2026-09-30T10:01:00Z','crawl-current')")
+        run_analysis(conn, site)
+        findings = {row[0] for row in conn.execute("SELECT problem_type FROM seo_problems")}
+    assert "missing_canonical" not in findings
+    assert "missing_meta_description" not in findings
+
+
 def test_analysis_excludes_old_pages_and_non_html_responses(tmp_path):
     site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
     with db(tmp_path / "seo.db") as conn:

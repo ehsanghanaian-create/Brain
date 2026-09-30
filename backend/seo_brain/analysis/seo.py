@@ -153,9 +153,9 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
             _problem(conn, sid, "missing_h1", "high" if p["indexable"] else "low", u, {"title": p["title"]}, run_id=run_id); counts["problems"] += 1
         elif p["h1_count"] > 1:
             _problem(conn, sid, "multiple_h1", "medium", u, {"h1_count": p["h1_count"], "h1": h1[:10]}, run_id=run_id); counts["problems"] += 1
-        if not p["canonical"]:
+        if p["indexable"] == 1 and not p["canonical"]:
             _problem(conn, sid, "missing_canonical", "medium", u, {}, run_id=run_id); counts["problems"] += 1
-        if not p["meta_description"]:
+        if p["indexable"] == 1 and not p["meta_description"]:
             _problem(conn, sid, "missing_meta_description", "low", u, {"title": p["title"]}, run_id=run_id); counts["problems"] += 1
         if p["indexable"] == 0 and (p["in_sitemap"] or len(inbound_all[u]) >= 3):
             _problem(conn, sid, "important_non_indexable", "high", u, {"reason": p["indexability_reason"], "in_sitemap": p["in_sitemap"],

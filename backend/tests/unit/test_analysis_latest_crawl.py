@@ -58,3 +58,24 @@ def test_paginated_archive_keeps_its_heading_without_duplicate_h1_findings(tmp_p
         urls = [row[0] for row in conn.execute(
             "SELECT url FROM seo_problems WHERE problem_type='duplicate_h1' ORDER BY url")]
     assert urls == [archive[0], other]
+
+
+def test_canonical_alias_with_identical_content_is_not_a_second_heading_problem(tmp_path):
+    site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
+    primary = "https://demo.example/service/"
+    alias = "https://demo.example/old-service/"
+    different = "https://demo.example/other-service/"
+    with db(tmp_path / "seo.db") as conn:
+        ensure_site(conn, site)
+        conn.execute("INSERT INTO crawl_runs(run_id,site_id,started_at,status,notes) VALUES "
+                     "('crawl-current','demo','2026-09-30T10:00:00Z','completed','{\"scope\":\"site\"}')")
+        for url, canonical, content_hash in ((alias, primary, "same"), (primary, primary, "same"),
+                                              (different, primary, "different")):
+            conn.execute("INSERT INTO pages(site_id,url,crawl_status,status_code,title,meta_description,h1,h1_count,"
+                         "canonical,content_hash,indexable,word_count,images_missing_alt,in_sitemap,last_crawled,crawl_run_id) "
+                         "VALUES ('demo',?,'ok',200,'Service','Useful description','[\"Service\"]',1,?,?,1,500,0,1,"
+                         "'2026-09-30T10:01:00Z','crawl-current')", (url, canonical, content_hash))
+        run_analysis(conn, site)
+        urls = [row[0] for row in conn.execute(
+            "SELECT url FROM seo_problems WHERE problem_type='duplicate_h1' ORDER BY url")]
+    assert urls == [different, primary]

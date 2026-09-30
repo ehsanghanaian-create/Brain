@@ -40,7 +40,7 @@ def expected_ctr(pos: float) -> float:
 def _h1_comparison_url(url: str) -> str:
     """Treat pages of one archive as one heading context, not competing documents."""
     parts = urlsplit(url)
-    path = re.sub(r"/page/[2-9]\d*/?$", "/", parts.path)
+    path = re.sub(r"/page/[2-9]\d*/?$", "/", unquote(parts.path))
     return f"{parts.scheme}://{parts.netloc}{path.rstrip('/')}/"
 
 
@@ -160,7 +160,17 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
         unique_pages = {}
         for u in sorted(urls, key=lambda value: (bool(re.search(r"/page/[2-9]\d*/?$", urlsplit(value).path)), value)):
             unique_pages.setdefault(_h1_comparison_url(u), u)
-        distinct_urls = list(unique_pages.values())
+        aliases = {}
+        for u in sorted(unique_pages.values(), key=lambda value: (by_url[value]["canonical"] != value, value)):
+            page = by_url[u]
+            canonical = page["canonical"] or ""
+            content_hash = page["content_hash"] or ""
+            if canonical and content_hash and urlsplit(canonical).netloc == urlsplit(u).netloc:
+                identity = (_h1_comparison_url(canonical), content_hash)
+            else:
+                identity = (_h1_comparison_url(u), u)
+            aliases.setdefault(identity, u)
+        distinct_urls = list(aliases.values())
         if len(distinct_urls) > 1:
             for u in distinct_urls:
                 _problem(conn, sid, "duplicate_h1", "medium", u,

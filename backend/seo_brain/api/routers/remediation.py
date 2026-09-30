@@ -7,10 +7,10 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import Engine
 
-from ...automation import Job, get_job_queue
+from ...automation import Job, JobQueue, get_job_queue
 from ...remediation.service import RemediationError, RemediationService, public_run
 from ...remediation.playbooks import ROADMAPS
-from ..deps import engine, gateway, require_site
+from ..deps import engine, gateway, job_queue, require_site
 from ..errors import ApiError
 
 router = APIRouter(prefix="/sites/{site_id}/remediation", tags=["remediation"], dependencies=[Depends(require_site)])
@@ -117,6 +117,17 @@ def problems(site_id: str, limit: int = Query(50, ge=1, le=200), offset: int = Q
 @router.post("/problems/{issue_key}/proposals", response_model=RemediationProposalOut)
 def propose(site_id: str, issue_key: str, svc: RemediationService = Depends(service)) -> dict:
     return _call(lambda: svc.propose(site_id, issue_key))
+
+
+@router.post("/problems/{issue_key}/proposal-jobs", status_code=202)
+def start_proposal_job(site_id: str, issue_key: str, svc: RemediationService = Depends(service),
+                       q: JobQueue = Depends(job_queue)) -> dict:
+    _call(lambda: svc._issue(site_id, issue_key))
+    for run in q.list(200):
+        if (run.job.type == "seo_proposal" and run.job.site_id == site_id
+                and run.job.payload.get("issue_key") == issue_key and run.status in ("queued", "running")):
+            return run.to_dict()
+    return q.enqueue(Job(type="seo_proposal", payload={"site_id": site_id, "issue_key": issue_key}, site_id=site_id)).to_dict()
 
 
 @router.get("/problems/{issue_key}/runs", response_model=list[RemediationRunOut])

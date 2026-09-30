@@ -9,6 +9,7 @@ type Method = components['schemas']['RemediationMethodOut'];
 type Proposal = components['schemas']['RemediationProposalOut'];
 type Run = components['schemas']['RemediationRunOut'];
 type StartRun = components['schemas']['StartRun'];
+type ProposalJob = { run_id: string; status: 'queued' | 'running' | 'succeeded' | 'failed'; result: Proposal | null; error: string | null };
 const statusFa: Record<string, string> = {
   queued: 'در صف', running: 'در حال اجرا', verified: 'رفع‌شده و تأییدشده', needs_review: 'نیازمند بررسی',
   needs_connection: 'نیازمند اتصال', failed: 'ناموفق', stale: 'داده تغییر کرده', rolled_back: 'بازگردانده‌شده'
@@ -16,12 +17,29 @@ const statusFa: Record<string, string> = {
 
 export function RemediationAction({ siteId, issueKey }: { siteId: string; issueKey: string }) {
   const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [proposalJobId, setProposalJobId] = useState<string | null>(null);
   const [run, setRun] = useState<Run | null>(null);
   const [pending, setPending] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const requestKeys = useRef(new Map<string, string>());
   const root = `/sites/${encodeURIComponent(siteId)}/remediation`;
+
+  useEffect(() => {
+    if (!proposalJobId) return;
+    const timer = window.setInterval(() => {
+      api<ProposalJob>(`/jobs/${encodeURIComponent(proposalJobId)}`).then((job) => {
+        if (job.status === 'succeeded') {
+          setProposal(job.result);
+          setProposalJobId(null);
+        } else if (job.status === 'failed') {
+          setError(job.error ?? 'ساخت پیشنهاد ناموفق بود. دوباره تلاش کنید.');
+          setProposalJobId(null);
+        }
+      }).catch((e) => { setError(String(e?.message ?? e)); setProposalJobId(null); });
+    }, 2500);
+    return () => window.clearInterval(timer);
+  }, [proposalJobId]);
 
   useEffect(() => {
     if (!run || !['queued', 'running'].includes(run.status)) return;
@@ -32,11 +50,14 @@ export function RemediationAction({ siteId, issueKey }: { siteId: string; issueK
   }, [root, run]);
 
   async function loadMethods() {
-    setPending(true); setError(null); setProposal(null); setRun(null);
+    setPending(true); setError(null); setProposal(null); setProposalJobId(null); setRun(null);
     try {
       const history = await api<Run[]>(`${root}/problems/${encodeURIComponent(issueKey)}/runs?limit=1`);
       if (history[0]) setRun(history[0]);
-      setProposal(await api<Proposal>(`${root}/problems/${encodeURIComponent(issueKey)}/proposals`, { method: 'POST' }));
+      const job = await api<ProposalJob>(`${root}/problems/${encodeURIComponent(issueKey)}/proposal-jobs`, { method: 'POST' });
+      if (job.status === 'succeeded') setProposal(job.result);
+      else if (job.status === 'failed') setError(job.error ?? 'ساخت پیشنهاد ناموفق بود. دوباره تلاش کنید.');
+      else setProposalJobId(job.run_id);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally { setPending(false); }
@@ -85,8 +106,8 @@ export function RemediationAction({ siteId, issueKey }: { siteId: string; issueK
   }
 
   return <div className='mt-2 space-y-2 text-xs'>
-    <Button size='sm' variant='outline' disabled={pending} onClick={loadMethods}>رفع مشکل</Button>
-    {pending && <p className='text-muted-foreground'>در حال بررسی…</p>}
+    <Button size='sm' variant='outline' disabled={pending || !!proposalJobId} onClick={loadMethods}>رفع مشکل</Button>
+    {(pending || proposalJobId) && <p className='text-muted-foreground'>در حال بررسی و دریافت پیشنهاد Atria…</p>}
     {error && <p className='text-destructive'>{error}</p>}
     {error && <a className='text-primary underline' href='/dashboard/ai-models'>تنظیم مدل و مسیر Atria</a>}
     {proposal && <div className='space-y-2 rounded border p-2'>

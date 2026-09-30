@@ -310,16 +310,23 @@ def test_remediation_api_exposes_methods_and_blocks_unconnected_template(service
     from fastapi.testclient import TestClient
     from seo_brain.api.deps import require_site
     from seo_brain.api.routers import remediation
+    from seo_brain.automation.queue import InProcessJobQueue
 
     app = FastAPI()
     app.include_router(remediation.router, prefix="/api/v1")
     app.dependency_overrides[require_site] = lambda: {"site_id": "gearboxemdad"}
     app.dependency_overrides[remediation.service] = lambda: service
+    queue = InProcessJobQueue(sync=True)
+    queue.register("seo_proposal", lambda payload: service.propose(payload["site_id"], payload["issue_key"]))
+    app.dependency_overrides[remediation.job_queue] = lambda: queue
     client = TestClient(app)
     root = "/api/v1/sites/gearboxemdad/remediation"
     listing = client.get(root + "/problems")
     assert listing.status_code == 200 and listing.json()["total"] == 1
     key = listing.json()["items"][0]["issue_key"]
+    queued = client.post(root + f"/problems/{key}/proposal-jobs")
+    assert queued.status_code == 202 and queued.json()["status"] == "succeeded"
+    assert queued.json()["result"]["issue_key"] == key
     proposal = client.post(root + f"/problems/{key}/proposals")
     assert proposal.status_code == 200 and proposal.json()["roadmap"]
     pid = proposal.json()["id"]

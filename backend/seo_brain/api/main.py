@@ -79,6 +79,11 @@ def _register_builtin_jobs() -> None:
         from ..remediation.service import RemediationService, public_run
         return public_run(RemediationService(_engine()).execute(payload["site_id"], payload["run_id"]))
 
+    def _run_seo_proposal(payload: dict):
+        from .deps import engine as _engine, gateway as _gateway
+        from ..remediation.service import RemediationService
+        return RemediationService(_engine(), _gateway()).propose(payload["site_id"], payload["issue_key"])
+
     def _run_wordpress_pipeline(payload: dict):
         """WordPress → sync → (crawl) → graph, one job; progress persisted in sync_runs (see wordpress/orchestrator.py)."""
         from .deps import engine as _engine
@@ -122,7 +127,8 @@ def _register_builtin_jobs() -> None:
 
     for name, fn in (("sync_wordpress", _run_sync_wordpress), ("build_graph", _run_build_graph), ("noop", _noop), ("links_analyze", _run_links_analyze), ("generation_run", _run_generation), ("content_automation", _run_content_automation), ("planner_analyze", _run_planner_analyze),
                      ("wordpress_sync", _run_wordpress_pipeline), ("gsc_sync", _run_gsc_sync), ("ga4_sync", _run_ga4_sync),
-                     ("plan_generate", _run_plan_generate), ("plan_publish", _run_plan_publish), ("seo_remediation", _run_seo_remediation)):
+                     ("plan_generate", _run_plan_generate), ("plan_publish", _run_plan_publish), ("seo_remediation", _run_seo_remediation),
+                     ("seo_proposal", _run_seo_proposal)):
         try:
             q.register(name, fn)
         except Exception:  # noqa: BLE001

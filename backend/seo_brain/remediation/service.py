@@ -182,7 +182,8 @@ class RemediationService:
         task = AITask(kind=TaskKind.SEO_REMEDIATION, site_id=site_id,
                       messages=[AIMessage("system", "شما پیشنهاددهندهٔ اصلاح SEO هستید؛ خروجی شما فقط داده است و هرگز مجوز اجرای مستقیم ندارد."), AIMessage("user", prompt)],
                       json_schema={"type": "object", "required": ["methods"], "properties": {"methods": {"type": "array"}}},
-                      max_tokens=3500 if evidence["issue"]["problem_type"] == "thin_content" else 1800)
+                      max_tokens=6144 if evidence["issue"]["problem_type"] == "thin_content" else 4096,
+                      temperature=0)
         try:
             result = self.gateway.run(task, [RouteStep(provider.name, route.get("model") or provider.default_model or "Atria-Dawn-Preview", "explicit remediation")],
                                       CallMeta(site_id=site_id, agent="seo_remediation", route_reason="explicit Atria only"))

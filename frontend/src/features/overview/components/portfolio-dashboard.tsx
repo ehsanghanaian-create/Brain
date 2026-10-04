@@ -15,6 +15,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { LivePortfolioSignals } from './live-portfolio-signals';
 
 const fa = new Intl.NumberFormat('fa-IR');
 const TYPE_FA: Record<string, string> = {
@@ -173,11 +174,13 @@ export function PortfolioDashboard({ data, health }: { data: PortfolioOverview; 
 
   return (
     <div className='flex flex-col gap-5'>
-      <section className='relative overflow-hidden rounded-2xl border border-sky-500/15 bg-gradient-to-l from-sky-500/[0.08] via-background to-violet-500/[0.05] p-4 shadow-sm sm:p-5'>
-        <div className='absolute -top-16 -left-10 size-44 rounded-full bg-sky-500/10 blur-3xl' aria-hidden='true' />
+      <section className='relative overflow-hidden rounded-2xl border border-[#1abb9c]/20 bg-gradient-to-l from-[#1abb9c]/[0.12] via-background to-[#066fd1]/[0.05] p-4 shadow-sm sm:p-5'>
+        <div className='absolute -top-16 -left-10 size-44 rounded-full bg-[#1abb9c]/15 blur-3xl' aria-hidden='true' />
         <div className='relative flex flex-col justify-between gap-4 lg:flex-row lg:items-center'><div className='space-y-2'><div className='flex flex-wrap items-center gap-2'><Badge variant='outline' className='border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'><span className='size-1.5 rounded-full bg-emerald-500' /> بک‌اند متصل</Badge><span className='text-muted-foreground text-xs'>به‌روزرسانی {formatDate(data.generated_at)}</span></div><div><h2 className='text-xl font-bold tracking-tight sm:text-2xl'>نمای فرماندهی سبد سایت‌ها</h2><p className='text-muted-foreground mt-1 max-w-2xl text-sm leading-6'>وضعیت داده، گراف دانش و فرصت‌های عملیاتی همه سایت‌ها در یک نگاه؛ از اینجا مشخص است قدم بعدی روی کدام سایت باید انجام شود.</p></div></div><div className='flex flex-wrap items-center gap-2'>{graphCandidates.length > 0 && <Button onClick={rebuildMissingGraphs} disabled={bulkGraphBusy}><IconNetwork className={cn(bulkGraphBusy && 'animate-pulse')} />{bulkGraphBusy ? 'در حال صف‌گذاری…' : `ساخت گراف ${fa.format(graphCandidates.length)} سایت سالم`}</Button>}<Link href='/dashboard/sites' className={buttonVariants({ variant: 'outline' })}><IconWorld /> مدیریت سایت‌ها</Link><Link href='/dashboard/sites/new' className={buttonVariants({ variant: graphCandidates.length ? 'outline' : 'default' })}><IconPlus /> افزودن سایت</Link></div></div>
         {graphCandidates.length > 0 && <div className='relative mt-4 flex flex-col gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-xs sm:flex-row sm:items-center sm:justify-between'><span><strong>{fa.format(graphCandidates.length)} سایت سالم فقط گراف ندارند.</strong> اجرای گروهی از محتوای موجود استفاده می‌کند و سایت‌های خطادار را وارد صف نمی‌کند.</span><span className='text-muted-foreground'>{graphCandidates.map((site) => site.name).join('، ')}</span></div>}
       </section>
+
+      <LivePortfolioSignals initial={data} />
 
       <section aria-label='شاخص‌های کلیدی' className='grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4'>
         <MetricCard title='سایت‌های آماده' value={data.totals.ready_sites} description={`از ${fa.format(data.totals.sites)} سایت ثبت‌شده، این تعداد داده و گراف قابل استفاده دارند.`} icon={IconWorld} lineClass='bg-emerald-500' iconClass='bg-emerald-500/10 text-emerald-600' footer={<div className='space-y-2'><div className='flex justify-between'><span className='text-muted-foreground'>آمادگی سبد</span><span className='font-semibold'>{fa.format(readiness)}٪</span></div><Progress value={readiness} className='h-1.5' /></div>} />

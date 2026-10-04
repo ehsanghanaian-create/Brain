@@ -1,0 +1,88 @@
+/* Gentelella v4 palette translated to SEO Brain's React components. */
+[data-theme='gentelella'] {
+  --background: #f5f7fb;
+  --foreground: #1e2633;
+  --card: #ffffff;
+  --card-foreground: #1e2633;
+  --popover: #ffffff;
+  --popover-foreground: #1e2633;
+  --primary: #1abb9c;
+  --primary-foreground: #ffffff;
+  --secondary: #e8f8f4;
+  --secondary-foreground: #147c68;
+  --muted: #f1f4f8;
+  --muted-foreground: #667485;
+  --accent: #e8f8f4;
+  --accent-foreground: #147c68;
+  --destructive: #d63939;
+  --destructive-foreground: #ffffff;
+  --border: #e6e7eb;
+  --input: #e6e7eb;
+  --ring: #1abb9c;
+  --chart-1: #1abb9c;
+  --chart-2: #066fd1;
+  --chart-3: #ae3ec9;
+  --chart-4: #f59f00;
+  --chart-5: #2fb344;
+  --sidebar: #1a2332;
+  --sidebar-foreground: #c5d0dc;
+  --sidebar-primary: #1abb9c;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #263348;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #2b3648;
+  --sidebar-ring: #1abb9c;
+  --font-sans: var(--font-vazirmatn), Vazirmatn, Tahoma, sans-serif;
+  --font-mono: ui-monospace, Consolas, monospace;
+  --radius: 0.5rem;
+  --shadow-sm: 0 2px 4px rgb(30 38 51 / 5%);
+  --shadow: 0 4px 14px rgb(30 38 51 / 7%);
+  --shadow-md: 0 8px 24px rgb(30 38 51 / 10%);
+  --shadow-lg: 0 16px 36px rgb(30 38 51 / 12%);
+}
+
+[data-theme='gentelella'].dark {
+  --background: #0f1623;
+  --foreground: #e6ebf2;
+  --card: #1a2332;
+  --card-foreground: #e6ebf2;
+  --popover: #1a2332;
+  --popover-foreground: #e6ebf2;
+  --secondary: #203b3b;
+  --secondary-foreground: #b2eee0;
+  --muted: #232d3e;
+  --muted-foreground: #a1adbd;
+  --accent: #25413f;
+  --accent-foreground: #b2eee0;
+  --border: #344154;
+  --input: #344154;
+  --sidebar: #141d2b;
+  --sidebar-foreground: #c5d0dc;
+  --sidebar-accent: #263348;
+  --sidebar-border: #2b3648;
+}
+
+[data-theme='gentelella'] [data-slot='sidebar'] {
+  border-color: var(--sidebar-border);
+}
+[data-theme='gentelella'] [data-slot='sidebar-menu-button'] {
+  transition: color .18s ease, background-color .18s ease, transform .18s ease;
+}
+[data-theme='gentelella'] [data-slot='sidebar-menu-button']:hover {
+  transform: translateX(-2px);
+}
+[data-theme='gentelella'] [data-slot='card'] {
+  box-shadow: 0 0 0 1px rgb(4 32 69 / 4%), 0 3px 12px rgb(30 38 51 / 4%);
+  transition: box-shadow .22s ease, transform .22s ease, border-color .22s ease;
+}
+[data-theme='gentelella'] [data-slot='card']:hover {
+  box-shadow: 0 8px 28px rgb(30 38 51 / 9%);
+}
+[data-theme='gentelella'] button,
+[data-theme='gentelella'] a {
+  -webkit-tap-highlight-color: transparent;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-theme='gentelella'] [data-slot='card'],
+  [data-theme='gentelella'] [data-slot='sidebar-menu-button'] { transition: none; transform: none; }
+}

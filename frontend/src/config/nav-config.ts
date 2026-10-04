@@ -67,6 +67,12 @@ export const navGroups: NavGroup[] = [
   {
     label: 'سیستم',
     items: [
+      { title: 'کال‌سنتر', url: '/dashboard/call-center', icon: 'phone', items: [],
+        description: 'ثبت تماس، تعیین منبع سئو یا ادز و پایش برند، مدل و منطقه' },
+      { title: 'مدیریت کاربران', url: '/dashboard/users', icon: 'teams', items: [],
+        description: 'مدیریت فهرست اعضای تیم و نقش‌ها' },
+      { title: 'تم داشبورد', url: '/dashboard/theme', icon: 'palette', items: [],
+        description: 'قالب Gentelella، رنگ شاخص و حالت روشن یا تیره' },
       { title: 'گزارش سایت', url: '/dashboard/reports', icon: 'reports', items: [],
         description: 'مرکز گزارش کامل هر سایت: کلمه کلیدی اصلی، جایگاه‌ها، مشکلات، بک‌لینک و رپورتاژ' },
       { title: 'داده زنده تبلیغات', url: '/ads-data', icon: 'reports', items: [],

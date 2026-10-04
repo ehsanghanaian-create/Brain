@@ -41,6 +41,9 @@ def test_call_center_source_and_operator_flow():
     summary = client.get("/api/v1/call-center/analytics").json()
     assert summary["by_source"].get("seo", 0) == 0
     assert summary["by_source"]["ads"] == 1
+    focused = client.get("/api/v1/call-center/analytics?source=ads").json()
+    assert focused["total"] == 1 and focused["by_region"] == [["تهران", 1]]
+    assert client.get("/api/v1/call-center/analytics?source=seo").json()["total"] == 0
     listing = client.get("/api/v1/call-center/calls?source=ads&limit=1").json()
     assert listing["total"] == 1 and listing["items"][0]["operator_name"] == "Operator Test"
     assert client.get("/api/v1/call-center/calls?source=ads&limit=1&offset=1").json()["items"] == []

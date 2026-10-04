@@ -219,18 +219,21 @@ def update_call(call_id: int, body: CallPatch, eng: Engine = Depends(engine)) ->
 
 
 @router.get("/analytics")
-def analytics(days: int = Query(30, ge=1, le=366), site_id: str | None = None,
+def analytics(days: int = Query(30, ge=1, le=366), site_id: str | None = None, source: Source | None = None,
               eng: Engine = Depends(engine)) -> dict:
     current = datetime.now(timezone.utc)
-    where = "occurred_at >= :since AND occurred_at <= :now" + (" AND site_id=:site_id" if site_id else "")
+    scope = (" AND site_id=:site_id" if site_id else "") + (" AND source=:source" if source else "")
+    where = "occurred_at >= :since AND occurred_at <= :now" + scope
     args = {"since": (current - timedelta(days=days)).isoformat(timespec="seconds"), "now": current.isoformat(timespec="seconds")}
     if site_id:
         args["site_id"] = site_id
+    if source:
+        args["source"] = source
     with eng.connect() as cx:
         records = cx.execute(text("SELECT occurred_at, source, warranty, brand, model, region, status FROM call_center_calls WHERE " + where), args).mappings().all()
-        undated_where = "occurred_at IS NULL" + (" AND site_id=:site_id" if site_id else "")
+        undated_where = "occurred_at IS NULL" + scope
         undated = cx.execute(text("SELECT COUNT(*) FROM call_center_calls WHERE " + undated_where), args).scalar_one()
-        future_where = "occurred_at > :now" + (" AND site_id=:site_id" if site_id else "")
+        future_where = "occurred_at > :now" + scope
         future = cx.execute(text("SELECT COUNT(*) FROM call_center_calls WHERE " + future_where), args).scalar_one()
     from collections import Counter
     by_source = Counter(row["source"] for row in records)

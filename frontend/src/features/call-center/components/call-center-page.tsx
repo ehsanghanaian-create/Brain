@@ -167,6 +167,7 @@ export function CallCenterPage() {
   const [recordTotal, setRecordTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [analytics, setAnalytics] = useState<CallAnalytics>(empty);
+  const [detailAnalytics, setDetailAnalytics] = useState<CallAnalytics>(empty);
   const [webTraffic, setWebTraffic] = useState<TrafficOverview | null>(null);
   const [webCalls, setWebCalls] = useState<TrafficCalls | null>(null);
   const [siteId, setSiteId] = useState('');
@@ -189,7 +190,7 @@ export function CallCenterPage() {
     async (silent = false) => {
       if (!silent) setLoading(true);
       try {
-        const [list, summary] = await Promise.all([
+        const [list, summary, focused] = await Promise.all([
           callCenterApi.calls({
             source,
             status,
@@ -198,11 +199,15 @@ export function CallCenterPage() {
             limit: 50,
             offset: page * 50
           }),
-          callCenterApi.analytics(days, siteId || undefined)
+          callCenterApi.analytics(days, siteId || undefined),
+          source
+            ? callCenterApi.analytics(days, siteId || undefined, source)
+            : Promise.resolve(null)
         ]);
         setRecords(list.items);
         setRecordTotal(list.total);
         setAnalytics(summary);
+        setDetailAnalytics(focused ?? summary);
         setLastUpdated(new Date());
         setError('');
         if (siteId) {
@@ -255,17 +260,17 @@ export function CallCenterPage() {
     [analytics]
   );
   const brandBars = useMemo(
-    () => analytics.by_brand.slice(0, 7).map(([name, value]) => ({ name, value })),
-    [analytics]
+    () => detailAnalytics.by_brand.slice(0, 7).map(([name, value]) => ({ name, value })),
+    [detailAnalytics]
   );
   const regionBars = useMemo(
-    () => analytics.by_region.slice(0, 7).map(([name, value]) => ({ name, value })),
-    [analytics]
+    () => detailAnalytics.by_region.slice(0, 7).map(([name, value]) => ({ name, value })),
+    [detailAnalytics]
   );
-  const sortedModels = useMemo(() => analytics.by_model.slice(0, 8), [analytics]);
+  const sortedModels = useMemo(() => detailAnalytics.by_model.slice(0, 8), [detailAnalytics]);
   const chartDaily = useMemo(
-    () => analytics.daily.map((row) => ({ ...row, label: row.date.slice(5) })),
-    [analytics]
+    () => detailAnalytics.daily.map((row) => ({ ...row, label: row.date.slice(5) })),
+    [detailAnalytics]
   );
   const webChannels = useMemo(
     () =>
@@ -649,6 +654,24 @@ export function CallCenterPage() {
         </Card>
       )}
 
+      <div className='flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-xs'>
+        <span>
+          تحلیل روند، برند، منطقه و مدل برای:{' '}
+          <strong className='text-primary'>{source ? sourceLabel[source] : 'همهٔ منابع'}</strong>
+        </span>
+        {source && (
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={() => {
+              setSource('');
+              setPage(0);
+            }}
+          >
+            نمایش همه
+          </Button>
+        )}
+      </div>
       <div className='grid gap-4 xl:grid-cols-[1.5fr_1fr]'>
         <LiveChart
           title='روند تماس‌ها بر اساس منبع'

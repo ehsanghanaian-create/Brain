@@ -85,8 +85,8 @@ export const callCenterApi = {
     api<CallRecord>('/call-center/calls', { method: 'POST', json: body }),
   patchCall: (id: number, body: Partial<CallRecord>) =>
     api<CallRecord>(`/call-center/calls/${id}`, { method: 'PATCH', json: body }),
-  analytics: (days: number, site_id?: string) =>
-    api<CallAnalytics>(`/call-center/analytics?${params({ days, site_id })}`)
+  analytics: (days: number, site_id?: string, source?: CallSource) =>
+    api<CallAnalytics>(`/call-center/analytics?${params({ days, site_id, source })}`)
 };
 
 export const sourceLabel: Record<CallSource, string> = {

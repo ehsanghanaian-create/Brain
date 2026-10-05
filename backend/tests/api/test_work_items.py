@@ -86,3 +86,58 @@ def test_cross_site_command_center_teams_and_ownership(client):
     assert overview["by_owner"][0]["name"] == "Operator"
     assert client.get("/api/v1/work/overview?team_id=999").json()["summary"]["total"] == 0
     assert client.get("/api/v1/work/teams").json()[0]["open_work"] == 1
+
+
+def test_site_project_members_hierarchy_dependencies_time_and_progress(client):
+    root = "/api/v1/work/projects/demo"
+    assigned = client.put(root + "/members/1", json={"user_id": 1, "responsibility": "lead"})
+    assert assigned.status_code == 200 and assigned.json()["responsibility"] == "lead"
+    assert client.get(root + "/members").json()[0]["full_name"] == "Operator"
+    assert client.put("/api/v1/work/projects/other/members/1", json={"user_id": 2}).status_code == 422
+
+    milestone = client.post(root + "/milestones", json={"title": "فاز فنی", "due_at": "2026-12-01T00:00:00Z"})
+    assert milestone.status_code == 201, milestone.text
+    milestone_id = milestone.json()["id"]
+    updated_milestone = client.patch(root + f"/milestones/{milestone_id}", json={"title": "پایان فاز فنی"})
+    assert updated_milestone.status_code == 200 and updated_milestone.json()["title"] == "پایان فاز فنی"
+    assert client.post("/api/v1/sites/other/work", json={"title": "کار در پروژهٔ دیگر",
+        "milestone_id": milestone_id}).status_code == 422
+    base = "/api/v1/sites/demo/work"
+    parent = client.post(base, json={"title": "بهبود فنی سایت"}).json()
+    prerequisite = client.post(base, json={"title": "بررسی سرچ کنسول", "parent_id": parent["id"],
+        "milestone_id": milestone_id, "estimated_hours": 2, "progress_percent": 50,
+        "start_at": "2026-11-01T00:00:00Z", "due_at": "2026-11-15T00:00:00Z"})
+    assert prerequisite.status_code == 201, prerequisite.text
+    first = prerequisite.json()
+    dependent = client.post(base, json={"title": "اصلاح صفحات", "parent_id": parent["id"],
+        "estimated_hours": 2, "due_at": "2026-11-30T00:00:00Z"}).json()
+    assert client.post(base, json={"title": "کار سایت دیگر", "parent_id": 999}).status_code == 422
+    assert client.patch(f"{base}/{parent['id']}", json={"parent_id": dependent["id"]}).status_code == 422
+    assert client.patch(f"{base}/{first['id']}", json={"start_at": "2026-12-01T00:00:00Z"}).status_code == 422
+
+    dep_url = root + f"/tasks/{dependent['id']}/dependencies"
+    assert client.post(dep_url, json={"depends_on_id": first["id"]}).status_code == 201
+    other_task = client.post("/api/v1/sites/other/work", json={"title": "کار مستقل سایت دیگر"}).json()
+    assert client.post(dep_url, json={"depends_on_id": other_task["id"]}).status_code == 404
+    assert client.post(dep_url, json={"depends_on_id": first["id"]}).status_code == 409
+    assert client.post(root + f"/tasks/{first['id']}/dependencies", json={"depends_on_id": dependent["id"]}).status_code == 422
+    assert client.post(dep_url, json={"depends_on_id": parent["id"]}).status_code == 201
+    assert {row["depends_on_id"] for row in client.get(dep_url).json()} == {first["id"], parent["id"]}
+    parent_finish = client.patch(f"{base}/{parent['id']}", json={"status": "verified", "owner_id": 1,
+        "due_at": "2026-12-01T00:00:00Z", "verification_note": "بررسی شد"})
+    assert parent_finish.status_code == 422 and "child work" in parent_finish.text
+    dependent_finish = client.patch(f"{base}/{dependent['id']}", json={"status": "verified", "owner_id": 1,
+        "verification_note": "بررسی شد"})
+    assert dependent_finish.status_code == 422 and "prerequisite work" in dependent_finish.text
+
+    logged = client.post(root + f"/tasks/{first['id']}/time", json={"user_id": 1, "minutes": 90,
+        "work_date": "2026-11-02", "note": "تحلیل داده"})
+    assert logged.status_code == 201, logged.text
+    assert client.get(root + f"/tasks/{first['id']}/time").json()[0]["minutes"] == 90
+    projects = client.get("/api/v1/work/projects").json()
+    demo = next(row for row in projects if row["site_id"] == "demo")
+    assert demo["members"] == 1 and demo["milestones"] == 1
+    assert demo["estimated_hours"] == 4 and demo["spent_hours"] == 1.5
+    assert demo["progress_percent"] == 25
+    assert client.get(root + "/milestones").json()[0]["tasks"] == 1
+    assert client.delete(root + "/members/1").status_code == 204

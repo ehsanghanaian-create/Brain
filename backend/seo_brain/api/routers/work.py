@@ -32,6 +32,14 @@ def _due_utc(value: datetime | None) -> str | None:
     return value.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
+def _date_utc(value: datetime | None, label: str) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        raise HTTPException(422, f"{label} must include a timezone")
+    return value.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
 class WorkIn(BaseModel):
     title: str = Field(min_length=3, max_length=200)
     description: str = Field(default="", max_length=5000)
@@ -44,6 +52,10 @@ class WorkIn(BaseModel):
     team_id: int | None = Field(default=None, ge=1)
     priority: Priority = "normal"
     estimated_hours: float | None = Field(default=None, ge=0, le=1000)
+    start_at: datetime | None = None
+    progress_percent: int = Field(default=0, ge=0, le=100)
+    parent_id: int | None = Field(default=None, ge=1)
+    milestone_id: int | None = Field(default=None, ge=1)
     due_at: datetime | None = None
     blocked_reason: str | None = Field(default=None, max_length=1000)
     verification_note: str | None = Field(default=None, max_length=3000)
@@ -60,6 +72,10 @@ class WorkPatch(BaseModel):
     team_id: int | None = Field(default=None, ge=1)
     priority: Priority | None = None
     estimated_hours: float | None = Field(default=None, ge=0, le=1000)
+    start_at: datetime | None = None
+    progress_percent: int | None = Field(default=None, ge=0, le=100)
+    parent_id: int | None = Field(default=None, ge=1)
+    milestone_id: int | None = Field(default=None, ge=1)
     due_at: datetime | None = None
     blocked_reason: str | None = Field(default=None, max_length=1000)
     verification_note: str | None = Field(default=None, max_length=3000)
@@ -78,7 +94,7 @@ def _record(cx, site_id: str, item_id: int, event_type: str, before: dict | None
          "at": now()})
 
 
-def _validate(cx, site_id: str, values: dict) -> None:
+def _validate(cx, site_id: str, values: dict, item_id: int | None = None) -> None:
     if values.get("status") in ACTIVE and (not values.get("owner_id") or not values.get("due_at")):
         raise HTTPException(422, "active work requires an owner and due date")
     if values.get("status") == "blocked" and not values.get("blocked_reason"):
@@ -95,6 +111,24 @@ def _validate(cx, site_id: str, values: dict) -> None:
                             {"id": values["team_id"]}).first()
         if not exists:
             raise HTTPException(422, "team must be active")
+    if values.get("start_at") and values.get("due_at") and values["start_at"] > values["due_at"]:
+        raise HTTPException(422, "start date must be before due date")
+    if values.get("parent_id") is not None:
+        parent = cx.execute(text("SELECT id,parent_id FROM work_items WHERE id=:id AND site_id=:s"),
+                            {"id": values["parent_id"], "s": site_id}).mappings().first()
+        if not parent:
+            raise HTTPException(422, "parent must belong to this site")
+        seen = {item_id} if item_id else set()
+        while parent:
+            if parent["id"] in seen:
+                raise HTTPException(422, "work hierarchy cannot contain a cycle")
+            seen.add(parent["id"])
+            parent = cx.execute(text("SELECT id,parent_id FROM work_items WHERE id=:id AND site_id=:s"),
+                                {"id": parent["parent_id"], "s": site_id}).mappings().first() if parent["parent_id"] else None
+    if values.get("milestone_id") is not None and not cx.execute(
+        text("SELECT 1 FROM work_milestones WHERE id=:id AND site_id=:s"),
+        {"id": values["milestone_id"], "s": site_id}).first():
+        raise HTTPException(422, "milestone must belong to this site")
     kind, source_id = values.get("kind"), values.get("source_id")
     if kind == "manual" and source_id is not None:
         raise HTTPException(422, "manual work cannot reference a source id")
@@ -140,6 +174,9 @@ def create_work(site_id: str, body: WorkIn, request: Request, eng: Engine = Depe
         raise HTTPException(422, "rejected or deferred work requires a reason")
     values = body.model_dump(exclude={"note"})
     values["due_at"] = _due_utc(body.due_at)
+    values["start_at"] = _date_utc(body.start_at, "start date")
+    if values["status"] == "verified":
+        values["progress_percent"] = 100
     values.update(site_id=site_id, created_at=now(), updated_at=now())
     try:
         with eng.begin() as cx:
@@ -159,10 +196,14 @@ def create_work(site_id: str, body: WorkIn, request: Request, eng: Engine = Depe
 @router.patch("/{item_id}")
 def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, eng: Engine = Depends(engine)) -> dict:
     patch = body.model_dump(exclude_unset=True, exclude={"note"})
-    if any(key in patch and patch[key] is None for key in ("title", "description", "status", "priority")):
+    if any(key in patch and patch[key] is None for key in ("title", "description", "status", "priority", "progress_percent")):
         raise HTTPException(422, "title, description and status cannot be null")
     if "due_at" in patch:
         patch["due_at"] = _due_utc(patch["due_at"])
+    if "start_at" in patch:
+        patch["start_at"] = _date_utc(patch["start_at"], "start date")
+    if patch.get("status") == "verified":
+        patch["progress_percent"] = 100
     with eng.begin() as cx:
         current = cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id"),
                              {"s": site_id, "id": item_id}).mappings().first()
@@ -172,7 +213,18 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
         merged = {**before, **patch}
         if patch.get("status") in ("rejected", "deferred") and patch["status"] != before["status"] and not body.note:
             raise HTTPException(422, "rejected or deferred work requires a reason")
-        _validate(cx, site_id, merged)
+        _validate(cx, site_id, merged, item_id)
+        if merged["status"] == "verified" and before["status"] != "verified":
+            unfinished = cx.execute(text("""SELECT 1 FROM work_dependencies d
+                JOIN work_items prerequisite ON prerequisite.id=d.depends_on_id
+                WHERE d.work_item_id=:id AND prerequisite.status<>'verified' LIMIT 1"""), {"id": item_id}).first()
+            if unfinished:
+                raise HTTPException(422, "prerequisite work is not verified")
+            unfinished_child = cx.execute(text("""SELECT 1 FROM work_items
+                WHERE site_id=:s AND parent_id=:id AND status NOT IN ('verified','rejected','deferred') LIMIT 1"""),
+                {"s": site_id, "id": item_id}).first()
+            if unfinished_child:
+                raise HTTPException(422, "child work is not complete")
         if merged == before:
             return before
         patch["updated_at"] = now()

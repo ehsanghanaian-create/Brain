@@ -140,6 +140,11 @@ def test_panel_login_role_access_and_audit(client):
     events = client.get(f'/api/v1/sites/demo/work/{work.json()["id"]}/events', headers=admin_headers).json()
     assert events[0]["actor_username"] == "admin"
     assert client.get('/api/v1/work/overview', headers=analyst_headers).status_code == 200
+    assert client.get('/api/v1/work/projects', headers=analyst_headers).status_code == 200
+    assert client.get('/api/v1/work/projects/demo/members', headers=analyst_headers).status_code == 200
+    assert client.put(f'/api/v1/work/projects/demo/members/{analyst.json()["id"]}', headers=analyst_headers,
+                      json={"user_id": analyst.json()["id"]}).status_code == 403
+    assert client.get('/api/v1/work/projects', headers=op_headers).status_code == 403
     assert client.post('/api/v1/work/teams', headers=analyst_headers, json={"name": "Forbidden"}).status_code == 403
     assert client.get('/api/v1/work/overview', headers=op_headers).status_code == 403
     assert client.get('/api/v1/call-center/users', headers=analyst_headers).status_code == 403

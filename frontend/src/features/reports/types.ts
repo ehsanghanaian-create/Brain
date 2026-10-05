@@ -183,6 +183,10 @@ export type WorkStatus = 'new' | 'triaged' | 'approved' | 'assigned' | 'in_progr
     team_name?: string | null;
     priority?: 'critical' | 'high' | 'normal' | 'low';
     estimated_hours?: number | null;
+    start_at?: string | null;
+    progress_percent?: number;
+    parent_id?: number | null;
+    milestone_id?: number | null;
   due_at: string | null;
   blocked_reason: string | null;
   verification_note: string | null;

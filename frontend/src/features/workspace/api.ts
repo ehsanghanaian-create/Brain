@@ -13,6 +13,15 @@ export type CommandWorkItem = WorkItem & {
 export type WorkTeam = { id: number; name: string; color: string; description: string; active: boolean;
   members: number; open_work: number };
 export type WorkPerson = { id: number; full_name: string; active: boolean; team_id: number | null; role: string };
+export type ProjectSummary = { site_id: string; name: string; canonical_url: string; members: number; tasks: number;
+  open_tasks: number; blocked_tasks: number; unassigned_tasks: number; overdue_tasks: number;
+  progress_percent: number; estimated_hours: number; spent_hours: number; milestones: number };
+export type ProjectMember = { site_id: string; user_id: number; responsibility: 'lead' | 'contributor' | 'viewer';
+  full_name: string; username: string; role: string; active: boolean; created_at: string };
+export type ProjectMilestone = { id: number; site_id: string; title: string; description: string;
+  due_at: string | null; tasks: number; verified_tasks: number; created_at: string };
+export type TaskDependency = { depends_on_id: number; title: string; status: WorkStatus; created_at: string };
+export type TaskTimeEntry = { id: number; user_id: number; user_name: string; minutes: number; work_date: string; note: string };
 export type CommandOverview = {
   summary: { total: number; open: number; overdue: number; unassigned: number; blocked: number; due_week: number; hours_open: number };
   items: CommandWorkItem[];
@@ -36,6 +45,27 @@ export const commandApi = {
     return api<CommandOverview>(`/work/overview?${query.toString()}`);
   },
   teams: () => api<WorkTeam[]>('/work/teams'),
+  projects: () => api<ProjectSummary[]>('/work/projects'),
+  projectMembers: (siteId: string) => api<ProjectMember[]>(`/work/projects/${encodeURIComponent(siteId)}/members`),
+  assignProjectMember: (siteId: string, userId: number, responsibility: ProjectMember['responsibility']) =>
+    api(`/work/projects/${encodeURIComponent(siteId)}/members/${userId}`, { method: 'PUT', json: { user_id: userId, responsibility } }),
+  removeProjectMember: (siteId: string, userId: number) =>
+    api(`/work/projects/${encodeURIComponent(siteId)}/members/${userId}`, { method: 'DELETE' }),
+  milestones: (siteId: string) => api<ProjectMilestone[]>(`/work/projects/${encodeURIComponent(siteId)}/milestones`),
+  createMilestone: (siteId: string, body: { title: string; description: string; due_at: string | null }) =>
+    api<ProjectMilestone>(`/work/projects/${encodeURIComponent(siteId)}/milestones`, { method: 'POST', json: body }),
+  updateMilestone: (siteId: string, id: number, body: { title?: string; description?: string; due_at?: string | null }) =>
+    api<ProjectMilestone>(`/work/projects/${encodeURIComponent(siteId)}/milestones/${id}`, { method: 'PATCH', json: body }),
+  dependencies: (siteId: string, taskId: number) =>
+    api<TaskDependency[]>(`/work/projects/${encodeURIComponent(siteId)}/tasks/${taskId}/dependencies`),
+  addDependency: (siteId: string, taskId: number, dependsOnId: number) =>
+    api(`/work/projects/${encodeURIComponent(siteId)}/tasks/${taskId}/dependencies`, { method: 'POST', json: { depends_on_id: dependsOnId } }),
+  removeDependency: (siteId: string, taskId: number, dependsOnId: number) =>
+    api(`/work/projects/${encodeURIComponent(siteId)}/tasks/${taskId}/dependencies/${dependsOnId}`, { method: 'DELETE' }),
+  timeEntries: (siteId: string, taskId: number) =>
+    api<TaskTimeEntry[]>(`/work/projects/${encodeURIComponent(siteId)}/tasks/${taskId}/time`),
+  logTime: (siteId: string, taskId: number, body: { user_id: number; minutes: number; work_date: string; note: string }) =>
+    api<TaskTimeEntry>(`/work/projects/${encodeURIComponent(siteId)}/tasks/${taskId}/time`, { method: 'POST', json: body }),
   people: () => api<WorkPerson[]>('/call-center/operators'),
   createTeam: (body: { name: string; color: string; description: string }) =>
     api<WorkTeam>('/work/teams', { method: 'POST', json: body }),

@@ -17,6 +17,8 @@ import type { WorkStatus } from '@/features/reports/types';
 import { commandApi, type CommandFilters, type CommandOverview, type CommandWorkItem, type WorkPerson,
   type WorkPriority, type WorkTeam } from '../api';
 import { WorkGraph } from './work-graph';
+import { ProjectExecution } from './project-execution';
+import { TaskExecutionDetails } from './task-execution-details';
 
 const num = new Intl.NumberFormat('fa-IR');
 const statusLabel: Record<WorkStatus, string> = {
@@ -28,19 +30,26 @@ const statusLabel: Record<WorkStatus, string> = {
 const priorityLabel: Record<WorkPriority, string> = { critical: 'فوری', high: 'بالا', normal: 'معمولی', low: 'پایین' };
 const activeStatuses = new Set<WorkStatus>(['approved', 'assigned', 'in_progress', 'review', 'published', 'measurement_pending', 'verified', 'blocked']);
 const closedStatuses = new Set<WorkStatus>(['verified', 'rejected', 'deferred']);
-type View = 'command' | 'sheet' | 'kanban' | 'timeline' | 'graph' | 'teams';
+type View = 'command' | 'projects' | 'sheet' | 'kanban' | 'timeline' | 'graph' | 'teams';
 type Focus = 'all' | 'overdue' | 'unassigned' | 'blocked' | 'due_week' | 'hours';
 type TaskForm = { site_id: string; title: string; description: string; url: string; status: WorkStatus;
   priority: WorkPriority; owner_id: string; team_id: string; due_at: string; estimated_hours: string;
+  start_at: string; progress_percent: string; parent_id: string; milestone_id: string;
   blocked_reason: string; verification_note: string; note: string };
 const blankForm: TaskForm = { site_id: '', title: '', description: '', url: '', status: 'new', priority: 'normal',
-  owner_id: '', team_id: '', due_at: '', estimated_hours: '', blocked_reason: '', verification_note: '', note: '' };
+  owner_id: '', team_id: '', due_at: '', start_at: '', progress_percent: '0', parent_id: '', milestone_id: '',
+  estimated_hours: '', blocked_reason: '', verification_note: '', note: '' };
 const views: { key: View; label: string }[] = [
-  { key: 'command', label: 'فرماندهی' }, { key: 'sheet', label: 'شیت کارها' },
+  { key: 'command', label: 'فرماندهی' }, { key: 'projects', label: 'پروژه‌ها' }, { key: 'sheet', label: 'شیت کارها' },
   { key: 'kanban', label: 'کانبان' }, { key: 'timeline', label: 'تایم‌لاین' },
   { key: 'graph', label: 'گراف مسیر' }, { key: 'teams', label: 'تیم‌ها' }
 ];
 const dateText = (value: string | null) => value ? new Date(value).toLocaleDateString('fa-IR', { year: 'numeric', month: 'short', day: 'numeric' }) : 'بدون موعد';
+const dateTimeInput = (value?: string | null) => {
+  if (!value) return '';
+  const date = new Date(value);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
 const isOverdue = (item: CommandWorkItem) => Boolean(item.due_at && !closedStatuses.has(item.status) && Date.parse(item.due_at) < Date.now());
 const statusTone = (status: WorkStatus) => status === 'blocked' ? 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300' :
   status === 'verified' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' :
@@ -64,6 +73,7 @@ export function WorkCommandCenter() {
   const [form, setForm] = useState<TaskForm>(blankForm);
   const [saving, setSaving] = useState(false);
   const [events, setEvents] = useState<Awaited<ReturnType<typeof commandApi.events>> | null>(null);
+  const [milestones, setMilestones] = useState<Awaited<ReturnType<typeof commandApi.milestones>>>([]);
   const [teamName, setTeamName] = useState('');
   const [teamColor, setTeamColor] = useState('#1abb9c');
   const [teamDescription, setTeamDescription] = useState('');
@@ -92,6 +102,10 @@ export function WorkCommandCenter() {
     const q = search.trim() || undefined;
     return previous.q === q ? previous : { ...previous, q };
   }), 300); return () => clearTimeout(timer); }, [search]);
+  useEffect(() => { if (!editing || !form.site_id) return; let active = true;
+    void commandApi.milestones(form.site_id).then((rows) => { if (active) setMilestones(rows); }).catch(() => { if (active) setMilestones([]); });
+    return () => { active = false; };
+  }, [editing, form.site_id]);
 
   const items = useMemo(() => (data?.items ?? []).filter((item) => {
     if (focus === 'overdue') return isOverdue(item);
@@ -114,7 +128,9 @@ export function WorkCommandCenter() {
     setForm(item === 'new' ? { ...blankForm, site_id: filters.site_id || sites[0]?.site_id || '' } : {
       site_id: item.site_id, title: item.title, description: item.description, url: item.url || '',
       status: item.status, priority: item.priority, owner_id: item.owner_id?.toString() || '',
-      team_id: item.team_id?.toString() || '', due_at: item.due_at?.slice(0, 16) || '',
+      team_id: item.team_id?.toString() || '', due_at: dateTimeInput(item.due_at),
+      start_at: dateTimeInput(item.start_at), progress_percent: String(item.progress_percent ?? 0),
+      parent_id: item.parent_id?.toString() || '', milestone_id: item.milestone_id?.toString() || '',
       estimated_hours: item.estimated_hours?.toString() || '', blocked_reason: item.blocked_reason || '',
       verification_note: item.verification_note || '', note: ''
     });
@@ -129,6 +145,9 @@ export function WorkCommandCenter() {
     const body = { title: form.title.trim(), description: form.description.trim(), url: form.url.trim() || null,
       status: form.status, priority: form.priority, owner_id: form.owner_id ? Number(form.owner_id) : null,
       team_id: form.team_id ? Number(form.team_id) : null, due_at: form.due_at ? new Date(form.due_at).toISOString() : null,
+      start_at: form.start_at ? new Date(form.start_at).toISOString() : null,
+      progress_percent: Number(form.progress_percent || 0), parent_id: form.parent_id ? Number(form.parent_id) : null,
+      milestone_id: form.milestone_id ? Number(form.milestone_id) : null,
       estimated_hours: form.estimated_hours ? Number(form.estimated_hours) : null,
       blocked_reason: form.blocked_reason.trim() || null, verification_note: form.verification_note.trim() || null,
       note: form.note.trim() || null };
@@ -242,6 +261,8 @@ export function WorkCommandCenter() {
         <Card><CardHeader><CardTitle>بار تیم‌ها</CardTitle><CardDescription>کار باز هر تیم برای توزیع بهتر مسئولیت.</CardDescription></CardHeader><CardContent><div className='h-64'>{data.by_team.length ? <ResponsiveContainer width='100%' height='100%'><BarChart data={data.by_team.slice(0, 8)} margin={{ left: 8, right: 8 }}><CartesianGrid strokeDasharray='3 3' opacity={.2} /><XAxis dataKey='name' tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey='open' name='کار باز' fill='#8b5cf6' radius={[6, 6, 0, 0]} animationDuration={850} /></BarChart></ResponsiveContainer> : <p className='text-muted-foreground pt-20 text-center text-sm'>با تعریف تیم و واگذاری کار، نمودار شکل می‌گیرد.</p>}</div></CardContent></Card>
       </div>}
 
+      {view === 'projects' && <ProjectExecution items={data.items} people={people} canEdit={canEdit} onTask={openTask} />}
+
       {view === 'sheet' && <Card><CardHeader><CardTitle>شیت مدیریت کارها</CardTitle><CardDescription>مرور همهٔ سایت‌ها، مسئولیت، موعد، اولویت و مرحلهٔ اجرا. برای تغییر هر ردیف، آن را باز کنید.</CardDescription></CardHeader><CardContent>
         <div className='overflow-x-auto rounded-lg border'><table className='w-full min-w-[1050px] text-right text-sm'><thead className='bg-muted/50 text-xs'><tr><th className='p-3'>کار / منبع</th><th>سایت</th><th>تیم</th><th>مسئول</th><th>اولویت</th><th>وضعیت</th><th>موعد</th><th>ساعت</th><th className='p-3'>جزئیات</th></tr></thead><tbody>
           {items.map((item) => <tr key={item.id} className='border-t transition-colors hover:bg-muted/40'><td className='max-w-64 p-3'><strong className='block truncate'>{item.title}</strong>{item.url && <span className='text-muted-foreground block truncate text-[11px]' dir='ltr'>{item.url}</span>}</td><td>{item.site_name}</td><td>{item.team_name || '—'}</td><td>{item.owner_name || <span className='text-amber-600'>بی‌مسئول</span>}</td><td><Badge variant='outline'>{priorityLabel[item.priority]}</Badge></td><td><Badge variant='outline' className={statusTone(item.status)}>{statusLabel[item.status]}</Badge></td><td className={isOverdue(item) ? 'text-rose-600' : ''}>{dateText(item.due_at)}</td><td>{item.estimated_hours ?? '—'}</td><td className='p-3'><Button size='sm' variant='outline' onClick={() => openTask(item)}>باز کردن</Button></td></tr>)}
@@ -294,12 +315,17 @@ export function WorkCommandCenter() {
         <label className='space-y-1 text-xs'>وضعیت<NativeSelect disabled={!canEdit} value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as WorkStatus }))}>{(Object.keys(statusLabel) as WorkStatus[]).map((status) => <NativeSelectOption key={status} value={status}>{statusLabel[status]}</NativeSelectOption>)}</NativeSelect></label>
         <label className='space-y-1 text-xs'>اولویت<NativeSelect disabled={!canEdit} value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as WorkPriority }))}>{(Object.keys(priorityLabel) as WorkPriority[]).map((priority) => <NativeSelectOption key={priority} value={priority}>{priorityLabel[priority]}</NativeSelectOption>)}</NativeSelect></label>
         <label className='space-y-1 text-xs'>موعد<Input disabled={!canEdit} type='datetime-local' value={form.due_at} onChange={(e) => setForm((f) => ({ ...f, due_at: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs'>شروع<Input disabled={!canEdit} type='datetime-local' value={form.start_at} onChange={(e) => setForm((f) => ({ ...f, start_at: e.target.value }))} /></label>
         <label className='space-y-1 text-xs'>ساعت برآوردی<Input disabled={!canEdit} type='number' min={0} max={1000} step={.5} value={form.estimated_hours} onChange={(e) => setForm((f) => ({ ...f, estimated_hours: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs'>درصد پیشرفت<Input disabled={!canEdit} type='number' min={0} max={100} value={form.progress_percent} onChange={(e) => setForm((f) => ({ ...f, progress_percent: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs'>زیرکارِ<NativeSelect disabled={!canEdit} value={form.parent_id} onChange={(e) => setForm((f) => ({ ...f, parent_id: e.target.value }))}><NativeSelectOption value=''>کار اصلی</NativeSelectOption>{(data?.items || []).filter((item) => item.site_id === form.site_id && (editing === 'new' || item.id !== editing.id)).map((item) => <NativeSelectOption key={item.id} value={String(item.id)}>{item.title}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>مایلستون<NativeSelect disabled={!canEdit} value={form.milestone_id} onChange={(e) => setForm((f) => ({ ...f, milestone_id: e.target.value }))}><NativeSelectOption value=''>بدون مایلستون</NativeSelectOption>{milestones.map((entry) => <NativeSelectOption key={entry.id} value={String(entry.id)}>{entry.title}</NativeSelectOption>)}</NativeSelect></label>
         {form.status === 'blocked' && <label className='space-y-1 text-xs sm:col-span-2'>دلیل مانع<Textarea disabled={!canEdit} value={form.blocked_reason} onChange={(e) => setForm((f) => ({ ...f, blocked_reason: e.target.value }))} /></label>}
         {form.status === 'verified' && <label className='space-y-1 text-xs sm:col-span-2'>نتیجهٔ سنجش<Textarea disabled={!canEdit} value={form.verification_note} onChange={(e) => setForm((f) => ({ ...f, verification_note: e.target.value }))} /></label>}
         {canEdit && <label className='space-y-1 text-xs sm:col-span-2'>یادداشت این تغییر<Input value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder='چرا این تصمیم گرفته شد؟' /></label>}
         <div className='flex flex-wrap gap-2 sm:col-span-2'>{canEdit && <Button onClick={saveTask} disabled={saving}>{saving ? 'در حال ذخیره…' : 'ذخیرهٔ کار'}</Button>}{editing !== 'new' && <Button variant='outline' onClick={() => void loadEvents(editing)}>نمایش تاریخچه</Button>}</div>
         {events && <div className='space-y-2 border-t pt-3 sm:col-span-2'><strong className='text-sm'>تاریخچهٔ کار</strong>{events.map((event) => <div key={event.id} className='rounded-lg border p-2 text-xs'><span className='text-muted-foreground'>{new Date(event.created_at).toLocaleString('fa-IR')}</span> · {event.event_type === 'created' ? 'ایجاد' : 'ویرایش'} · {event.actor_username || 'سیستم'} {event.note && <span>· {event.note}</span>}</div>)}</div>}
+        {editing !== 'new' && <TaskExecutionDetails item={editing} items={data?.items || []} people={people} canEdit={canEdit} />}
       </div>}
     </DialogContent></Dialog>
   </div>;

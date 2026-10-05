@@ -12,6 +12,7 @@
 | Timeline | Due date load for the next 21 days and a chronological delivery list |
 | Responsibility graph | Site → task, task → owner and task → team relationships, capped at 35 visible tasks |
 | Teams | Team directory, member assignments and current open work |
+| Projects | Site ownership, milestones, task hierarchy, scheduled work and logged time |
 
 The main dashboard includes a live work pulse and opens this workspace. Each site report still has its existing detailed work tab and shares the same records. The portfolio's next recommended action can be converted into an unassigned task for review; the interface avoids an obvious duplicate while an open task with the same title exists.
 
@@ -19,4 +20,4 @@ The overview API (`GET /api/v1/work/overview`) provides filtered summary totals,
 
 Teams live in `panel_teams`, and users and work items reference them through `team_id`. Creating and editing teams, assigning members and mutating tasks require an administrator. Analysts can read the workspace, while call-center operators remain restricted to call-center. Work events store the acting panel username when an individual session made the change; trusted service jobs appear as system actions. The panel audit also records the route and changed field names.
 
-The migration sequence is `0028_work_command_center.sql` followed by `0029_work_event_actor.sql`. Back up the database before applying migrations in any environment.
+The migration sequence is `0028_work_command_center.sql`, `0029_work_event_actor.sql`, then `0030_project_execution.sql`. Back up the database before applying migrations in any environment. A deeper feature and release analysis is in `project-management-research-2026-10-05.md`.

@@ -15,17 +15,20 @@ def test_call_center_source_and_operator_flow():
     migrations = Path(__file__).parents[3] / "database" / "migrations"
     with eng.begin() as cx:
         for filename in ("0011_ads_click_events.sql", "0018_traffic_intel.sql", "0020_call_center.sql",
-                         "0023_call_outcomes.sql", "0024_call_attribution.sql", "0025_call_attribution_lock.sql"):
+                         "0023_call_outcomes.sql", "0024_call_attribution.sql", "0025_call_attribution_lock.sql",
+                         "0026_panel_auth.sql"):
             cx.connection.driver_connection.executescript((migrations / filename).read_text(encoding="utf-8"))
     app = FastAPI()
     app.include_router(call_center.router, prefix="/api/v1")
     app.dependency_overrides[call_center.engine] = lambda: eng
     client = TestClient(app)
 
-    user = client.post("/api/v1/call-center/users", json={"full_name": "Operator Test", "email": "Operator@Example.com", "role": "call_center"})
+    user = client.post("/api/v1/call-center/users", json={"full_name": "Operator Test", "email": "Operator@Example.com",
+                                                     "username": "operator", "password": "long-test-password", "role": "call_center"})
     assert user.status_code == 201
     assert user.json()["email"] == "operator@example.com"
-    duplicate = client.post("/api/v1/call-center/users", json={"full_name": "Another", "email": "operator@example.com"})
+    duplicate = client.post("/api/v1/call-center/users", json={"full_name": "Another", "email": "operator@example.com",
+                                                          "username": "another", "password": "long-test-password"})
     assert duplicate.status_code == 409
     assert client.patch(f"/api/v1/call-center/users/{user.json()['id']}", json={"active": None}).status_code == 422
     record = client.post("/api/v1/call-center/calls", json={

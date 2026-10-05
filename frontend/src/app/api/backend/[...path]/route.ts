@@ -1,12 +1,11 @@
 /**
  * Server-side proxy: /api/backend/<path> → ${SEO_BRAIN_API_URL}/api/v1/<path>
- * Adds X-API-Token from the server env so the browser never sees it (contract §2).
+ * Forwards only the individual's HttpOnly session, so role checks run in FastAPI.
  * Passes X-Request-ID through (or generates one) and returns the backend body/status untouched.
  */
 import { NextRequest, NextResponse } from 'next/server';
 
 const BASE = (process.env.SEO_BRAIN_API_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
-const TOKEN = process.env.SEO_BRAIN_API_TOKEN ?? '';
 
 async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const { path } = await ctx.params;
@@ -14,9 +13,15 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
     return NextResponse.json({ error: { code: 'bad_path', message: 'مسیر نامعتبر', request_id: null } }, { status: 400 });
   }
   const target = `${BASE}/api/v1/${path.map(encodeURIComponent).join('/')}${req.nextUrl.search}`;
+  const authPath = path.join('/');
+  const publicAuth = authPath === 'auth/login' || authPath === 'auth/status';
+  const session = req.cookies.get('sb_panel_session')?.value;
+  if (!publicAuth && !session) {
+    return NextResponse.json({ error: { code: 'unauthorized', message: 'ورود به حساب کاربری لازم است', request_id: null } }, { status: 401 });
+  }
   const requestId = req.headers.get('x-request-id') ?? crypto.randomUUID().replace(/-/g, '').slice(0, 16);
   const headers: Record<string, string> = { 'X-Request-ID': requestId, Accept: 'application/json' };
-  if (TOKEN) headers['X-API-Token'] = TOKEN;
+  if (session && !publicAuth) headers.Authorization = `Bearer ${session}`;
   const ct = req.headers.get('content-type');
   if (ct) headers['Content-Type'] = ct;
   const hasBody = !['GET', 'HEAD'].includes(req.method);
@@ -39,10 +44,21 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
     };
     const disposition = res.headers.get('content-disposition');
     if (disposition) responseHeaders['Content-Disposition'] = disposition;
-    return new NextResponse(body, {
+    if (authPath === 'auth/login' && res.ok) {
+      const parsed = JSON.parse(text) as { token: string; user: unknown };
+      const response = NextResponse.json({ user: parsed.user });
+      response.cookies.set('sb_panel_session', parsed.token, {
+        httpOnly: true, secure: req.nextUrl.protocol === 'https:', sameSite: 'lax',
+        path: '/', maxAge: 12 * 60 * 60
+      });
+      return response;
+    }
+    const response = new NextResponse(body, {
       status: res.status,
       headers: responseHeaders
     });
+    if (authPath === 'auth/logout') response.cookies.delete('sb_panel_session');
+    return response;
   } catch (e) {
     // backend unreachable → same envelope shape as the backend would send
     return NextResponse.json(

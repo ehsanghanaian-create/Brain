@@ -96,6 +96,65 @@ def test_phone_required_for_manual_calls_and_edits(client):
     assert client.patch(f'{path}/{created.json()["id"]}', json={"phone": ""}).status_code == 422
 
 
+def test_panel_login_role_access_and_audit(client):
+    from seo_brain.api.panel_auth import hash_password
+    _seed(client)
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO panel_users(full_name,email,username,password_hash,role,active,created_at,updated_at)
+            VALUES ('Admin','admin@example.test','admin',:hash,'admin',1,:at,:at)"""),
+            {"hash": hash_password("correct-test-password"), "at": datetime.now(timezone.utc).isoformat()})
+    assert client.get('/api/v1/sites').status_code == 401
+    bad = client.post('/api/v1/auth/login', json={"username": "admin", "password": "bad-password"})
+    assert bad.status_code == 401
+    login = client.post('/api/v1/auth/login', json={"username": "admin", "password": "correct-test-password"})
+    assert login.status_code == 200 and login.json()["user"]["role"] == "admin"
+    admin_headers = {"Authorization": "Bearer " + login.json()["token"]}
+    created = client.post('/api/v1/call-center/users', headers=admin_headers, json={
+        "full_name": "Call Operator", "email": "operator@example.test", "username": "operator",
+        "password": "operator-test-password", "role": "call_center"})
+    assert created.status_code == 201 and "password_hash" not in created.json()
+    operator_login = client.post('/api/v1/auth/login', json={"username": "operator", "password": "operator-test-password"})
+    op_headers = {"Authorization": "Bearer " + operator_login.json()["token"]}
+    assert client.get('/api/v1/sites', headers=op_headers).status_code == 200
+    assert client.get('/api/v1/portfolio/overview', headers=op_headers).status_code == 403
+    assert client.post('/api/v1/call-center/users', headers=op_headers, json={
+        "full_name": "Forbidden", "email": "forbidden@example.test", "username": "forbidden",
+        "password": "forbidden-password", "role": "admin"}).status_code == 403
+    call = client.post('/api/v1/call-center/calls', headers=op_headers, json={"phone": "09120000003"})
+    assert call.status_code == 201
+    audit = client.get('/api/v1/auth/audit', headers=admin_headers)
+    assert audit.status_code == 200
+    assert any(row["actor_username"] == "operator" and row["path"] == "/api/v1/call-center/calls" for row in audit.json()["items"])
+    assert client.get('/api/v1/auth/audit', headers=op_headers).status_code == 403
+    analyst = client.post('/api/v1/call-center/users', headers=admin_headers, json={
+        "full_name": "Analyst", "email": "analyst@example.test", "username": "analyst",
+        "password": "analyst-test-password", "role": "analyst"})
+    assert analyst.status_code == 201
+    analyst_login = client.post('/api/v1/auth/login', json={"username": "analyst", "password": "analyst-test-password"})
+    analyst_headers = {"Authorization": "Bearer " + analyst_login.json()["token"]}
+    assert client.get('/api/v1/portfolio/overview', headers=analyst_headers).status_code == 200
+    assert client.get('/api/v1/call-center/users', headers=analyst_headers).status_code == 403
+    assert client.post('/api/v1/call-center/calls', headers=analyst_headers, json={"phone": "09120000004"}).status_code == 403
+    reset = client.patch(f'/api/v1/call-center/users/{analyst.json()["id"]}', headers=admin_headers,
+                         json={"password": "new-analyst-password"})
+    assert reset.status_code == 200 and "password_hash" not in reset.json()
+    assert client.get('/api/v1/portfolio/overview', headers=analyst_headers).status_code == 401
+    assert client.patch(f'/api/v1/call-center/users/{login.json()["user"]["id"]}', headers=admin_headers,
+                        json={"role": "analyst"}).status_code == 422
+    assert client.patch(f'/api/v1/call-center/users/{created.json()["id"]}', headers=admin_headers,
+                        json={"role": "analyst"}).status_code == 200
+    assert client.get('/api/v1/call-center/calls', headers=op_headers).status_code == 401
+    client.post('/api/v1/auth/logout', headers=op_headers)
+    assert client.get('/api/v1/call-center/calls', headers=op_headers).status_code == 401
+
+
+def test_panel_login_locks_after_repeated_failures(client):
+    for _ in range(5):
+        response = client.post('/api/v1/auth/login', json={"username": "unknown", "password": "incorrect"})
+        assert response.status_code == 401
+    assert client.post('/api/v1/auth/login', json={"username": "unknown", "password": "incorrect"}).status_code == 429
+
+
 def test_late_click_reconciliation_marks_ads_probable(client):
     _seed(client)
     at = (datetime.now(timezone.utc) - timedelta(hours=4)).replace(microsecond=0).isoformat()
@@ -303,7 +362,7 @@ def test_api_token_enforced_when_set(tmp_path, monkeypatch):
 
 def test_legacy_dashboard_mounted(client):
     r = client.get("/legacy/api/sites")
-    assert r.status_code == 200
+    assert r.status_code == 403  # legacy view is administrator-only
     assert client.get("/").json()["legacy_dashboard"] == "/legacy"
 
 

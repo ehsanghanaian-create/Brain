@@ -151,7 +151,7 @@ Graph node types added: `KEYWORD` (from `keywords`, distinct from GSC `QUERY`), 
 | `/jobs` | list, runs, `POST /{id}/run-now`, `GET /runs/{id}/stream` (SSE) |
 | `/settings`, `/help` | key/value; help articles (fa) |
 
-Auth: single local API token (generated at setup, stored in SecretStore, sent by the frontend from `.env.local`); CORS restricted to `http://localhost:3000`; both servers bind `127.0.0.1` locally. Multi-user auth is a server-phase concern (Phase 19), designed as a pluggable dependency in `deps.py`.
+Auth: named panel accounts use password hashes, opaque sessions, role checks and an audit log (see `panel-auth.md`). The internal API token remains for trusted server-to-server work and is never forwarded for browser requests.
 
 ---
 

@@ -179,7 +179,7 @@ function LiveChart({
 
 export function CallCenterPage() {
   const [sites, setSites] = useState<Site[]>([]);
-  const [users, setUsers] = useState<PanelUser[]>([]);
+  const [users, setUsers] = useState<Pick<PanelUser, 'id' | 'full_name' | 'active'>[]>([]);
   const [records, setRecords] = useState<CallRecord[]>([]);
   const [recordTotal, setRecordTotal] = useState(0);
   const [page, setPage] = useState(0);
@@ -261,7 +261,7 @@ export function CallCenterPage() {
     void load();
   }, [load]);
   useEffect(() => {
-    Promise.all([endpoints.sites(), callCenterApi.users()])
+    Promise.all([endpoints.sites(), callCenterApi.operators()])
       .then(([s, u]) => {
         setSites(s);
         setUsers(u.filter((x) => x.active));

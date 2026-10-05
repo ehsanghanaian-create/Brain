@@ -148,6 +148,31 @@ def create_app() -> FastAPI:
     origins = [o.strip() for o in (env("FRONTEND_ORIGIN", "http://localhost:3000,http://127.0.0.1:3000") or "").split(",") if o.strip()]
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"], expose_headers=["X-Request-ID"])
     install_error_handlers(app)
+    @app.middleware("http")
+    async def panel_audit_middleware(request, call_next):
+        if request.url.path.startswith("/legacy"):
+            from .panel_auth import require_panel
+            from .deps import engine as panel_engine
+            resolve_engine = request.app.dependency_overrides.get(panel_engine, panel_engine)
+            try:
+                user = require_panel(request, resolve_engine())
+                if not user or user["role"] != "admin":
+                    from fastapi.responses import JSONResponse
+                    return JSONResponse({"error": "forbidden"}, status_code=403)
+            except Exception:
+                from fastapi.responses import JSONResponse
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+        response = await call_next(request)
+        if getattr(request.state, "panel_user", None):
+            try:
+                from .panel_auth import audit_mutation
+                from .deps import engine as panel_engine
+                resolve_engine = request.app.dependency_overrides.get(panel_engine, panel_engine)
+                audit_mutation(resolve_engine(), request, response.status_code, getattr(request.state, "audit_fields", None))
+            except Exception as exc:  # noqa: BLE001 — logging failure must be observable but not alter a successful mutation
+                import logging
+                logging.getLogger("api.audit").exception("audit write failed: %s", exc)
+        return response
 
     deps = [Depends(require_token)]
     app.include_router(health.router, prefix=API_PREFIX)
@@ -155,6 +180,8 @@ def create_app() -> FastAPI:
     from .routers import work as work_router_mod
     app.include_router(google_router_mod.callback_router, prefix=API_PREFIX)     # Google's browser redirect cannot send X-API-Token; guarded by the state nonce
     app.include_router(tracker.router, prefix=API_PREFIX)   # عمومی — امنیتش با write-key سایت است، نه X-API-Token
+    from .routers import panel_auth as panel_auth_router
+    app.include_router(panel_auth_router.router, prefix=API_PREFIX)
     for r in (portfolio.router, ads_data.router, call_center.router, sites.router, sites.gsc_router, google_router_mod.router, graph.router, memory.router, knowledge.router, site_security.router, site_media.router, network.router, ip_graph.router, ops.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router, reports.router, work_router_mod.router, traffic.router):
         app.include_router(r, prefix=API_PREFIX, dependencies=deps)
 

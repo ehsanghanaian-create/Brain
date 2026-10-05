@@ -16,7 +16,13 @@ export function UserManagement() {
   const [error, setError] = useState('');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>('call_center');
+  const [resetId, setResetId] = useState<number | null>(null);
+  const [resetUsername, setResetUsername] = useState('');
+  const [resetPassword, setResetPassword] = useState('');
+  const [audit, setAudit] = useState<Awaited<ReturnType<typeof callCenterApi.audit>> | null>(null);
   const reduced = useReducedMotion();
   const load = useCallback(
     () =>
@@ -38,11 +44,15 @@ export function UserManagement() {
       await callCenterApi.addUser({
         full_name: name.trim(),
         email: email.trim(),
+        username: username.trim(),
+        password,
         role,
         active: true
       });
       setName('');
       setEmail('');
+      setUsername('');
+      setPassword('');
       await load();
       toast.success('عضو تیم ثبت شد');
     } catch (e) {
@@ -60,18 +70,28 @@ export function UserManagement() {
       toast.error(e instanceof Error ? e.message : String(e));
     }
   }
+  async function saveCredentials() {
+    if (resetId === null) return;
+    try {
+      const passwordChanged = Boolean(resetPassword);
+      await callCenterApi.patchUser(resetId, { username: resetUsername.trim(), ...(resetPassword ? { password: resetPassword } : {}) });
+      setResetId(null);
+      setResetPassword('');
+      await load();
+      toast.success(passwordChanged ? 'اطلاعات ورود ذخیره شد؛ نشست‌های قبلی کاربر بسته شدند' : 'نام کاربری ذخیره شد؛ نشست‌های قبلی کاربر بسته شدند');
+    } catch (cause) { toast.error(cause instanceof Error ? cause.message : String(cause)); }
+  }
 
   return (
     <div className='space-y-4'>
-      <p className='rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs leading-6 text-foreground'>
-        این صفحه دفتر اعضای تیم و نقش کاری آن‌هاست. در نسخهٔ فعلی SEO Brain ورود فردی و محدودسازی
-        دسترسی بر اساس این نقش‌ها هنوز فعال نیست.
+      <p className='rounded-xl border border-primary/30 bg-primary/10 px-4 py-3 text-xs leading-6 text-foreground'>
+        هر کاربر با نام کاربری و گذرواژهٔ اختصاصی وارد می‌شود. مدیر دسترسی کامل دارد؛ تحلیل‌گر فقط گزارش‌ها را می‌بیند و اپراتور کال‌سنتر فقط صفحهٔ تماس‌ها را.
       </p>
       <div className='grid gap-5 xl:grid-cols-[1fr_2fr]'>
         <Card className='h-fit'>
           <CardHeader>
             <CardTitle>افزودن عضو تیم</CardTitle>
-            <CardDescription>نقش‌ها برای ثبت و دسته‌بندی فعالیت تیم استفاده می‌شوند.</CardDescription>
+            <CardDescription>نام کاربری، گذرواژه و سطح دسترسی را برای هر عضو مشخص کنید.</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={add} className='space-y-4'>
@@ -97,6 +117,14 @@ export function UserManagement() {
                   required
                   placeholder='name@example.com'
                 />
+              </label>
+              <label htmlFor='team-username' className='block space-y-1.5 text-sm font-medium'>
+                نام کاربری
+                <Input id='team-username' dir='ltr' autoComplete='off' minLength={3} required value={username} onChange={(e) => setUsername(e.target.value)} placeholder='username' />
+              </label>
+              <label htmlFor='team-password' className='block space-y-1.5 text-sm font-medium'>
+                گذرواژه (حداقل ۱۲ نویسه)
+                <Input id='team-password' type='password' dir='ltr' autoComplete='new-password' minLength={12} required value={password} onChange={(e) => setPassword(e.target.value)} />
               </label>
               <label htmlFor='team-role' className='block space-y-1.5 text-sm font-medium'>
                 نقش
@@ -144,6 +172,7 @@ export function UserManagement() {
                 </span>
                 <span className='min-w-36 flex-1'>
                   <strong className='block text-sm'>{user.full_name}</strong>
+                  <span className='text-muted-foreground block text-xs' dir='ltr'>@{user.username || 'بدون نام کاربری'}</span>
                   <span className='text-muted-foreground block text-xs' dir='ltr'>
                     {user.email}
                   </span>
@@ -167,6 +196,12 @@ export function UserManagement() {
                 >
                   {user.active ? 'فعال' : 'غیرفعال'}
                 </Button>
+                <Button variant='outline' size='sm' onClick={() => { setResetId(resetId === user.id ? null : user.id); setResetUsername(user.username || ''); setResetPassword(''); }}>اطلاعات ورود</Button>
+                {resetId === user.id && <div className='grid w-full gap-2 rounded-lg bg-muted p-3 sm:grid-cols-[1fr_1fr_auto]'>
+                  <Input aria-label={`نام کاربری ${user.full_name}`} dir='ltr' value={resetUsername} onChange={(e) => setResetUsername(e.target.value)} />
+                  <Input aria-label={`گذرواژه جدید ${user.full_name}`} type='password' dir='ltr' minLength={12} placeholder='گذرواژه جدید (اختیاری)' value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} />
+                  <Button onClick={saveCredentials}>ذخیره</Button>
+                </div>}
               </motion.div>
             ))}
             {!users.length && !error && (
@@ -182,6 +217,10 @@ export function UserManagement() {
           </CardContent>
         </Card>
       </div>
+      <Card><CardHeader><CardTitle>گزارش فعالیت کاربران</CardTitle><CardDescription>زمان، کاربر، مسیر و فیلدهای تغییرکرده؛ گذرواژه در لاگ ذخیره نمی‌شود.</CardDescription></CardHeader>
+        <CardContent className='space-y-3'><Button variant='outline' onClick={async () => { try { setAudit(await callCenterApi.audit()); } catch (cause) { toast.error(cause instanceof Error ? cause.message : String(cause)); } }}>نمایش آخرین فعالیت‌ها</Button>
+          {audit && <div className='overflow-x-auto'><table className='w-full min-w-[700px] text-right text-xs'><thead><tr className='border-b'><th className='p-2'>زمان</th><th>کاربر</th><th>اقدام</th><th>مسیر</th><th>فیلدها</th></tr></thead><tbody>{audit.items.map((item) => <tr key={item.id} className='border-b'><td className='p-2'>{new Date(item.created_at).toLocaleString('fa-IR')}</td><td className='p-2'>{item.actor_username}</td><td className='p-2'>{item.method}</td><td className='p-2' dir='ltr'>{item.path}</td><td className='p-2'>{(JSON.parse(item.changed_fields) as string[]).join('، ') || '—'}</td></tr>)}</tbody></table></div>}
+        </CardContent></Card>
     </div>
   );
 }

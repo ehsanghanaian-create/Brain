@@ -4,7 +4,7 @@ from __future__ import annotations
 import secrets
 from functools import lru_cache
 
-from fastapi import Depends, Header, HTTPException, Path
+from fastapi import Depends, Header, HTTPException, Path, Request
 from sqlalchemy import Engine
 
 from ..ai import AIOrchestrator, AIRouter, EchoProvider, MemoryService, Route, TaskKind
@@ -100,9 +100,11 @@ def require_site(site_id: str = Path(...), repo: SitesRepository = Depends(sites
     return s
 
 
-def require_token(x_api_token: str | None = Header(default=None)) -> None:
-    """Local API token. If API_TOKEN is unset, the API is open on loopback (dev default);
-    if set, every request must send `X-API-Token`. Setup will generate one for the frontend."""
+def require_token(request: Request, x_api_token: str | None = Header(default=None), eng: Engine = Depends(engine)) -> None:
+    """Accept trusted service token or an individual panel session with role checks."""
+    from .panel_auth import require_panel
     expected = env("API_TOKEN")
-    if expected and not (x_api_token and secrets.compare_digest(x_api_token, expected)):
-        raise HTTPException(401, "missing or invalid X-API-Token")
+    service_valid = bool(expected and x_api_token and secrets.compare_digest(x_api_token, expected))
+    if expected and not service_valid and not request.headers.get("authorization", "").lower().startswith("bearer "):
+        raise HTTPException(401, "missing or invalid credentials")
+    require_panel(request, eng, service_token_valid=service_valid)

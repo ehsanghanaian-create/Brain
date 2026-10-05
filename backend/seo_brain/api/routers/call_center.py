@@ -12,12 +12,13 @@ import io
 import json
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import Engine, text
 
 from ...call_center.sheet_import import import_workbook
 from ...call_center.attribution import suggest
+from ..panel_auth import hash_password
 from ..deps import engine
 from ..errors import ApiError
 
@@ -195,6 +196,8 @@ async def import_calls(file: UploadFile = File(...), dry_run: bool = Form(True),
 class UserIn(BaseModel):
     full_name: str = Field(min_length=2, max_length=120)
     email: str = Field(min_length=3, max_length=254)
+    username: str = Field(min_length=3, max_length=40, pattern=r"^[a-zA-Z][a-zA-Z0-9_.-]*$")
+    password: str = Field(min_length=12, max_length=256)
     role: Role = "call_center"
     active: bool = True
 
@@ -202,6 +205,8 @@ class UserIn(BaseModel):
 class UserPatch(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=120)
     email: str | None = Field(default=None, min_length=3, max_length=254)
+    username: str | None = Field(default=None, min_length=3, max_length=40, pattern=r"^[a-zA-Z][a-zA-Z0-9_.-]*$")
+    password: str | None = Field(default=None, min_length=12, max_length=256)
     role: Role | None = None
     active: bool | None = None
 
@@ -259,6 +264,8 @@ def _call_row(row) -> dict:
 
 def _user_row(row) -> dict:
     out = dict(row)
+    out["has_password"] = bool(out.get("password_hash"))
+    out.pop("password_hash", None)
     out["active"] = bool(out["active"])
     return out
 
@@ -270,9 +277,18 @@ def users(eng: Engine = Depends(engine)) -> list[dict]:
     return [_user_row(row) for row in rows]
 
 
+@router.get("/operators")
+def operators(eng: Engine = Depends(engine)) -> list[dict]:
+    with eng.connect() as cx:
+        rows = cx.execute(text("SELECT id, full_name, active FROM panel_users ORDER BY active DESC, full_name")).mappings().all()
+    return [dict(row) for row in rows]
+
+
 @router.post("/users", status_code=201)
-def create_user(body: UserIn, eng: Engine = Depends(engine)) -> dict:
+def create_user(body: UserIn, request: Request, eng: Engine = Depends(engine)) -> dict:
     values = body.model_dump()
+    values["username"] = values["username"].strip().lower()
+    values["password_hash"] = hash_password(values.pop("password"))
     values["email"] = values["email"].strip().lower()
     values["full_name"] = values["full_name"].strip()
     if len(values["full_name"]) < 2 or "@" not in values["email"]:
@@ -280,23 +296,35 @@ def create_user(body: UserIn, eng: Engine = Depends(engine)) -> dict:
     values["active"] = int(values["active"])
     values["at"] = now()
     with eng.begin() as cx:
+        if getattr(request.state, "panel_user", None) and request.state.panel_user["role"] != "admin":
+            raise ApiError(403, "فقط مدیر می‌تواند کاربر بسازد", code="forbidden")
+        if cx.execute(text("SELECT 1 FROM panel_users WHERE username=:username"), values).first():
+            raise ApiError(409, "این نام کاربری قبلاً ثبت شده است", code="conflict")
         if cx.execute(text("SELECT 1 FROM panel_users WHERE email=:email"), values).first():
             raise ApiError(409, "این ایمیل قبلاً ثبت شده است", code="conflict")
-        uid = cx.execute(text("""INSERT INTO panel_users(full_name,email,role,active,created_at,updated_at)
-            VALUES (:full_name,:email,:role,:active,:at,:at)"""), values).lastrowid
+        uid = cx.execute(text("""INSERT INTO panel_users(full_name,email,username,password_hash,role,active,created_at,updated_at)
+            VALUES (:full_name,:email,:username,:password_hash,:role,:active,:at,:at)"""), values).lastrowid
         row = cx.execute(text("SELECT * FROM panel_users WHERE id=:id"), {"id": uid}).mappings().one()
+    request.state.audit_fields = ["full_name", "email", "username", "role", "active"]
     return _user_row(row)
 
 
 @router.patch("/users/{user_id}")
-def update_user(user_id: int, body: UserPatch, eng: Engine = Depends(engine)) -> dict:
+def update_user(user_id: int, body: UserPatch, request: Request, eng: Engine = Depends(engine)) -> dict:
     values = body.model_dump(exclude_unset=True)
+    if getattr(request.state, "panel_user", None) and request.state.panel_user["role"] != "admin":
+        raise ApiError(403, "فقط مدیر می‌تواند کاربر را تغییر دهد", code="forbidden")
     if not values:
         raise ApiError(400, "تغییری ارسال نشده است", code="bad_request")
     if any(value is None for value in values.values()):
         raise ApiError(422, "فیلدهای کاربر نمی‌توانند خالی باشند", code="validation_error")
     if "email" in values and values["email"] is not None:
         values["email"] = values["email"].strip().lower()
+    if "username" in values and values["username"] is not None:
+        values["username"] = values["username"].strip().lower()
+    if "password" in values:
+        values["password_hash"] = hash_password(values.pop("password"))
+    request.state.audit_fields = ["password" if key == "password_hash" else key for key in values]
     if "full_name" in values and values["full_name"] is not None:
         values["full_name"] = values["full_name"].strip()
     if ("full_name" in values and len(values["full_name"]) < 2) or ("email" in values and "@" not in values["email"]):
@@ -304,11 +332,19 @@ def update_user(user_id: int, body: UserPatch, eng: Engine = Depends(engine)) ->
     if "active" in values:
         values["active"] = int(values["active"])
     with eng.begin() as cx:
-        if not cx.execute(text("SELECT 1 FROM panel_users WHERE id=:id"), {"id": user_id}).first():
+        current_user = cx.execute(text("SELECT id,role,active FROM panel_users WHERE id=:id"), {"id": user_id}).mappings().first()
+        if not current_user:
             raise ApiError(404, "کاربر پیدا نشد", code="not_found")
+        if current_user["role"] == "admin" and current_user["active"] and (values.get("role", "admin") != "admin" or values.get("active", 1) == 0):
+            if cx.execute(text("SELECT COUNT(*) FROM panel_users WHERE role='admin' AND active=1")).scalar_one() <= 1:
+                raise ApiError(422, "آخرین مدیر فعال را نمی‌توان غیرفعال کرد", code="validation_error")
+        if "username" in values and cx.execute(text("SELECT 1 FROM panel_users WHERE username=:username AND id<>:id"), {"username": values["username"], "id": user_id}).first():
+            raise ApiError(409, "این نام کاربری قبلاً ثبت شده است", code="conflict")
         if "email" in values and cx.execute(text("SELECT 1 FROM panel_users WHERE email=:email AND id<>:id"), {"email": values["email"], "id": user_id}).first():
             raise ApiError(409, "این ایمیل قبلاً ثبت شده است", code="conflict")
         cx.execute(text("UPDATE panel_users SET " + ", ".join(f"{key}=:{key}" for key in values) + ", updated_at=:at WHERE id=:id"), {**values, "at": now(), "id": user_id})
+        if "username" in values or "password_hash" in values or "role" in values or values.get("active") == 0:
+            cx.execute(text("UPDATE panel_sessions SET revoked_at=:at WHERE user_id=:id AND revoked_at IS NULL"), {"at": now(), "id": user_id})
         row = cx.execute(text("SELECT * FROM panel_users WHERE id=:id"), {"id": user_id}).mappings().one()
     return _user_row(row)
 
@@ -336,7 +372,7 @@ def calls(source: Source | None = None, status: Status | None = None, site_id: s
 
 
 @router.post("/calls", status_code=201)
-def create_call(body: CallIn, eng: Engine = Depends(engine)) -> dict:
+def create_call(body: CallIn, request: Request, eng: Engine = Depends(engine)) -> dict:
     values = body.model_dump()
     values["occurred_at"] = utc_time(body.occurred_at or datetime.now(timezone.utc))
     values["follow_up_at"] = utc_time(body.follow_up_at) if body.follow_up_at else None
@@ -366,11 +402,12 @@ def create_call(body: CallIn, eng: Engine = Depends(engine)) -> dict:
         columns += ("attribution_event", "attribution_checked_at", "auto_attributed", "attribution_locked")
         result = cx.execute(text("INSERT INTO call_center_calls(" + ",".join(columns) + ",created_at,updated_at) VALUES (" + ",".join(":" + c for c in columns) + ",:at,:at)"), values)
         row = cx.execute(text("SELECT c.*, u.full_name AS operator_name FROM call_center_calls c LEFT JOIN panel_users u ON u.id=c.operator_id WHERE c.id=:id"), {"id": result.lastrowid}).mappings().one()
+    request.state.audit_fields = list(body.model_fields_set)
     return _call_row(row)
 
 
 @router.patch("/calls/{call_id}")
-def update_call(call_id: int, body: CallPatch, eng: Engine = Depends(engine)) -> dict:
+def update_call(call_id: int, body: CallPatch, request: Request, eng: Engine = Depends(engine)) -> dict:
     values = body.model_dump(exclude_unset=True)
     if not values:
         raise ApiError(400, "تغییری ارسال نشده است", code="bad_request")
@@ -405,6 +442,7 @@ def update_call(call_id: int, body: CallPatch, eng: Engine = Depends(engine)) ->
             values.update(attribution)
         cx.execute(text("UPDATE call_center_calls SET " + ", ".join(f"{key}=:{key}" for key in values if key not in ("id", "at")) + ", updated_at=:at WHERE id=:id"), values)
         row = cx.execute(text("SELECT c.*, u.full_name AS operator_name FROM call_center_calls c LEFT JOIN panel_users u ON u.id=c.operator_id WHERE c.id=:id"), values).mappings().one()
+    request.state.audit_fields = list(body.model_fields_set)
     return _call_row(row)
 
 

@@ -31,12 +31,17 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import * as React from 'react';
 import { Icons } from '@/components/icons';
+import { allowedPage, homeFor, type PanelRole } from '@/lib/panel-access';
+import { api } from '@/lib/api/client';
 
-export default function AppSidebar() {
+export default function AppSidebar({ user }: { user: { full_name: string; role: PanelRole } }) {
   const pathname = usePathname();
   const { isOpen } = useMediaQuery();
   const router = useRouter();
   const filteredGroups = useFilteredNavGroups(navGroups);
+  const visibleGroups = filteredGroups.map((group) => ({ ...group,
+    items: group.items.filter((item) => allowedPage(user.role, item.url))
+  })).filter((group) => group.items.length > 0);
 
   React.useEffect(() => {
     // Side effects based on sidebar state changes
@@ -47,7 +52,7 @@ export default function AppSidebar() {
       <SidebarHeader className='border-b'>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size='lg' tooltip='SEO Brain' render={<Link href='/dashboard/overview' aria-label='صفحه اصلی SEO Brain' />} className='data-[state=open]:bg-sidebar-accent'>
+            <SidebarMenuButton size='lg' tooltip='SEO Brain' render={<Link href={homeFor(user?.role ?? 'admin')} aria-label='صفحه اصلی SEO Brain' />} className='data-[state=open]:bg-sidebar-accent'>
               <span className='bg-primary text-primary-foreground flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold'>SB</span>
               <span className='grid flex-1 text-start leading-tight'><span className='truncate text-sm font-semibold'>SEO Brain</span><span className='text-muted-foreground truncate text-[11px]'>سیستم‌عامل سئوی محلی</span></span>
             </SidebarMenuButton>
@@ -55,7 +60,7 @@ export default function AppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent className='overflow-x-hidden'>
-        {filteredGroups.map((group) => (
+        {visibleGroups.map((group) => (
           <SidebarGroup key={group.label || 'ungrouped'} className='py-0'>
             {group.label && <SidebarGroupLabel>{group.label}</SidebarGroupLabel>}
             <SidebarMenu>
@@ -136,15 +141,18 @@ export default function AppSidebar() {
                 <DropdownMenuGroup>
                   <DropdownMenuLabel className='p-0 font-normal'>
                     <div className='text-muted-foreground px-1 py-1.5 text-sm'>
-                      کاربر محلی — بدون ورود. بک‌اند: 127.0.0.1:8000
+                      {user ? `${user.full_name} · ${user.role === 'admin' ? 'مدیر' : user.role === 'analyst' ? 'تحلیل‌گر' : 'اپراتور کال‌سنتر'}` : 'در حال دریافت کاربر…'}
                     </div>
                   </DropdownMenuLabel>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
-                  <DropdownMenuItem onClick={() => router.push('/dashboard/settings')}>
+                  {user?.role === 'admin' && <DropdownMenuItem onClick={() => router.push('/dashboard/settings')}>
                     <Icons.settings className='me-2 h-4 w-4' />
                     تنظیمات
+                  </DropdownMenuItem>}
+                  <DropdownMenuItem onClick={async () => { await api('/auth/logout', { method: 'POST' }); router.replace('/login'); router.refresh(); }}>
+                    خروج از حساب
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>

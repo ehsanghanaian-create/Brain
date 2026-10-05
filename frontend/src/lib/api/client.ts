@@ -372,7 +372,7 @@ export const endpoints = {
   createSiteWork: (id: string, body: Record<string, unknown>) => api<import('@/features/reports/types').WorkItem>(`/sites/${encodeURIComponent(id)}/work`, { method: 'POST', json: body }),
   updateSiteWork: (id: string, itemId: number, body: Record<string, unknown>) => api<import('@/features/reports/types').WorkItem>(`/sites/${encodeURIComponent(id)}/work/${itemId}`, { method: 'PATCH', json: body }),
   siteWorkEvents: (id: string, itemId: number) => api<import('@/features/reports/types').WorkEvent[]>(`/sites/${encodeURIComponent(id)}/work/${itemId}/events`),
-  panelUsers: () => api<{ id: number; full_name: string; active: boolean }[]>('/call-center/users'),
+  panelUsers: () => api<{ id: number; full_name: string; active: boolean }[]>('/call-center/operators'),
   reportMainKeyword: (id: string, days = 28) => api<ReportMainKeyword>(`/sites/${encodeURIComponent(id)}/report/main-keyword?days=${days}`),
   setReportMainKeyword: (id: string, keyword: string) =>
     api<{ keyword: string; performance: ReportKeywordPerf | null }>(`/sites/${encodeURIComponent(id)}/report/main-keyword`, { method: 'PUT', json: { keyword } }),

@@ -18,10 +18,10 @@ Frontend client: TypeScript types + client are **generated** from the OpenAPI sn
 
 ## 2. Authentication
 
-* Header **`X-API-Token: <token>`** on every request except `GET /api/v1/health`.
-* Backend: `API_TOKEN` in `.env`. If unset (dev default), the API is open on loopback — the frontend must still *send* the header when it has one.
-* Frontend: the token lives **server-side** in `frontend/.env.local` (`SEO_BRAIN_API_TOKEN`) and is attached by a Next.js route-handler proxy `app/api/backend/[...path]/route.ts` that forwards `/api/backend/*` → `${SEO_BRAIN_API_URL}/api/v1/*`. The browser never sees the token. Server components may call the backend directly with the same env vars.
-* Failure: `401 {"error":{"code":"unauthorized"}}` → the UI shows a "backend token missing/invalid" banner with the fix (`.env`), no login screen (single local user). Multi-user auth arrives with Phase 19 behind the same header/proxy without contract change.
+* Each panel user signs in with a unique username and password at `/login`. The backend stores a password hash and issues a revocable session. The Next.js proxy stores the session in an HttpOnly cookie and forwards it as a Bearer token; browser code never receives the token.
+* The backend enforces `admin`, `analyst`, and `call_center` roles on API requests. The frontend also limits routes and navigation by role. See `panel-auth.md` for the access matrix and bootstrap process.
+* `X-API-Token: <token>` remains a privileged credential for trusted internal automation and server components. Configure `API_TOKEN` in the backend environment and `SEO_BRAIN_API_TOKEN` on the frontend server; never send it from browser requests.
+* `/api/v1/health`, `/api/v1/auth/status`, and `/api/v1/auth/login` are public. Unauthorized panel calls return 401 and forbidden role calls return 403.
 
 ## 3. Response formats
 

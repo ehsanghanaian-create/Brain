@@ -10,6 +10,8 @@ export type PanelUser = {
   id: number;
   full_name: string;
   email: string;
+  username: string | null;
+  has_password: boolean;
   role: UserRole;
   active: boolean;
   created_at: string;
@@ -104,10 +106,12 @@ const params = (values: Record<string, string | number | undefined>) => {
 };
 export const callCenterApi = {
   users: () => api<PanelUser[]>('/call-center/users'),
-  addUser: (body: Omit<PanelUser, 'id' | 'created_at' | 'updated_at'>) =>
+  operators: () => api<{ id: number; full_name: string; active: boolean }[]>('/call-center/operators'),
+  addUser: (body: { full_name: string; email: string; username: string; password: string; role: UserRole; active: boolean }) =>
     api<PanelUser>('/call-center/users', { method: 'POST', json: body }),
-  patchUser: (id: number, body: Partial<PanelUser>) =>
+  patchUser: (id: number, body: Partial<PanelUser> & { password?: string }) =>
     api<PanelUser>(`/call-center/users/${id}`, { method: 'PATCH', json: body }),
+  audit: () => api<{ items: { id: number; actor_username: string; actor_role: UserRole; method: string; path: string; status_code: number; changed_fields: string; created_at: string }[]; total: number }>('/auth/audit?limit=100'),
   calls: (filters: {
     source?: string;
     status?: string;
@@ -166,7 +170,7 @@ export const confidenceLabel: Record<SourceConfidence, string> = {
   confirmed: 'قطعی', probable: 'محتمل', unknown: 'نامشخص'
 };
 export const roleLabel: Record<UserRole, string> = {
-  admin: 'مدیر',
+  admin: 'دسترسی کامل (مدیر)',
   analyst: 'تحلیل‌گر',
   call_center: 'اپراتور کال‌سنتر'
 };

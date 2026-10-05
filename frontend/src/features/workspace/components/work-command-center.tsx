@@ -301,7 +301,7 @@ export function WorkCommandCenter() {
         </tbody></table></div>{!items.length && <p className='text-muted-foreground py-10 text-center text-sm'>کاری مطابق فیلتر پیدا نشد.</p>}
       </CardContent></Card>}
 
-      {view === 'kanban' && <TeamBoard items={data.items} sites={sites} people={people} preferredSiteId={filters.site_id} meId={meId}
+      {view === 'kanban' && <TeamBoard items={data.items} sites={sites.filter((site) => canEdit || projects.some((project) => project.site_id === site.site_id && project.my_responsibility))} people={people} preferredSiteId={filters.site_id} meId={meId}
         canLead={canLead} canUpdate={canUpdate} onOpen={openTask} onPrepareStatus={(item, status) => { openTask(item); setForm((current) => ({ ...current, status })); }}
         onSiteChange={(siteId) => setFilters((current) => ({ ...current, site_id: siteId || undefined }))}
         onChanged={async () => { await refresh(true); }} />}

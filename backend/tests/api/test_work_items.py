@@ -93,6 +93,70 @@ def test_board_order_and_checklist_persist_with_site_boundary(client):
     assert client.patch(f"/api/v1/sites/other/work/{first['id']}/checklist/{check.json()['id']}", json={"done": False}).status_code == 404
 
 
+def test_project_labels_and_atomic_bulk_work_updates(client):
+    base = "/api/v1/sites/demo/work"
+    first = client.post(base, json={"title": "Audit crawl paths"}).json()
+    second = client.post(base, json={"title": "Review content map"}).json()
+    foreign = client.post("/api/v1/sites/other/work", json={"title": "Other project work"}).json()
+    label = client.post(base + "/labels", json={"name": "Technical SEO", "color": "#2563eb"})
+    assert label.status_code == 201
+    label_id = label.json()["id"]
+    assert client.post(base + "/labels", json={"name": "Technical SEO"}).status_code == 409
+    assert client.put(f"{base}/{first['id']}/labels/{label_id}").status_code == 200
+    assert client.put(f"{base}/{first['id']}/labels/{label_id}").status_code == 200
+    assert [row["id"] for row in client.get(f"{base}/{first['id']}/labels").json()] == [label_id]
+    assert client.put(f"/api/v1/sites/other/work/{foreign['id']}/labels/{label_id}").status_code == 404
+    overview = client.get("/api/v1/work/overview?site_id=demo").json()
+    assert next(row for row in overview["items"] if row["id"] == first["id"])["labels"][0]["name"] == "Technical SEO"
+    first_page = client.get('/api/v1/work/board/demo?limit=1').json()
+    assert len(first_page['items']) == 1 and first_page['next_after_id'] == first['id']
+    second_page = client.get(f'/api/v1/work/board/demo?limit=1&after_id={first_page["next_after_id"]}').json()
+    assert second_page['items'][0]['id'] == second['id'] and second_page['next_after_id'] is None
+    invalid = client.post(base + "/bulk", json={"item_ids": [first["id"], foreign["id"]],
+        "patch": {"priority": "critical"}})
+    assert invalid.status_code == 404
+    assert all(row["priority"] == "normal" for row in client.get(base).json()["items"])
+    applied = client.post(base + "/bulk", json={"item_ids": [first["id"], second["id"]],
+        "patch": {"priority": "high", "owner_id": 1}})
+    assert applied.status_code == 200 and applied.json()["updated"] == 2
+    assert all(row["priority"] == "high" and row["owner_id"] == 1 for row in client.get(base).json()["items"])
+    assert client.delete(f"{base}/{first['id']}/labels/{label_id}").status_code == 204
+    assert client.get(f"{base}/{first['id']}/labels").json() == []
+
+
+def test_typed_project_fields_validate_and_persist(client):
+    base = '/api/v1/sites/demo/work'
+    item = client.post(base, json={'title': 'Measure SEO impact'}).json()
+    other = client.post('/api/v1/sites/other/work', json={'title': 'Unrelated task'}).json()
+    choice = client.post(base + '/fields', json={'name': 'Action type', 'field_type': 'select',
+        'options': ['Technical', 'Content']})
+    assert choice.status_code == 201
+    field_id = choice.json()['id']
+    assert client.post(base + '/fields', json={'name': 'Action type', 'field_type': 'text'}).status_code == 409
+    value_url = f"{base}/{item['id']}/fields/{field_id}"
+    assert client.put(value_url, json={'value': 'Unknown'}).status_code == 422
+    assert client.put(f"/api/v1/sites/other/work/{other['id']}/fields/{field_id}",
+        json={'value': 'Technical'}).status_code == 404
+    assert client.put(value_url, json={'value': 'Technical'}).status_code == 200
+    assert client.get(f"{base}/{item['id']}/fields").json()[0]['value'] == 'Technical'
+    numeric = client.post(base + '/fields', json={'name': 'Budget', 'field_type': 'number'}).json()
+    number_url = f"{base}/{item['id']}/fields/{numeric['id']}"
+    assert client.put(number_url, json={'value': 'not a number'}).status_code == 422
+    assert client.put(number_url, json={'value': 12.5}).json()['value'] == 12.5
+    board_item = next(row for row in client.get('/api/v1/work/board/demo').json()['items'] if row['id'] == item['id'])
+    assert any(field['name'] == 'Budget' and field['value'] == 12.5 for field in board_item['custom_fields'])
+    calendar = client.post(base + '/fields', json={'name': 'Review date', 'field_type': 'date'}).json()
+    date_url = f"{base}/{item['id']}/fields/{calendar['id']}"
+    assert client.put(date_url, json={'value': '2026-02-31'}).status_code == 422
+    assert client.put(date_url, json={'value': '2026-12-31'}).status_code == 200
+    assert client.put(value_url, json={'value': None}).status_code == 200
+    assert client.get(f"{base}/{item['id']}/fields").json()[0]['value'] is None
+    events = client.get(f"{base}/{item['id']}/events").json()
+    assert 'field_updated' in [event['event_type'] for event in events]
+    assert client.delete(f"{base}/fields/{numeric['id']}").status_code == 204
+    assert all(field['id'] != numeric['id'] for field in client.get(f"{base}/{item['id']}/fields").json())
+
+
 def test_cross_site_command_center_teams_and_ownership(client):
     team = client.post("/api/v1/work/teams", json={"name": "SEO", "color": "#1abb9c"})
     assert team.status_code == 201, team.text

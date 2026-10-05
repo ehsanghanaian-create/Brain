@@ -2,6 +2,14 @@ import { api } from '@/lib/api/client';
 import type { WorkItem, WorkStatus } from '@/features/reports/types';
 
 export type WorkPriority = 'critical' | 'high' | 'normal' | 'low';
+export type WorkLabel = { id: number; site_id: string; name: string; color: string };
+export type WorkCustomField = { id: number; site_id: string; name: string;
+  field_type: 'text' | 'number' | 'date' | 'select'; options: string[] };
+export type WorkCustomValue = WorkCustomField & { value: string | number | null };
+export type BoardViewConfig = { query: string; owner_filter: string; priority_filter: WorkPriority | '';
+  label_id: number | null; mine: boolean; group_by: 'status' | 'owner' | 'priority' };
+export type SavedBoardView = { id: number; site_id: string; name: string; config: BoardViewConfig;
+  created_at: string; updated_at: string };
 export type CommandWorkItem = WorkItem & {
   site_name: string;
   team_id: number | null;
@@ -12,6 +20,8 @@ export type CommandWorkItem = WorkItem & {
   board_order: number;
   checklist_total: number;
   checklist_done: number;
+  labels: WorkLabel[];
+  custom_fields?: { id: number; name: string; field_type: WorkCustomField['field_type']; value: string | number }[];
 };
 export type WorkTeam = { id: number; name: string; color: string; description: string; active: boolean;
   members: number; open_work: number };
@@ -50,6 +60,8 @@ export const commandApi = {
     Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== '') query.set(key, String(value)); });
     return api<CommandOverview>(`/work/overview?${query.toString()}`);
   },
+  boardPage: (siteId: string, afterId = 0) =>
+    api<{ items: CommandWorkItem[]; next_after_id: number | null }>(`/work/board/${encodeURIComponent(siteId)}?after_id=${afterId}&limit=500`),
   teams: () => api<WorkTeam[]>('/work/teams'),
   projects: () => api<ProjectSummary[]>('/work/projects'),
   projectMembers: (siteId: string) => api<ProjectMember[]>(`/work/projects/${encodeURIComponent(siteId)}/members`),
@@ -89,5 +101,32 @@ export const commandApi = {
   checklist: (item: CommandWorkItem) => api<WorkChecklistItem[]>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist`),
   addChecklist: (item: CommandWorkItem, title: string) => api<WorkChecklistItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist`, { method: 'POST', json: { title } }),
   toggleChecklist: (item: CommandWorkItem, checklistId: number, done: boolean) => api<WorkChecklistItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist/${checklistId}`, { method: 'PATCH', json: { done } }),
-  removeChecklist: (item: CommandWorkItem, checklistId: number) => api(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist/${checklistId}`, { method: 'DELETE' })
+  removeChecklist: (item: CommandWorkItem, checklistId: number) => api(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist/${checklistId}`, { method: 'DELETE' }),
+  labels: (siteId: string) => api<WorkLabel[]>(`/sites/${encodeURIComponent(siteId)}/work/labels`),
+  itemLabels: (item: CommandWorkItem) => api<WorkLabel[]>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/labels`),
+  createLabel: (siteId: string, body: { name: string; color: string }) =>
+    api<WorkLabel>(`/sites/${encodeURIComponent(siteId)}/work/labels`, { method: 'POST', json: body }),
+  deleteLabel: (siteId: string, labelId: number) =>
+    api(`/sites/${encodeURIComponent(siteId)}/work/labels/${labelId}`, { method: 'DELETE' }),
+  addItemLabel: (item: CommandWorkItem, labelId: number) =>
+    api<WorkLabel>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/labels/${labelId}`, { method: 'PUT' }),
+  removeItemLabel: (item: CommandWorkItem, labelId: number) =>
+    api(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/labels/${labelId}`, { method: 'DELETE' }),
+  customFields: (siteId: string) => api<WorkCustomField[]>(`/sites/${encodeURIComponent(siteId)}/work/fields`),
+  createCustomField: (siteId: string, body: { name: string; field_type: WorkCustomField['field_type']; options: string[] }) =>
+    api<WorkCustomField>(`/sites/${encodeURIComponent(siteId)}/work/fields`, { method: 'POST', json: body }),
+  deleteCustomField: (siteId: string, fieldId: number) =>
+    api(`/sites/${encodeURIComponent(siteId)}/work/fields/${fieldId}`, { method: 'DELETE' }),
+  itemFields: (item: CommandWorkItem) => api<WorkCustomValue[]>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/fields`),
+  setItemField: (item: CommandWorkItem, fieldId: number, value: string | number | null) =>
+    api<WorkCustomValue>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/fields/${fieldId}`, { method: 'PUT', json: { value } }),
+  savedViews: (siteId: string) => api<SavedBoardView[]>(`/work/views/${encodeURIComponent(siteId)}`),
+  createSavedView: (siteId: string, name: string, config: BoardViewConfig) =>
+    api<SavedBoardView>(`/work/views/${encodeURIComponent(siteId)}`, { method: 'POST', json: { name, config } }),
+  deleteSavedView: (siteId: string, viewId: number) =>
+    api(`/work/views/${encodeURIComponent(siteId)}/${viewId}`, { method: 'DELETE' }),
+  bulkUpdate: (siteId: string, itemIds: number[], patch: { owner_id?: number | null; due_at?: string | null; priority?: WorkPriority }) =>
+    api<{ updated: number; item_ids: number[] }>(`/sites/${encodeURIComponent(siteId)}/work/bulk`, {
+      method: 'POST', json: { item_ids: itemIds, patch }
+    })
 };

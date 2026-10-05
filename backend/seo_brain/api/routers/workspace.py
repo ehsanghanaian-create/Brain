@@ -1,7 +1,9 @@
 """Cross-site work command center and team directory."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -9,6 +11,7 @@ from sqlalchemy import Engine, text
 from sqlalchemy.exc import IntegrityError
 
 from ..deps import engine
+from ..project_access import project_responsibility
 
 router = APIRouter(prefix="/work", tags=["work-command-center"])
 CLOSED = ("verified", "rejected", "deferred")
@@ -29,6 +32,81 @@ class TeamPatch(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     active: bool | None = None
+
+
+class SavedViewConfig(BaseModel):
+    query: str = Field(default="", max_length=200)
+    owner_filter: str = Field(default="", max_length=20)
+    priority_filter: Literal["", "critical", "high", "normal", "low"] = ""
+    label_id: int | None = Field(default=None, ge=1)
+    mine: bool = False
+    group_by: Literal["status", "owner", "priority"] = "status"
+
+
+class SavedViewIn(BaseModel):
+    name: str = Field(min_length=2, max_length=50)
+    config: SavedViewConfig
+
+
+def _view_actor(cx, request: Request, site_id: str) -> int:
+    actor = getattr(request.state, "panel_user", None)
+    if not actor:
+        raise HTTPException(401, "sign in to manage saved views")
+    if project_responsibility(cx, request, site_id) == "none":
+        raise HTTPException(403, "project membership is required")
+    if not cx.execute(text("SELECT 1 FROM sites WHERE site_id=:site"), {"site": site_id}).first():
+        raise HTTPException(404, "site not found")
+    return actor["id"]
+
+
+@router.get("/views/{site_id}")
+def saved_views(site_id: str, request: Request, eng: Engine = Depends(engine)) -> list[dict]:
+    with eng.connect() as cx:
+        user_id = _view_actor(cx, request, site_id)
+        rows = cx.execute(text("""SELECT id,site_id,name,config_json,created_at,updated_at
+            FROM work_saved_views WHERE user_id=:user AND site_id=:site ORDER BY name"""),
+            {"user": user_id, "site": site_id}).mappings().all()
+    return [{**{key: value for key, value in row.items() if key != "config_json"},
+             "config": json.loads(row["config_json"])} for row in rows]
+
+
+@router.post("/views/{site_id}", status_code=201)
+def create_saved_view(site_id: str, body: SavedViewIn, request: Request,
+                      eng: Engine = Depends(engine)) -> dict:
+    name = body.name.strip()
+    if len(name) < 2:
+        raise HTTPException(422, "view name is too short")
+    try:
+        with eng.begin() as cx:
+            user_id = _view_actor(cx, request, site_id)
+            if body.config.label_id is not None and not cx.execute(text("""SELECT 1 FROM work_labels
+                WHERE site_id=:site AND id=:id"""), {"site": site_id, "id": body.config.label_id}).first():
+                raise HTTPException(422, "label does not belong to this project")
+            result = cx.execute(text("""INSERT INTO work_saved_views
+                (user_id,site_id,name,config_json,created_at,updated_at)
+                VALUES (:user,:site,:name,:config,:at,:at)"""),
+                {"user": user_id, "site": site_id, "name": name,
+                 "config": body.config.model_dump_json(), "at": now()})
+            row = cx.execute(text("SELECT * FROM work_saved_views WHERE id=:id"),
+                             {"id": result.lastrowid}).mappings().one()
+    except IntegrityError as exc:
+        raise HTTPException(409, "view name already exists for this project") from exc
+    request.state.audit_fields = ["name", "config"]
+    return {"id": row["id"], "site_id": site_id, "name": name,
+            "config": body.config.model_dump(), "created_at": row["created_at"], "updated_at": row["updated_at"]}
+
+
+@router.delete("/views/{site_id}/{view_id}", status_code=204)
+def delete_saved_view(site_id: str, view_id: int, request: Request,
+                      eng: Engine = Depends(engine)) -> None:
+    with eng.begin() as cx:
+        user_id = _view_actor(cx, request, site_id)
+        result = cx.execute(text("""DELETE FROM work_saved_views
+            WHERE id=:id AND user_id=:user AND site_id=:site"""),
+            {"id": view_id, "user": user_id, "site": site_id})
+        if not result.rowcount:
+            raise HTTPException(404, "saved view not found")
+    request.state.audit_fields = ["view_id"]
 
 
 @router.get("/teams")
@@ -140,10 +218,60 @@ def overview(site_id: str | None = None, owner_id: int | None = None, team_id: i
             w.title, s.name AS site_name FROM work_item_events e
             JOIN work_items w ON w.id=e.work_item_id JOIN sites s ON s.site_id=e.site_id
             ORDER BY e.id DESC LIMIT 12""")).mappings().all()
+        labels_by_item: dict[int, list[dict]] = {row["id"]: [] for row in rows}
+        if rows:
+            identifiers = {f"item_{index}": row["id"] for index, row in enumerate(rows)}
+            placeholders = ",".join(f":{key}" for key in identifiers)
+            label_rows = cx.execute(text(f"""SELECT il.work_item_id,l.id,l.name,l.color
+                FROM work_item_labels il JOIN work_labels l ON l.id=il.label_id AND l.site_id=il.site_id
+                WHERE il.work_item_id IN ({placeholders}) ORDER BY l.name"""), identifiers).mappings().all()
+            for label in label_rows:
+                labels_by_item[label["work_item_id"]].append({"id": label["id"], "name": label["name"], "color": label["color"]})
     return {"summary": {k: (float(v or 0) if k == "hours_open" else int(v or 0)) for k, v in summary.items()},
-            "items": [dict(row) for row in rows], "limit": limit, "offset": offset,
+            "items": [{**dict(row), "labels": labels_by_item[row["id"]]} for row in rows], "limit": limit, "offset": offset,
             "by_status": [dict(row) for row in by_status],
             "by_site": [{k: int(v or 0) if k in {"total", "open", "overdue", "unassigned"} else v for k, v in row.items()} for row in by_site],
             "by_owner": [{k: (float(v or 0) if k == "hours_open" else int(v or 0)) if k in {"total", "open", "overdue", "hours_open"} else v for k, v in row.items()} for row in by_owner],
             "by_team": [{k: int(v or 0) if k in {"total", "open", "overdue"} else v for k, v in row.items()} for row in by_team],
             "due_days": [dict(row) for row in due_days], "recent": [dict(row) for row in recent]}
+
+
+@router.get("/board/{site_id}")
+def project_board(site_id: str, request: Request, after_id: int = Query(0, ge=0),
+                  limit: int = Query(200, ge=1, le=500), eng: Engine = Depends(engine)) -> dict:
+    """Complete project board via keyset pages; avoids the overview's 500-row cap."""
+    with eng.connect() as cx:
+        if not cx.execute(text("SELECT 1 FROM sites WHERE site_id=:site"), {"site": site_id}).first():
+            raise HTTPException(404, "site not found")
+        if project_responsibility(cx, request, site_id) == "none":
+            raise HTTPException(403, "project membership is required")
+        rows = cx.execute(text("""SELECT w.*,s.name AS site_name,u.full_name AS owner_name,
+            t.name AS team_name,t.color AS team_color,
+            (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id) AS checklist_total,
+            (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id AND ci.done=1) AS checklist_done
+            FROM work_items w JOIN sites s ON s.site_id=w.site_id
+            LEFT JOIN panel_users u ON u.id=w.owner_id LEFT JOIN panel_teams t ON t.id=w.team_id
+            WHERE w.site_id=:site AND w.id>:after ORDER BY w.id LIMIT :limit"""),
+            {"site": site_id, "after": after_id, "limit": limit + 1}).mappings().all()
+        page = rows[:limit]
+        labels_by_item: dict[int, list[dict]] = {row["id"]: [] for row in page}
+        fields_by_item: dict[int, list[dict]] = {row["id"]: [] for row in page}
+        if page:
+            identifiers = {f"item_{index}": row["id"] for index, row in enumerate(page)}
+            placeholders = ",".join(f":{key}" for key in identifiers)
+            label_rows = cx.execute(text(f"""SELECT il.work_item_id,l.id,l.name,l.color
+                FROM work_item_labels il JOIN work_labels l ON l.id=il.label_id AND l.site_id=il.site_id
+                WHERE il.site_id=:site AND il.work_item_id IN ({placeholders}) ORDER BY l.name"""),
+                {**identifiers, "site": site_id}).mappings().all()
+            for label in label_rows:
+                labels_by_item[label["work_item_id"]].append({"id": label["id"], "name": label["name"], "color": label["color"]})
+            field_rows = cx.execute(text(f"""SELECT v.work_item_id,f.id,f.name,f.field_type,v.value_json
+                FROM work_custom_values v JOIN work_custom_fields f ON f.id=v.field_id AND f.site_id=v.site_id
+                WHERE v.site_id=:site AND v.work_item_id IN ({placeholders}) ORDER BY f.id"""),
+                {**identifiers, "site": site_id}).mappings().all()
+            for field in field_rows:
+                fields_by_item[field["work_item_id"]].append({"id": field["id"], "name": field["name"],
+                    "field_type": field["field_type"], "value": json.loads(field["value_json"])})
+    return {"items": [{**dict(row), "labels": labels_by_item[row["id"]],
+                        "custom_fields": fields_by_item[row["id"]]} for row in page],
+            "next_after_id": page[-1]["id"] if len(rows) > limit else None}

@@ -211,6 +211,39 @@ def test_project_membership_controls_collaboration(client):
     assert client.patch(f'{check_path}/{step.json()["id"]}', headers=worker, json={'done': True}).status_code == 200
     assert client.delete(f'{check_path}/{step.json()["id"]}', headers=worker).status_code == 403
     assert client.delete(f'{check_path}/{step.json()["id"]}', headers=lead).status_code == 204
+    label = client.post(f'{path}/labels', headers=lead, json={'name': 'Content', 'color': '#16a34a'})
+    assert label.status_code == 201
+    assert client.get(f'{path}/labels', headers=outsider).status_code == 403
+    assert client.get(f'{path}/labels', headers=worker).status_code == 200
+    label_path = f'{item_path}/labels/{label.json()["id"]}'
+    assert client.put(label_path, headers=outsider).status_code == 403
+    assert client.put(label_path, headers=worker).status_code == 200
+    assert client.delete(label_path, headers=worker).status_code == 204
+    field = client.post(f'{path}/fields', headers=lead,
+        json={'name': 'SEO channel', 'field_type': 'select', 'options': ['Organic', 'Ads']})
+    assert field.status_code == 201
+    assert client.get(f'{path}/fields', headers=outsider).status_code == 403
+    assert client.get(f'{path}/fields', headers=worker).status_code == 200
+    field_path = f'{item_path}/fields/{field.json()["id"]}'
+    assert client.put(field_path, headers=outsider, json={'value': 'Organic'}).status_code == 403
+    assert client.put(field_path, headers=worker, json={'value': 'Organic'}).status_code == 200
+    assert client.post(f'{path}/fields', headers=worker, json={'name': 'Nope', 'field_type': 'text'}).status_code == 403
+    assert client.delete(f'{path}/fields/{field.json()["id"]}', headers=worker).status_code == 403
+    assert client.post(f'{path}/bulk', headers=worker, json={'item_ids': [created['id']],
+        'patch': {'priority': 'high'}}).status_code == 403
+    assert client.post(f'{path}/bulk', headers=lead, json={'item_ids': [created['id']],
+        'patch': {'priority': 'high'}}).status_code == 200
+    view_path = '/api/v1/work/views/demo'
+    assert client.get('/api/v1/work/board/demo', headers=outsider).status_code == 403
+    assert client.get('/api/v1/work/board/demo', headers=worker).status_code == 200
+    view_body = {'name': 'My critical work', 'config': {'priority_filter': 'critical', 'mine': True, 'group_by': 'owner'}}
+    assert client.post(view_path, headers=outsider, json=view_body).status_code == 403
+    saved = client.post(view_path, headers=worker, json=view_body)
+    assert saved.status_code == 201 and saved.json()['config']['group_by'] == 'owner'
+    assert len(client.get(view_path, headers=worker).json()) == 1
+    assert client.get(view_path, headers=lead).json() == []
+    assert client.delete(f'{view_path}/{saved.json()["id"]}', headers=lead).status_code == 404
+    assert client.delete(f'{view_path}/{saved.json()["id"]}', headers=worker).status_code == 204
     commented = client.patch(item_path, headers=worker, json={'note': 'Waiting for crawl output'})
     assert commented.status_code == 200
     events = client.get(f'{item_path}/events', headers=admin).json()

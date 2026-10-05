@@ -67,6 +67,32 @@ def test_work_site_isolation_and_source_validation(client):
     assert client.get(f"/api/v1/sites/other/work/{item['id']}/events").status_code == 404
 
 
+def test_board_order_and_checklist_persist_with_site_boundary(client):
+    base = "/api/v1/sites/demo/work"
+    first = client.post(base, json={"title": "Audit landing pages"}).json()
+    second = client.post(base, json={"title": "Prepare content brief"}).json()
+    assert second["board_order"] > first["board_order"]
+    moved = client.patch(f"{base}/{second['id']}", json={"board_order": first["board_order"] - 100})
+    assert moved.status_code == 200
+    assert moved.json()["board_order"] < first["board_order"]
+    assigned = client.patch(f"{base}/{second['id']}", json={"status": "assigned", "owner_id": 1,
+        "due_at": "2026-12-01T00:00:00Z", "board_order": 512})
+    assert assigned.status_code == 200 and assigned.json()["status"] == "assigned"
+    assert next(row for row in client.get(base).json()["items"] if row["id"] == second["id"])["board_order"] == 512
+    assert client.patch(f"{base}/{second['id']}", json={"board_order": None}).status_code == 422
+    check = client.post(f"{base}/{first['id']}/checklist", json={"title": "Inspect indexability"})
+    assert check.status_code == 201 and check.json()["done"] is False
+    checked = client.patch(f"{base}/{first['id']}/checklist/{check.json()['id']}", json={"done": True})
+    assert checked.status_code == 200 and checked.json()["done"] is True
+    events = client.get(f"{base}/{first['id']}/events").json()
+    assert [event["event_type"] for event in events][-2:] == ["checklist_added", "checklist_updated"]
+    overview = client.get("/api/v1/work/overview?site_id=demo").json()
+    card = next(row for row in overview["items"] if row["id"] == first["id"])
+    assert card["checklist_total"] == 1 and card["checklist_done"] == 1
+    assert client.get(f"/api/v1/sites/other/work/{first['id']}/checklist").status_code == 404
+    assert client.patch(f"/api/v1/sites/other/work/{first['id']}/checklist/{check.json()['id']}", json={"done": False}).status_code == 404
+
+
 def test_cross_site_command_center_teams_and_ownership(client):
     team = client.post("/api/v1/work/teams", json={"name": "SEO", "color": "#1abb9c"})
     assert team.status_code == 201, team.text

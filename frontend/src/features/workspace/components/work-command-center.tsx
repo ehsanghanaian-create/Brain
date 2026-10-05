@@ -19,6 +19,7 @@ import { commandApi, type CommandFilters, type CommandOverview, type CommandWork
 import { WorkGraph } from './work-graph';
 import { ProjectExecution } from './project-execution';
 import { TeamPlanner } from './team-planner';
+import { TeamBoard } from './team-board';
 import { TaskExecutionDetails } from './task-execution-details';
 
 const num = new Intl.NumberFormat('fa-IR');
@@ -41,8 +42,8 @@ const blankForm: TaskForm = { site_id: '', title: '', description: '', url: '', 
   owner_id: '', team_id: '', due_at: '', start_at: '', progress_percent: '0', parent_id: '', milestone_id: '',
   estimated_hours: '', blocked_reason: '', verification_note: '', note: '' };
 const views: { key: View; label: string }[] = [
-  { key: 'command', label: 'فرماندهی' }, { key: 'mine', label: 'کارهای من' }, { key: 'projects', label: 'پروژه‌ها' }, { key: 'planner', label: 'برنامهٔ تیم' }, { key: 'sheet', label: 'شیت کارها' },
-  { key: 'kanban', label: 'کانبان' }, { key: 'timeline', label: 'تایم‌لاین' },
+  { key: 'kanban', label: 'برد تیم' }, { key: 'mine', label: 'کارهای من' }, { key: 'projects', label: 'پروژه‌ها' }, { key: 'planner', label: 'برنامهٔ تیم' }, { key: 'sheet', label: 'شیت کارها' },
+  { key: 'command', label: 'فرماندهی' }, { key: 'timeline', label: 'تایم‌لاین' },
   { key: 'graph', label: 'گراف مسیر' }, { key: 'teams', label: 'تیم‌ها' }
 ];
 const dateText = (value: string | null) => value ? new Date(value).toLocaleDateString('fa-IR', { year: 'numeric', month: 'short', day: 'numeric' }) : 'بدون موعد';
@@ -69,7 +70,7 @@ export function WorkCommandCenter() {
   const [search, setSearch] = useState('');
   const requestId = useRef(0);
   const [focus, setFocus] = useState<Focus>('all');
-  const [view, setView] = useState<View>('command');
+  const [view, setView] = useState<View>('kanban');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<CommandWorkItem | 'new' | null>(null);
@@ -222,7 +223,7 @@ export function WorkCommandCenter() {
     {error && <Card className='border-rose-500/40'><CardContent className='pt-5 text-sm text-rose-600'>{error} <Button variant='outline' size='sm' onClick={() => void refresh()}>تلاش دوباره</Button></CardContent></Card>}
     {loading && !data && <div className='text-muted-foreground rounded-xl border p-12 text-center text-sm'>در حال خواندن کارهای همهٔ سایت‌ها…</div>}
     {data && <>
-      <section className='grid grid-cols-2 gap-2 md:grid-cols-3 2xl:grid-cols-6' aria-label='شاخص‌های عملیات'>
+      {view !== 'kanban' && <><section className='grid grid-cols-2 gap-2 md:grid-cols-3 2xl:grid-cols-6' aria-label='شاخص‌های عملیات'>
         {([
           ['کار باز', data.summary.open, 'all', 'text-sky-600'],
           ['عقب‌افتاده', data.summary.overdue, 'overdue', 'text-rose-600'],
@@ -243,7 +244,7 @@ export function WorkCommandCenter() {
         <NativeSelect aria-label='فیلتر مسئول' value={filters.owner_id || ''} onChange={(e) => setFilters((f) => ({ ...f, owner_id: e.target.value ? Number(e.target.value) : undefined }))} className='w-40'><NativeSelectOption value=''>همهٔ مسئولان</NativeSelectOption>{people.filter((person) => person.active).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect>
         <NativeSelect aria-label='فیلتر وضعیت' value={filters.status || ''} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value || undefined }))} className='w-40'><NativeSelectOption value=''>همهٔ وضعیت‌ها</NativeSelectOption>{(Object.keys(statusLabel) as WorkStatus[]).map((status) => <NativeSelectOption key={status} value={status}>{statusLabel[status]}</NativeSelectOption>)}</NativeSelect>
         <NativeSelect aria-label='فیلتر اولویت' value={filters.priority || ''} onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value || undefined }))} className='w-32'><NativeSelectOption value=''>همهٔ اولویت‌ها</NativeSelectOption>{(Object.keys(priorityLabel) as WorkPriority[]).map((priority) => <NativeSelectOption key={priority} value={priority}>{priorityLabel[priority]}</NativeSelectOption>)}</NativeSelect>
-      </div>
+      </div></>}
 
       <div className='flex flex-wrap gap-1.5 border-b pb-2' role='tablist' aria-label='نماهای میز عملیات'>
         {views.map((entry) => <Button key={entry.key} size='sm' variant={view === entry.key ? 'default' : 'ghost'} role='tab' aria-selected={view === entry.key} onClick={() => setView(entry.key)}>{entry.label}</Button>)}
@@ -300,16 +301,10 @@ export function WorkCommandCenter() {
         </tbody></table></div>{!items.length && <p className='text-muted-foreground py-10 text-center text-sm'>کاری مطابق فیلتر پیدا نشد.</p>}
       </CardContent></Card>}
 
-      {view === 'kanban' && <div className='space-y-2'><p className='text-muted-foreground text-xs'>برای تغییر مرحله، کارت را باز کنید{canEdit ? ' یا به ستون مقصد بکشید؛ پیش از ذخیره، شرط‌های آن مرحله بررسی می‌شود.' : '.'}</p><div className='grid gap-3 lg:grid-cols-3 2xl:grid-cols-6'>
-        {([
-          ['ورودی', ['new', 'triaged']], ['آمادهٔ اجرا', ['approved', 'assigned']],
-          ['در حال اجرا', ['in_progress']], ['بازبینی و سنجش', ['review', 'published', 'measurement_pending']],
-          ['مسدود', ['blocked']], ['نهایی', ['verified', 'rejected', 'deferred']]
-        ] as [string, WorkStatus[]][]).map(([label, statuses]) => { const rows = items.filter((item) => statuses.includes(item.status)); return <Card key={label} className='min-w-0' onDragOver={(event) => { if (canEdit) event.preventDefault(); }} onDrop={(event) => { if (!canEdit) return; event.preventDefault(); const item = items.find((row) => row.id === Number(event.dataTransfer.getData('text/plain'))); if (item) { openTask(item); setForm((current) => ({ ...current, status: statuses[0] })); } }}><CardHeader className='pb-3'><CardTitle className='flex items-center justify-between text-sm'>{label}<Badge variant='secondary'>{num.format(rows.length)}</Badge></CardTitle></CardHeader><CardContent className='space-y-2'>
-          {rows.map((item) => <button key={item.id} draggable={canEdit} onDragStart={(event) => event.dataTransfer.setData('text/plain', String(item.id))} onClick={() => openTask(item)} className='w-full rounded-lg border bg-background p-3 text-right shadow-sm transition-transform hover:-translate-y-0.5 hover:shadow-md'><span className='text-muted-foreground block text-[11px]'>{item.site_name} · {priorityLabel[item.priority]}</span><strong className='mt-1 block text-sm'>{item.title}</strong><span className='text-muted-foreground mt-2 block text-xs'>{item.owner_name || 'بی‌مسئول'} · {dateText(item.due_at)}</span></button>)}
-          {!rows.length && <p className='text-muted-foreground py-6 text-center text-xs'>بدون کار</p>}
-        </CardContent></Card>; })}
-      </div></div>}
+      {view === 'kanban' && <TeamBoard items={data.items} sites={sites} people={people} preferredSiteId={filters.site_id} meId={meId}
+        canLead={canLead} canUpdate={canUpdate} onOpen={openTask} onPrepareStatus={(item, status) => { openTask(item); setForm((current) => ({ ...current, status })); }}
+        onSiteChange={(siteId) => setFilters((current) => ({ ...current, site_id: siteId || undefined }))}
+        onChanged={async () => { await refresh(true); }} />}
 
       {view === 'timeline' && <div className='grid gap-4 xl:grid-cols-[1fr_1.3fr]'>
         <Card><CardHeader><CardTitle>موعدهای ۲۱ روز آینده</CardTitle><CardDescription>بار برنامه‌ریزی‌شدهٔ کارهای باز بر اساس روز سررسید.</CardDescription></CardHeader><CardContent><div className='h-72'>{dueSeries.length ? <ResponsiveContainer width='100%' height='100%'><AreaChart data={dueSeries}><defs><linearGradient id='dueGradient' x1='0' y1='0' x2='0' y2='1'><stop offset='0%' stopColor='#1abb9c' stopOpacity={.42} /><stop offset='100%' stopColor='#1abb9c' stopOpacity={.02} /></linearGradient></defs><CartesianGrid strokeDasharray='3 3' opacity={.2} /><XAxis dataKey='day' tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Area type='monotone' dataKey='count' name='کار' stroke='#1abb9c' strokeWidth={3} fill='url(#dueGradient)' animationDuration={900} /></AreaChart></ResponsiveContainer> : <p className='text-muted-foreground pt-24 text-center text-sm'>در ۲۱ روز آینده موعدی ثبت نشده است.</p>}</div></CardContent></Card>
@@ -355,8 +350,8 @@ export function WorkCommandCenter() {
         {form.status === 'verified' && <label className='space-y-1 text-xs sm:col-span-2'>نتیجهٔ سنجش<Textarea disabled={!canManageEditing} value={form.verification_note} onChange={(e) => setForm((f) => ({ ...f, verification_note: e.target.value }))} /></label>}
         {canUpdateEditing && <label className='space-y-1 text-xs sm:col-span-2'>یادداشت این تغییر<Input value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder='پیشرفت، مانع یا تصمیم انجام‌شده را ثبت کنید' /></label>}
         <div className='flex flex-wrap gap-2 sm:col-span-2'>{canUpdateEditing && <Button onClick={saveTask} disabled={saving}>{saving ? 'در حال ذخیره…' : 'ذخیرهٔ کار'}</Button>}{editing !== 'new' && <Button variant='outline' onClick={() => void loadEvents(editing)}>نمایش تاریخچه</Button>}</div>
-        {events && <div className='space-y-2 border-t pt-3 sm:col-span-2'><strong className='text-sm'>تاریخچهٔ کار</strong>{events.map((event) => <div key={event.id} className='rounded-lg border p-2 text-xs'><span className='text-muted-foreground'>{new Date(event.created_at).toLocaleString('fa-IR')}</span> · {event.event_type === 'created' ? 'ایجاد' : event.event_type === 'comment' ? 'یادداشت' : 'ویرایش'} · {event.actor_username || 'سیستم'} {event.note && <span>· {event.note}</span>}</div>)}</div>}
-        {editing !== 'new' && <TaskExecutionDetails item={editing} items={data?.items || []} people={people} canEdit={canManageEditing} canLogTime={canUpdate(editing)} canLogOthers={canEdit} meId={meId} />}
+        {events && <div className='space-y-2 border-t pt-3 sm:col-span-2'><strong className='text-sm'>تاریخچهٔ کار</strong>{events.map((event) => <div key={event.id} className='rounded-lg border p-2 text-xs'><span className='text-muted-foreground'>{new Date(event.created_at).toLocaleString('fa-IR')}</span> · {event.event_type === 'created' ? 'ایجاد' : event.event_type === 'comment' ? 'یادداشت' : event.event_type === 'checklist_added' ? 'افزودن گام' : event.event_type === 'checklist_updated' ? 'تغییر گام' : event.event_type === 'checklist_removed' ? 'برداشتن گام' : 'ویرایش'} · {event.actor_username || 'سیستم'} {event.note && <span>· {event.note}</span>}</div>)}</div>}
+        {editing !== 'new' && <TaskExecutionDetails item={editing} items={data?.items || []} people={people} canEdit={canManageEditing} canLogTime={canUpdate(editing)} canLogOthers={canEdit} meId={meId} onChanged={() => void refresh(true)} />}
       </div>}
     </DialogContent></Dialog>
   </div>;

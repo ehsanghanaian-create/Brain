@@ -79,6 +79,8 @@ def role_allowed(role: str, path: str, method: str) -> bool:
                 (method == "POST" and re.fullmatch(r"/api/v1/sites/[^/]+/work", path))
                 or (method == "PATCH" and re.fullmatch(r"/api/v1/sites/[^/]+/work/\d+", path))
                 or (method == "POST" and re.fullmatch(r"/api/v1/work/projects/[^/]+/tasks/\d+/time", path))
+                or (method in {"POST", "PATCH"} and re.fullmatch(r"/api/v1/sites/[^/]+/work/\d+/checklist(?:/\d+)?", path))
+                or (method == "DELETE" and re.fullmatch(r"/api/v1/sites/[^/]+/work/\d+/checklist/\d+", path))
                 or (method in {"POST", "PATCH"} and re.fullmatch(r"/api/v1/work/projects/[^/]+/milestones(?:/\d+)?", path))
                 or (method in {"POST", "DELETE"} and re.fullmatch(r"/api/v1/work/projects/[^/]+/tasks/\d+/dependencies(?:/\d+)?", path))
             )

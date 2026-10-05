@@ -203,6 +203,14 @@ def test_project_membership_controls_collaboration(client):
     progressed = client.patch(item_path, headers=worker, json={'status': 'in_progress', 'progress_percent': 50,
         'note': 'Initial technical audit complete'})
     assert progressed.status_code == 200 and progressed.json()['progress_percent'] == 50
+    assert client.patch(item_path, headers=worker, json={'board_order': 128}).status_code == 200
+    check_path = f'{item_path}/checklist'
+    assert client.post(check_path, headers=outsider, json={'title': 'Forbidden step'}).status_code == 403
+    step = client.post(check_path, headers=worker, json={'title': 'Validate crawl coverage'})
+    assert step.status_code == 201
+    assert client.patch(f'{check_path}/{step.json()["id"]}', headers=worker, json={'done': True}).status_code == 200
+    assert client.delete(f'{check_path}/{step.json()["id"]}', headers=worker).status_code == 403
+    assert client.delete(f'{check_path}/{step.json()["id"]}', headers=lead).status_code == 204
     commented = client.patch(item_path, headers=worker, json={'note': 'Waiting for crawl output'})
     assert commented.status_code == 200
     events = client.get(f'{item_path}/events', headers=admin).json()

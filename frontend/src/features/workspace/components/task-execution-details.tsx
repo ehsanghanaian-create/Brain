@@ -5,15 +5,17 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
-import { commandApi, type CommandWorkItem, type TaskDependency, type TaskTimeEntry, type WorkPerson } from '../api';
+import { commandApi, type CommandWorkItem, type TaskDependency, type TaskTimeEntry, type WorkChecklistItem, type WorkPerson } from '../api';
 
 const number = new Intl.NumberFormat('fa-IR');
 
-export function TaskExecutionDetails({ item, items, people, canEdit, canLogTime, canLogOthers, meId }: {
-  item: CommandWorkItem; items: CommandWorkItem[]; people: WorkPerson[]; canEdit: boolean; canLogTime: boolean; canLogOthers: boolean; meId: number | null;
+export function TaskExecutionDetails({ item, items, people, canEdit, canLogTime, canLogOthers, meId, onChanged }: {
+  item: CommandWorkItem; items: CommandWorkItem[]; people: WorkPerson[]; canEdit: boolean; canLogTime: boolean; canLogOthers: boolean; meId: number | null; onChanged: () => void;
 }) {
   const [dependencies, setDependencies] = useState<TaskDependency[]>([]);
   const [entries, setEntries] = useState<TaskTimeEntry[]>([]);
+  const [checklist, setChecklist] = useState<WorkChecklistItem[]>([]);
+  const [checklistTitle, setChecklistTitle] = useState('');
   const [dependencyId, setDependencyId] = useState('');
   const [userId, setUserId] = useState(meId?.toString() || item.owner_id?.toString() || '');
   const [minutes, setMinutes] = useState('');
@@ -21,9 +23,9 @@ export function TaskExecutionDetails({ item, items, people, canEdit, canLogTime,
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const refresh = useCallback(async () => {
-    try { const [deps, time] = await Promise.all([
-      commandApi.dependencies(item.site_id, item.id), commandApi.timeEntries(item.site_id, item.id)
-    ]); setDependencies(deps); setEntries(time); }
+    try { const [deps, time, checks] = await Promise.all([
+      commandApi.dependencies(item.site_id, item.id), commandApi.timeEntries(item.site_id, item.id), commandApi.checklist(item)
+    ]); setDependencies(deps); setEntries(time); setChecklist(checks); }
     catch (cause) { toast.error(cause instanceof Error ? cause.message : 'جزئیات اجرا دریافت نشد'); }
   }, [item.id, item.site_id]);
   useEffect(() => { void refresh(); }, [refresh]);
@@ -51,8 +53,33 @@ export function TaskExecutionDetails({ item, items, people, canEdit, canLogTime,
     catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ثبت زمان انجام نشد'); }
     finally { setBusy(false); }
   }
+  async function addChecklist() {
+    if (checklistTitle.trim().length < 2) return;
+    setBusy(true);
+    try { await commandApi.addChecklist(item, checklistTitle.trim()); setChecklistTitle(''); await refresh(); onChanged(); toast.success('مورد چک‌لیست افزوده شد'); }
+    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ثبت چک‌لیست انجام نشد'); }
+    finally { setBusy(false); }
+  }
+  async function toggleChecklist(entry: WorkChecklistItem) {
+    setBusy(true);
+    try { await commandApi.toggleChecklist(item, entry.id, !entry.done); await refresh(); onChanged(); }
+    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'تغییر چک‌لیست انجام نشد'); }
+    finally { setBusy(false); }
+  }
+  async function removeChecklist(entry: WorkChecklistItem) {
+    setBusy(true);
+    try { await commandApi.removeChecklist(item, entry.id); await refresh(); onChanged(); toast.success('مورد برداشته شد'); }
+    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'حذف مورد انجام نشد'); }
+    finally { setBusy(false); }
+  }
 
   return <div className='space-y-4 border-t pt-4 sm:col-span-2'>
+    <div className='space-y-2'><div className='flex items-center justify-between'><strong className='text-sm'>چک‌لیست انجام کار</strong><span className='text-muted-foreground text-xs'>{number.format(checklist.filter((entry) => entry.done).length)} از {number.format(checklist.length)} انجام‌شده</span></div>
+      {checklist.length > 0 && <div className='h-1.5 overflow-hidden rounded-full bg-muted'><div className='h-full bg-emerald-500 transition-all' style={{ width: `${checklist.filter((entry) => entry.done).length / checklist.length * 100}%` }} /></div>}
+      {checklist.map((entry) => <div key={entry.id} className='flex items-center gap-2 rounded-lg border p-2 text-xs'><label className='flex min-w-0 flex-1 items-center gap-2'><input type='checkbox' checked={entry.done} disabled={!canLogTime || busy} onChange={() => void toggleChecklist(entry)} /><span className={entry.done ? 'text-muted-foreground line-through' : ''}>{entry.title}</span></label>{canEdit && <Button size='sm' variant='ghost' disabled={busy} onClick={() => void removeChecklist(entry)}>برداشتن</Button>}</div>)}
+      {!checklist.length && <p className='text-muted-foreground text-xs'>هنوز گامی برای این کار ثبت نشده است.</p>}
+      {canLogTime && <div className='flex gap-2'><Input aria-label='گام جدید چک‌لیست' placeholder='گام بعدی انجام کار' value={checklistTitle} onChange={(event) => setChecklistTitle(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void addChecklist(); }} /><Button size='sm' disabled={busy || checklistTitle.trim().length < 2} onClick={addChecklist}>افزودن</Button></div>}
+    </div>
     <div className='space-y-2'><strong className='text-sm'>پیش‌نیازهای این کار</strong>
       <p className='text-muted-foreground text-xs'>تا وقتی پیش‌نیازها تأیید نشده‌اند، این کار نمی‌تواند «تأیید نتیجه» شود.</p>
       {dependencies.map((dep) => <div key={dep.depends_on_id} className='flex items-center justify-between gap-2 rounded-lg border p-2 text-xs'><span>{dep.title} · {dep.status === 'verified' ? 'تأییدشده' : 'در جریان'}</span>{canEdit && <Button size='sm' variant='ghost' disabled={busy} onClick={() => void removeDependency(dep.depends_on_id)}>برداشتن</Button>}</div>)}

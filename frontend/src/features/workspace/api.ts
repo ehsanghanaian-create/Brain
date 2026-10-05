@@ -9,6 +9,9 @@ export type CommandWorkItem = WorkItem & {
   team_color: string | null;
   priority: WorkPriority;
   estimated_hours: number | null;
+  board_order: number;
+  checklist_total: number;
+  checklist_done: number;
 };
 export type WorkTeam = { id: number; name: string; color: string; description: string; active: boolean;
   members: number; open_work: number };
@@ -23,6 +26,8 @@ export type ProjectMilestone = { id: number; site_id: string; title: string; des
   due_at: string | null; tasks: number; verified_tasks: number; created_at: string };
 export type TaskDependency = { depends_on_id: number; title: string; status: WorkStatus; created_at: string };
 export type TaskTimeEntry = { id: number; user_id: number; user_name: string; minutes: number; work_date: string; note: string };
+export type WorkChecklistItem = { id: number; site_id: string; work_item_id: number; title: string;
+  done: boolean; actor_id: number | null; created_at: string; updated_at: string };
 export type CommandOverview = {
   summary: { total: number; open: number; overdue: number; unassigned: number; blocked: number; due_week: number; hours_open: number };
   items: CommandWorkItem[];
@@ -80,5 +85,9 @@ export const commandApi = {
     api<CommandWorkItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}`, { method: 'PATCH', json: body }),
   events: (item: CommandWorkItem) =>
     api<{ id: number; event_type: string; before_json: string | null; after_json: string; note: string | null; actor_username: string | null; created_at: string }[]>(
-      `/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/events`)
+      `/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/events`),
+  checklist: (item: CommandWorkItem) => api<WorkChecklistItem[]>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist`),
+  addChecklist: (item: CommandWorkItem, title: string) => api<WorkChecklistItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist`, { method: 'POST', json: { title } }),
+  toggleChecklist: (item: CommandWorkItem, checklistId: number, done: boolean) => api<WorkChecklistItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist/${checklistId}`, { method: 'PATCH', json: { done } }),
+  removeChecklist: (item: CommandWorkItem, checklistId: number) => api(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist/${checklistId}`, { method: 'DELETE' })
 };

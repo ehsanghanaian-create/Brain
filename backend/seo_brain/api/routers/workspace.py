@@ -111,7 +111,9 @@ def overview(site_id: str | None = None, owner_id: int | None = None, team_id: i
             COALESCE(SUM(CASE WHEN w.status NOT IN ('verified','rejected','deferred') THEN w.estimated_hours ELSE 0 END),0) AS hours_open
             {base}"""), {**args, "week_end": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(timespec="seconds")}).mappings().one()
         rows = cx.execute(text(f"""SELECT w.*, s.name AS site_name, u.full_name AS owner_name,
-            t.name AS team_name, t.color AS team_color {base}
+            t.name AS team_name, t.color AS team_color,
+            (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id) AS checklist_total,
+            (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id AND ci.done=1) AS checklist_done {base}
             ORDER BY CASE WHEN w.status='blocked' THEN 0 WHEN w.status NOT IN ('verified','rejected','deferred') AND w.due_at<:now THEN 1 ELSE 2 END,
             CASE w.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
             w.due_at, w.id DESC LIMIT :lim OFFSET :off"""), args).mappings().all()

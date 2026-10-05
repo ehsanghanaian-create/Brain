@@ -81,6 +81,15 @@ class WorkPatch(BaseModel):
     blocked_reason: str | None = Field(default=None, max_length=1000)
     verification_note: str | None = Field(default=None, max_length=3000)
     note: str | None = Field(default=None, max_length=1000)
+    board_order: float | None = Field(default=None, ge=-1000000000, le=1000000000)
+
+
+class ChecklistIn(BaseModel):
+    title: str = Field(min_length=2, max_length=200)
+
+
+class ChecklistPatch(BaseModel):
+    done: bool
 
 
 def _record(cx, site_id: str, item_id: int, event_type: str, before: dict | None,
@@ -190,6 +199,9 @@ def create_work(site_id: str, body: WorkIn, request: Request, eng: Engine = Depe
         with eng.begin() as cx:
             require_lead(cx, request, site_id)
             _validate(cx, site_id, values, strict_owner=getattr(request.state, "panel_user", None) is not None)
+            values["board_order"] = float(cx.execute(text("""SELECT COALESCE(MAX(board_order),0)+1024
+                FROM work_items WHERE site_id=:site AND status=:status"""),
+                {"site": site_id, "status": values["status"]}).scalar_one())
             cols = list(values)
             result = cx.execute(text(f"INSERT INTO work_items({','.join(cols)}) VALUES({','.join(':'+c for c in cols)})"), values)
             item_id = result.lastrowid
@@ -205,8 +217,8 @@ def create_work(site_id: str, body: WorkIn, request: Request, eng: Engine = Depe
 @router.patch("/{item_id}")
 def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, eng: Engine = Depends(engine)) -> dict:
     patch = body.model_dump(exclude_unset=True, exclude={"note"})
-    if any(key in patch and patch[key] is None for key in ("title", "description", "status", "priority", "progress_percent")):
-        raise HTTPException(422, "title, description and status cannot be null")
+    if any(key in patch and patch[key] is None for key in ("title", "description", "status", "priority", "progress_percent", "board_order")):
+        raise HTTPException(422, "required work fields cannot be null")
     if "due_at" in patch:
         patch["due_at"] = _due_utc(patch["due_at"])
     if "start_at" in patch:
@@ -220,7 +232,7 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
             raise HTTPException(404, "work item not found")
         require_assignee(cx, request, site_id, current["owner_id"])
         if project_responsibility(cx, request, site_id) == "contributor":
-            allowed = {"status", "progress_percent", "blocked_reason", "note"}
+            allowed = {"status", "progress_percent", "blocked_reason", "note", "board_order"}
             if not body.model_fields_set <= allowed:
                 raise HTTPException(403, "contributors may only update status, progress and blocker notes")
             if patch.get("status") in {"verified", "rejected", "deferred", "approved", "assigned"}:
@@ -269,3 +281,87 @@ def work_events(site_id: str, item_id: int, eng: Engine = Depends(engine)) -> li
             FROM work_item_events WHERE site_id=:s AND work_item_id=:id ORDER BY id"""),
             {"s": site_id, "id": item_id}).mappings().all()
     return [dict(row) for row in rows]
+
+
+@router.get("/{item_id}/checklist")
+def checklist(site_id: str, item_id: int, eng: Engine = Depends(engine)) -> list[dict]:
+    with eng.connect() as cx:
+        if not cx.execute(text("SELECT 1 FROM work_items WHERE site_id=:site AND id=:item"),
+                          {"site": site_id, "item": item_id}).first():
+            raise HTTPException(404, "work item not found")
+        rows = cx.execute(text("""SELECT id,site_id,work_item_id,title,done,actor_id,created_at,updated_at
+            FROM work_checklist_items WHERE site_id=:site AND work_item_id=:item ORDER BY id"""),
+            {"site": site_id, "item": item_id}).mappings().all()
+    return [{**dict(row), "done": bool(row["done"])} for row in rows]
+
+
+@router.post("/{item_id}/checklist", status_code=201)
+def add_checklist_item(site_id: str, item_id: int, body: ChecklistIn, request: Request,
+                       eng: Engine = Depends(engine)) -> dict:
+    title = body.title.strip()
+    if len(title) < 2:
+        raise HTTPException(422, "checklist title is too short")
+    with eng.begin() as cx:
+        work = cx.execute(text("SELECT owner_id FROM work_items WHERE site_id=:site AND id=:item"),
+                          {"site": site_id, "item": item_id}).mappings().first()
+        if not work:
+            raise HTTPException(404, "work item not found")
+        require_assignee(cx, request, site_id, work["owner_id"])
+        actor = getattr(request.state, "panel_user", None)
+        result = cx.execute(text("""INSERT INTO work_checklist_items
+            (site_id,work_item_id,title,done,actor_id,created_at,updated_at)
+            VALUES (:site,:item,:title,0,:actor,:at,:at)"""),
+            {"site": site_id, "item": item_id, "title": title,
+             "actor": actor["id"] if actor else None, "at": now()})
+        row = cx.execute(text("SELECT * FROM work_checklist_items WHERE id=:id"),
+                         {"id": result.lastrowid}).mappings().one()
+        _record(cx, site_id, item_id, "checklist_added", None, dict(row), None, actor)
+    request.state.audit_fields = ["title"]
+    return {**dict(row), "done": False}
+
+
+@router.patch("/{item_id}/checklist/{checklist_id}")
+def update_checklist_item(site_id: str, item_id: int, checklist_id: int, body: ChecklistPatch,
+                          request: Request, eng: Engine = Depends(engine)) -> dict:
+    with eng.begin() as cx:
+        work = cx.execute(text("SELECT owner_id FROM work_items WHERE site_id=:site AND id=:item"),
+                          {"site": site_id, "item": item_id}).mappings().first()
+        if not work:
+            raise HTTPException(404, "work item not found")
+        require_assignee(cx, request, site_id, work["owner_id"])
+        before = cx.execute(text("""SELECT * FROM work_checklist_items
+            WHERE id=:id AND site_id=:site AND work_item_id=:item"""),
+            {"id": checklist_id, "site": site_id, "item": item_id}).mappings().first()
+        if not before:
+            raise HTTPException(404, "checklist item not found")
+        result = cx.execute(text("""UPDATE work_checklist_items SET done=:done,updated_at=:at
+            WHERE id=:id AND site_id=:site AND work_item_id=:item"""),
+            {"done": int(body.done), "at": now(), "id": checklist_id, "site": site_id, "item": item_id})
+        if not result.rowcount:
+            raise HTTPException(404, "checklist item not found")
+        row = cx.execute(text("SELECT * FROM work_checklist_items WHERE id=:id"),
+                         {"id": checklist_id}).mappings().one()
+        _record(cx, site_id, item_id, "checklist_updated", dict(before), dict(row), None,
+                getattr(request.state, "panel_user", None))
+    request.state.audit_fields = ["done"]
+    return {**dict(row), "done": bool(row["done"])}
+
+
+@router.delete("/{item_id}/checklist/{checklist_id}", status_code=204)
+def remove_checklist_item(site_id: str, item_id: int, checklist_id: int, request: Request,
+                          eng: Engine = Depends(engine)) -> None:
+    with eng.begin() as cx:
+        require_lead(cx, request, site_id)
+        before = cx.execute(text("""SELECT * FROM work_checklist_items
+            WHERE id=:id AND site_id=:site AND work_item_id=:item"""),
+            {"id": checklist_id, "site": site_id, "item": item_id}).mappings().first()
+        if not before:
+            raise HTTPException(404, "checklist item not found")
+        result = cx.execute(text("""DELETE FROM work_checklist_items
+            WHERE id=:id AND site_id=:site AND work_item_id=:item"""),
+            {"id": checklist_id, "site": site_id, "item": item_id})
+        if not result.rowcount:
+            raise HTTPException(404, "checklist item not found")
+        _record(cx, site_id, item_id, "checklist_removed", dict(before), {"id": checklist_id, "deleted": True},
+                None, getattr(request.state, "panel_user", None))
+    request.state.audit_fields = ["checklist_id"]

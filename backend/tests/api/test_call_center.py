@@ -60,6 +60,6 @@ def test_call_center_source_and_operator_flow():
     assert listing["total"] == 1 and listing["items"][0]["operator_name"] == "Operator Test"
     assert client.get("/api/v1/call-center/calls?source=ads&limit=1&offset=1").json()["items"] == []
     future = (datetime.now(timezone.utc) + timedelta(days=10)).isoformat()
-    assert client.post("/api/v1/call-center/calls", json={"occurred_at": future, "source": "unknown"}).status_code == 201
+    assert client.post("/api/v1/call-center/calls", json={"occurred_at": future, "source": "unknown", "phone": "09120000002"}).status_code == 201
     summary = client.get("/api/v1/call-center/analytics").json()
     assert summary["total"] == 1 and summary["future"] == 1

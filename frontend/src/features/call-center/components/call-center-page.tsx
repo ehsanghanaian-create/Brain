@@ -316,6 +316,10 @@ export function CallCenterPage() {
 
   async function saveCall(e: React.FormEvent) {
     e.preventDefault();
+    if (!/[0-9۰-۹٠-٩]/.test(draft.phone)) {
+      toast.error('شماره تماس الزامی است');
+      return;
+    }
     setSaving(true);
     try {
       const values: Partial<CallRecord> = {
@@ -342,8 +346,8 @@ export function CallCenterPage() {
   }
   async function saveQuick(e: React.FormEvent) {
     e.preventDefault();
-    if (!quick.phone.trim() && !quick.customer_name.trim()) {
-      toast.error('نام یا شماره تماس را وارد کنید');
+    if (!/[0-9۰-۹٠-٩]/.test(quick.phone)) {
+      toast.error('شماره تماس الزامی است');
       return;
     }
     setQuickSaving(true);
@@ -642,6 +646,7 @@ export function CallCenterPage() {
         <div className='flex flex-wrap items-center gap-2'><Input type='file' accept='.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' aria-label='فایل CSV یا XLSX تماس‌ها' className='max-w-sm' onChange={(event) => { setImportFile(event.target.files?.[0] ?? null); setImportMapping({}); setImportPreview(null); setWorkbookPreview(null); setImportPreviewReady(false); }} /><Button onClick={() => runImport(true)} disabled={!importFile || importing}>{importing ? 'در حال بررسی…' : 'پیش‌نمایش و اعتبارسنجی'}</Button></div>
         {workbookPreview && <div className='space-y-3'>
           <p className='text-sm'>این فایل {number.format(workbookPreview.rows_valid)} تماس دارد. منبع همهٔ تماس‌ها «نامشخص» ثبت می‌شود؛ فایل ستونی برای تشخیص سئو یا ادز ندارد.</p>
+          {Object.values(workbookPreview.sheets).some((count) => count.missing_phone > 0) && <p role='alert' className='text-xs text-amber-500'>ردیف‌های بدون شماره تماس در ورود فایل نادیده گرفته می‌شوند.</p>}
           <div className='overflow-x-auto'><table className='w-full min-w-[690px] text-right text-xs'><thead><tr className='border-b text-muted-foreground'><th className='py-2'>تب</th><th>تماس معتبر</th><th>تکراری</th><th>ردیف تغییرکرده</th><th>بدون تاریخ</th><th>شماره کوتاه</th><th>کنسل‌شده</th></tr></thead><tbody>{Object.entries(workbookPreview.sheets).map(([name, count]) => <tr key={name} className='border-b last:border-0'><td className='py-2 font-medium'>{name}</td><td>{number.format(count.valid)}</td><td>{number.format(count.skipped_existing)}</td><td>{number.format(count.changed_rows)}</td><td>{number.format(count.missing_date)}</td><td>{number.format(count.short_phone)}</td><td>{number.format(count.cancelled)}</td></tr>)}</tbody></table></div>
           {workbookPreview.rows_changed > 0 && <p role='alert' className='rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs'>محتوای {number.format(workbookPreview.rows_changed)} ردیف نسبت به ورود قبلی تغییر کرده است. برای جلوگیری از بازنویسی اصلاحات اپراتور، این ردیف‌ها خودکار به‌روزرسانی نمی‌شوند.</p>}
           <Button onClick={() => runImport(false)} disabled={!importPreviewReady || !workbookPreview.dry_run || workbookPreview.rows_valid <= workbookPreview.rows_skipped + workbookPreview.rows_changed || importing}>ثبت {number.format(Math.max(0, workbookPreview.rows_valid - workbookPreview.rows_skipped - workbookPreview.rows_changed))} تماس جدید</Button>
@@ -1037,9 +1042,10 @@ export function CallCenterPage() {
                 />
               </label>
               <label htmlFor='call-phone' className='space-y-1 text-xs'>
-                شماره تماس
+                شماره تماس *
                 <Input
                   id='call-phone'
+                  required
                   value={draft.phone}
                   onChange={(e) => field('phone', e.target.value)}
                   dir='ltr'
@@ -1239,7 +1245,7 @@ export function CallCenterPage() {
               <Input aria-label='زمان واقعی تماس' title='زمان واقعی تماس' type='datetime-local' dir='ltr' value={quick.occurred_at} onFocus={() => setQuick((v) => ({ ...v, occurred_at: v.occurred_at || localNow() }))} onChange={(e) => setQuick((v) => ({ ...v, occurred_at: e.target.value }))} />
               <NativeSelect aria-label='سایت تماس' value={quickSite || siteId} onChange={(e) => setQuickSite(e.target.value)}><NativeSelectOption value=''>سایت نامشخص</NativeSelectOption>{sites.map((s) => <NativeSelectOption key={s.site_id} value={s.site_id}>{s.name}</NativeSelectOption>)}</NativeSelect>
               <Input aria-label='نام تماس‌گیرنده' placeholder='نام تماس‌گیرنده' value={quick.customer_name} onChange={(e) => setQuick((v) => ({ ...v, customer_name: e.target.value }))} />
-              <Input aria-label='شماره تماس‌گیرنده' placeholder='شماره تماس' dir='ltr' inputMode='tel' value={quick.phone} onChange={(e) => setQuick((v) => ({ ...v, phone: e.target.value }))} />
+              <Input aria-label='شماره تماس‌گیرنده، الزامی' placeholder='شماره تماس *' required dir='ltr' inputMode='tel' value={quick.phone} onChange={(e) => setQuick((v) => ({ ...v, phone: e.target.value }))} />
               <Input aria-label='برند خودرو' placeholder='برند' value={quick.brand} onChange={(e) => setQuick((v) => ({ ...v, brand: e.target.value }))} />
               <Input aria-label='مدل خودرو' placeholder='مدل' value={quick.model} onChange={(e) => setQuick((v) => ({ ...v, model: e.target.value }))} />
               <Input aria-label='منطقه' placeholder='منطقه' value={quick.region} onChange={(e) => setQuick((v) => ({ ...v, region: e.target.value }))} />

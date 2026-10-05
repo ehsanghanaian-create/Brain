@@ -91,7 +91,7 @@ def import_workbook(data: bytes, eng: Engine, *, apply: bool = False,
                     idx[optional] = headers.index(optional)
             sheet_counts = counts[sheet_name] = {"candidates": 0, "valid": 0, "imported": 0,
                                                   "skipped_existing": 0, "missing_date": 0,
-                                                  "short_phone": 0, "future_date": 0, "cancelled": 0,
+                                                  "missing_phone": 0, "short_phone": 0, "future_date": 0, "cancelled": 0,
                                                   "changed_rows": 0}
             for row_number, row in enumerate(iterator, start=spec["header_row"] + 1):
                 get = lambda key: row[idx[key]] if key in idx and idx[key] < len(row) else None
@@ -102,6 +102,9 @@ def import_workbook(data: bytes, eng: Engine, *, apply: bool = False,
                 if not name and not phone:
                     continue  # Formatted blank rows are not calls.
                 sheet_counts["candidates"] += 1
+                if not any(char.isdigit() for char in phone):
+                    sheet_counts["missing_phone"] += 1
+                    continue
                 occurred_at = _date(get("تاریخ و ساعت ثبت"))
                 if not occurred_at:
                     sheet_counts["missing_date"] += 1

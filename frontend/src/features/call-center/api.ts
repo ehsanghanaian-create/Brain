@@ -85,7 +85,7 @@ export type CallWorkbookResult = {
   dry_run: boolean;
   sha256: string;
   sheets: Record<string, { candidates: number; valid: number; imported: number; skipped_existing: number;
-    missing_date: number; short_phone: number; future_date: number; cancelled: number; changed_rows: number }>;
+    missing_date: number; missing_phone: number; short_phone: number; future_date: number; cancelled: number; changed_rows: number }>;
   rows_valid: number;
   rows_imported: number;
   rows_skipped: number;

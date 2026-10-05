@@ -119,8 +119,8 @@ async def import_calls(file: UploadFile = File(...), dry_run: bool = Form(True),
         raise ApiError(413, "هر بار حداکثر ۱۰۰۰ ردیف وارد کنید", code="too_many_rows")
     if not rows:
         raise ApiError(422, "فایل CSV ردیفی ندارد", code="invalid_csv")
-    if not resolved["phone"] and not resolved["customer_name"]:
-        raise ApiError(422, "ستون نام مشتری یا شماره تماس را نگاشت کنید", code="invalid_mapping")
+    if not resolved["phone"]:
+        raise ApiError(422, "ستون شماره تماس را نگاشت کنید", code="invalid_mapping")
     errors: list[dict] = []
     preview: list[dict] = []
     imported = skipped = valid = 0
@@ -139,8 +139,8 @@ async def import_calls(file: UploadFile = File(...), dry_run: bool = Form(True),
                     raise ValueError("تعداد سلول‌ها با سرستون برابر نیست")
                 get = lambda field: str(row.get(resolved[field]) or "").strip() if resolved[field] else ""
                 name, phone = get("customer_name")[:160], clean_phone(get("phone"))
-                if not name and not phone:
-                    raise ValueError("نام یا شماره تماس خالی است")
+                if not any(char.isdigit() for char in phone):
+                    raise ValueError("شماره تماس الزامی است")
                 site_id = get("site_id") or default_site_id or None
                 if site_id and site_id not in site_ids:
                     raise ValueError("شناسه سایت پیدا نشد")
@@ -210,7 +210,7 @@ class CallIn(BaseModel):
     site_id: str | None = Field(default=None, max_length=120)
     occurred_at: datetime | None = None
     customer_name: str = Field(default="", max_length=160)
-    phone: str = Field(default="", max_length=30)
+    phone: str = Field(min_length=1, max_length=30)
     warranty: bool = False
     brand: str = Field(default="", max_length=100)
     model: str = Field(default="", max_length=100)
@@ -341,6 +341,8 @@ def create_call(body: CallIn, eng: Engine = Depends(engine)) -> dict:
     values["occurred_at"] = utc_time(body.occurred_at or datetime.now(timezone.utc))
     values["follow_up_at"] = utc_time(body.follow_up_at) if body.follow_up_at else None
     values["phone"] = clean_phone(body.phone)
+    if not any(char.isdigit() for char in values["phone"]):
+        raise ApiError(422, "شماره تماس الزامی است", code="validation_error")
     values["warranty"] = int(body.warranty)
     values["site_id"] = values["site_id"] or None
     values["at"] = now()
@@ -380,6 +382,8 @@ def update_call(call_id: int, body: CallPatch, eng: Engine = Depends(engine)) ->
         values["follow_up_at"] = utc_time(values["follow_up_at"])
     if "phone" in values and values["phone"] is not None:
         values["phone"] = clean_phone(values["phone"])
+        if not any(char.isdigit() for char in values["phone"]):
+            raise ApiError(422, "شماره تماس الزامی است", code="validation_error")
     if "warranty" in values:
         values["warranty"] = int(values["warranty"])
     values["at"] = now()

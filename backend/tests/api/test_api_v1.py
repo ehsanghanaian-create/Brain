@@ -71,7 +71,7 @@ def test_call_attribution_uses_actual_call_time_and_preserves_manual_choice(clie
     assert row["source"] == "seo" and row["source_confidence"] == "probable" and row["auto_attributed"] == 1
     assert row["attribution_event"].startswith("track:")
     second = client.post('/api/v1/call-center/calls', json={"site_id": "demo", "occurred_at": ts,
-        "customer_name": "Another Caller"})
+        "customer_name": "Another Caller", "phone": "09120000002"})
     assert second.status_code == 201 and second.json()["source"] == "unknown"
     # A second possible caller click makes the identity ambiguous on recheck.
     with client.eng.begin() as cx:
@@ -85,6 +85,15 @@ def test_call_attribution_uses_actual_call_time_and_preserves_manual_choice(clie
     assert manual.status_code == 200 and manual.json()["auto_attributed"] == 0
     client.post('/api/v1/call-center/reconcile', params={"site_id": "demo"})
     assert client.get('/api/v1/call-center/calls', params={"site_id": "demo"}).json()["items"][0]["source"] == "ads"
+
+
+def test_phone_required_for_manual_calls_and_edits(client):
+    path = '/api/v1/call-center/calls'
+    assert client.post(path, json={"customer_name": "Test Caller"}).status_code == 422
+    assert client.post(path, json={"customer_name": "Test Caller", "phone": " + "}).status_code == 422
+    created = client.post(path, json={"customer_name": "Test Caller", "phone": "۰۹۱۲۳۴۵۶۷۸۹"})
+    assert created.status_code == 201 and created.json()["phone"] == "09123456789"
+    assert client.patch(f'{path}/{created.json()["id"]}', json={"phone": ""}).status_code == 422
 
 
 def test_late_click_reconciliation_marks_ads_probable(client):
@@ -200,6 +209,10 @@ def test_call_center_csv_import_preview_mapping_and_deduplication(client):
     assert repeat.json()["rows_skipped"] == 2 and repeat.json()["rows_imported"] == 0
     calls = client.get("/api/v1/call-center/calls").json()
     assert calls["total"] == 2 and {row["source_basis"] for row in calls["items"]} == {"import"}
+    missing_phone = "مشتری,موبایل\nبدون شماره,\n".encode("utf-8-sig")
+    rejected = client.post(path, files={"file": ("missing.csv", missing_phone, "text/csv")},
+                           data={"dry_run": "true"})
+    assert rejected.status_code == 200 and rejected.json()["errors_count"] == 1
 
 
 def test_call_center_workbook_import_preserves_warranty_and_unknown_source(client):
@@ -214,6 +227,7 @@ def test_call_center_workbook_import_preserves_warranty_and_unknown_source(clien
     warranty = workbook.create_sheet("گارانتی")
     warranty.append(["ردیف", "تاریخ و ساعت ثبت", "نام و نام خانوادگی", "شماره تماس", "برند خودرو", "مدل خودرو"])
     warranty.append([1, None, None, 9351234567, "Brand", "X2"])
+    warranty.append([2, None, "No Phone", None, "Brand", "X3"])
     buffer = BytesIO()
     workbook.save(buffer)
     data = buffer.getvalue()
@@ -222,6 +236,7 @@ def test_call_center_workbook_import_preserves_warranty_and_unknown_source(clien
     preview = client.post(path, files=files(), data={"dry_run": "true", "site_id": "demo"})
     assert preview.status_code == 200, preview.text
     assert preview.json()["rows_valid"] == 2 and preview.json()["rows_imported"] == 0
+    assert preview.json()["sheets"]["گارانتی"]["missing_phone"] == 1
     assert preview.json()["sheets"]["گارانتی"]["missing_date"] == 1
     done = client.post(path, files=files(), data={"dry_run": "false", "site_id": "demo"})
     assert done.status_code == 200 and done.json()["rows_imported"] == 2

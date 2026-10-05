@@ -167,7 +167,7 @@ export interface MonthlyProgress {
 
 export type WorkStatus = 'new' | 'triaged' | 'approved' | 'assigned' | 'in_progress' | 'review' |
   'published' | 'measurement_pending' | 'verified' | 'blocked' | 'rejected' | 'deferred';
-export interface WorkItem {
+  export interface WorkItem {
   id: number;
   site_id: string;
   title: string;
@@ -178,7 +178,11 @@ export interface WorkItem {
   query: string | null;
   status: WorkStatus;
   owner_id: number | null;
-  owner_name?: string | null;
+    owner_name?: string | null;
+    team_id?: number | null;
+    team_name?: string | null;
+    priority?: 'critical' | 'high' | 'normal' | 'low';
+    estimated_hours?: number | null;
   due_at: string | null;
   blocked_reason: string | null;
   verification_note: string | null;
@@ -198,6 +202,8 @@ export interface WorkEvent {
   before_json: string | null;
   after_json: string;
   note: string | null;
+  actor_id?: number | null;
+  actor_username?: string | null;
   created_at: string;
 }
 

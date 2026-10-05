@@ -23,6 +23,8 @@ export const navGroups: NavGroup[] = [
     items: [
       { title: 'داشبورد', url: '/dashboard/overview', icon: 'dashboard', shortcut: ['d', 'd'], items: [],
         description: 'وضعیت کلی سایت‌ها، گراف دانش و سلامت سیستم' },
+      { title: 'میز عملیات و تیم', url: '/dashboard/work', icon: 'kanban', shortcut: ['w', 'w'], items: [],
+        description: 'شیت کارها، کانبان، تایم‌لاین، تیم‌ها و گراف مسئولیت همهٔ سایت‌ها' },
       { title: 'شروع راه‌اندازی', url: '/dashboard/onboarding', icon: 'sparkles', items: [],
         description: 'اتصال گوگل ← انتخاب سایت‌ها ← شروع تحلیل سئو (چهار قدم، بدون تنظیم فنی)' },
       { title: 'سایت‌ها', url: '/dashboard/sites', icon: 'sites', shortcut: ['s', 's'], items: [],

@@ -13,6 +13,7 @@ export type PanelUser = {
   username: string | null;
   has_password: boolean;
   role: UserRole;
+  team_id: number | null;
   active: boolean;
   created_at: string;
   updated_at: string;
@@ -107,7 +108,7 @@ const params = (values: Record<string, string | number | undefined>) => {
 export const callCenterApi = {
   users: () => api<PanelUser[]>('/call-center/users'),
   operators: () => api<{ id: number; full_name: string; active: boolean }[]>('/call-center/operators'),
-  addUser: (body: { full_name: string; email: string; username: string; password: string; role: UserRole; active: boolean }) =>
+  addUser: (body: { full_name: string; email: string; username: string; password: string; role: UserRole; team_id?: number | null; active: boolean }) =>
     api<PanelUser>('/call-center/users', { method: 'POST', json: body }),
   patchUser: (id: number, body: Partial<PanelUser> & { password?: string }) =>
     api<PanelUser>(`/call-center/users/${id}`, { method: 'PATCH', json: body }),

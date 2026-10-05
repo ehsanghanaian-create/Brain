@@ -1,0 +1,306 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { motion, useReducedMotion } from 'motion/react';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { toast } from 'sonner';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Textarea } from '@/components/ui/textarea';
+import { api, type PortfolioOverview, type Site } from '@/lib/api/client';
+import type { WorkStatus } from '@/features/reports/types';
+import { commandApi, type CommandFilters, type CommandOverview, type CommandWorkItem, type WorkPerson,
+  type WorkPriority, type WorkTeam } from '../api';
+import { WorkGraph } from './work-graph';
+
+const num = new Intl.NumberFormat('fa-IR');
+const statusLabel: Record<WorkStatus, string> = {
+  new: 'جدید', triaged: 'نیازمند بررسی', approved: 'تأییدشده', assigned: 'واگذار شده',
+  in_progress: 'در حال اجرا', review: 'بازبینی', published: 'منتشر شده',
+  measurement_pending: 'در انتظار سنجش', verified: 'تأیید نتیجه', blocked: 'مسدود',
+  rejected: 'رد شده', deferred: 'تعویق'
+};
+const priorityLabel: Record<WorkPriority, string> = { critical: 'فوری', high: 'بالا', normal: 'معمولی', low: 'پایین' };
+const activeStatuses = new Set<WorkStatus>(['approved', 'assigned', 'in_progress', 'review', 'published', 'measurement_pending', 'verified', 'blocked']);
+const closedStatuses = new Set<WorkStatus>(['verified', 'rejected', 'deferred']);
+type View = 'command' | 'sheet' | 'kanban' | 'timeline' | 'graph' | 'teams';
+type Focus = 'all' | 'overdue' | 'unassigned' | 'blocked' | 'due_week' | 'hours';
+type TaskForm = { site_id: string; title: string; description: string; url: string; status: WorkStatus;
+  priority: WorkPriority; owner_id: string; team_id: string; due_at: string; estimated_hours: string;
+  blocked_reason: string; verification_note: string; note: string };
+const blankForm: TaskForm = { site_id: '', title: '', description: '', url: '', status: 'new', priority: 'normal',
+  owner_id: '', team_id: '', due_at: '', estimated_hours: '', blocked_reason: '', verification_note: '', note: '' };
+const views: { key: View; label: string }[] = [
+  { key: 'command', label: 'فرماندهی' }, { key: 'sheet', label: 'شیت کارها' },
+  { key: 'kanban', label: 'کانبان' }, { key: 'timeline', label: 'تایم‌لاین' },
+  { key: 'graph', label: 'گراف مسیر' }, { key: 'teams', label: 'تیم‌ها' }
+];
+const dateText = (value: string | null) => value ? new Date(value).toLocaleDateString('fa-IR', { year: 'numeric', month: 'short', day: 'numeric' }) : 'بدون موعد';
+const isOverdue = (item: CommandWorkItem) => Boolean(item.due_at && !closedStatuses.has(item.status) && Date.parse(item.due_at) < Date.now());
+const statusTone = (status: WorkStatus) => status === 'blocked' ? 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300' :
+  status === 'verified' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' :
+  status === 'in_progress' ? 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300' : '';
+
+export function WorkCommandCenter() {
+  const [data, setData] = useState<CommandOverview | null>(null);
+  const [sites, setSites] = useState<Site[]>([]);
+  const [people, setPeople] = useState<WorkPerson[]>([]);
+  const [teams, setTeams] = useState<WorkTeam[]>([]);
+  const [portfolio, setPortfolio] = useState<PortfolioOverview | null>(null);
+  const [role, setRole] = useState<'admin' | 'analyst' | 'call_center'>('analyst');
+  const [filters, setFilters] = useState<CommandFilters>({ limit: 500 });
+  const [search, setSearch] = useState('');
+  const requestId = useRef(0);
+  const [focus, setFocus] = useState<Focus>('all');
+  const [view, setView] = useState<View>('command');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [editing, setEditing] = useState<CommandWorkItem | 'new' | null>(null);
+  const [form, setForm] = useState<TaskForm>(blankForm);
+  const [saving, setSaving] = useState(false);
+  const [events, setEvents] = useState<Awaited<ReturnType<typeof commandApi.events>> | null>(null);
+  const [teamName, setTeamName] = useState('');
+  const [teamColor, setTeamColor] = useState('#1abb9c');
+  const [teamDescription, setTeamDescription] = useState('');
+  const [teamSaving, setTeamSaving] = useState(false);
+  const [editingTeamId, setEditingTeamId] = useState<number | null>(null);
+  const [teamEdit, setTeamEdit] = useState({ name: '', description: '', color: '#1abb9c', active: true });
+  const reduced = useReducedMotion();
+  const canEdit = role === 'admin';
+
+  const refresh = useCallback(async (quiet = false) => {
+    const currentRequest = ++requestId.current;
+    if (!quiet) setLoading(true);
+    try {
+      const [overview, teamRows, personRows, siteRows, me, portfolioRows] = await Promise.all([
+        commandApi.overview(filters), commandApi.teams(), commandApi.people(),
+        api<Site[]>('/sites'), commandApi.me(), api<PortfolioOverview>('/portfolio/overview')
+      ]);
+      if (currentRequest === requestId.current) {
+        setData(overview); setTeams(teamRows); setPeople(personRows); setSites(siteRows); setRole(me.role); setPortfolio(portfolioRows); setError('');
+      }
+    } catch (cause) { if (currentRequest === requestId.current) setError(cause instanceof Error ? cause.message : 'دریافت داده انجام نشد'); }
+    finally { if (currentRequest === requestId.current) setLoading(false); }
+  }, [filters]);
+  useEffect(() => { void refresh(); const timer = setInterval(() => void refresh(true), 30000); return () => clearInterval(timer); }, [refresh]);
+  useEffect(() => { const timer = setTimeout(() => setFilters((previous) => {
+    const q = search.trim() || undefined;
+    return previous.q === q ? previous : { ...previous, q };
+  }), 300); return () => clearTimeout(timer); }, [search]);
+
+  const items = useMemo(() => (data?.items ?? []).filter((item) => {
+    if (focus === 'overdue') return isOverdue(item);
+    if (focus === 'unassigned') return !item.owner_id && !closedStatuses.has(item.status);
+    if (focus === 'blocked') return item.status === 'blocked';
+    if (focus === 'due_week') return Boolean(item.due_at && !closedStatuses.has(item.status) &&
+      Date.parse(item.due_at) >= Date.now() && Date.parse(item.due_at) < Date.now() + 7 * 86400000);
+    if (focus === 'hours') return Boolean(item.estimated_hours && !closedStatuses.has(item.status));
+    return true;
+  }), [data, focus]);
+  const ownerBars = useMemo(() => (data?.by_owner ?? []).slice(0, 8).map((row) => ({ name: row.name, باز: row.open, عقب‌افتاده: row.overdue })), [data]);
+  const dueSeries = useMemo(() => { const days = new Map(data?.due_days.map((row) => [row.day, row.count]) ?? []);
+    return Array.from({ length: 21 }, (_, index) => { const date = new Date(); date.setUTCHours(12, 0, 0, 0); date.setUTCDate(date.getUTCDate() + index);
+      return { day: date.toLocaleDateString('fa-IR', { month: 'short', day: 'numeric' }), count: days.get(date.toISOString().slice(0, 10)) || 0 }; }); }, [data]);
+  const statusChart = useMemo(() => (data?.by_status ?? []).map((row) => ({ name: statusLabel[row.key], value: row.count })), [data]);
+  const displayCount = data?.summary.total ?? 0;
+
+  function openTask(item: CommandWorkItem | 'new') {
+    setEvents(null); setEditing(item);
+    setForm(item === 'new' ? { ...blankForm, site_id: filters.site_id || sites[0]?.site_id || '' } : {
+      site_id: item.site_id, title: item.title, description: item.description, url: item.url || '',
+      status: item.status, priority: item.priority, owner_id: item.owner_id?.toString() || '',
+      team_id: item.team_id?.toString() || '', due_at: item.due_at?.slice(0, 16) || '',
+      estimated_hours: item.estimated_hours?.toString() || '', blocked_reason: item.blocked_reason || '',
+      verification_note: item.verification_note || '', note: ''
+    });
+  }
+  async function saveTask() {
+    if (!editing) return;
+    if (form.title.trim().length < 3 || !form.site_id) { toast.error('سایت و عنوان کار را مشخص کنید'); return; }
+    if (activeStatuses.has(form.status) && (!form.owner_id || !form.due_at)) { toast.error('برای کار فعال، مسئول و موعد لازم است'); return; }
+    if (form.status === 'blocked' && !form.blocked_reason.trim()) { toast.error('دلیل مسدود شدن را بنویسید'); return; }
+    if (form.status === 'verified' && !form.verification_note.trim()) { toast.error('نتیجهٔ سنجش را ثبت کنید'); return; }
+    setSaving(true);
+    const body = { title: form.title.trim(), description: form.description.trim(), url: form.url.trim() || null,
+      status: form.status, priority: form.priority, owner_id: form.owner_id ? Number(form.owner_id) : null,
+      team_id: form.team_id ? Number(form.team_id) : null, due_at: form.due_at ? new Date(form.due_at).toISOString() : null,
+      estimated_hours: form.estimated_hours ? Number(form.estimated_hours) : null,
+      blocked_reason: form.blocked_reason.trim() || null, verification_note: form.verification_note.trim() || null,
+      note: form.note.trim() || null };
+    try {
+      if (editing === 'new') await commandApi.createWork(form.site_id, body);
+      else await commandApi.updateWork(editing, body);
+      setEditing(null); await refresh(true); toast.success('کار و تاریخچهٔ آن ذخیره شد');
+    } catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ذخیره انجام نشد'); }
+    finally { setSaving(false); }
+  }
+  async function loadEvents(item: CommandWorkItem) {
+    try { setEvents(await commandApi.events(item)); }
+    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'تاریخچه در دسترس نیست'); }
+  }
+  async function createTeam() {
+    if (teamName.trim().length < 2) return;
+    setTeamSaving(true);
+    try { await commandApi.createTeam({ name: teamName.trim(), color: teamColor, description: teamDescription.trim() });
+      setTeamName(''); setTeamDescription(''); await refresh(true); toast.success('تیم ایجاد شد'); }
+    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ثبت تیم انجام نشد'); }
+    finally { setTeamSaving(false); }
+  }
+  async function assignMember(person: WorkPerson, teamId: string) {
+    try { await commandApi.assignMember(person.id, teamId ? Number(teamId) : null);
+      await refresh(true); toast.success('عضویت تیم به‌روز شد'); }
+    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'تغییر تیم انجام نشد'); }
+  }
+  async function saveTeam() {
+    if (editingTeamId === null || teamEdit.name.trim().length < 2) return;
+    setTeamSaving(true);
+    try { await commandApi.updateTeam(editingTeamId, { ...teamEdit, name: teamEdit.name.trim() });
+      setEditingTeamId(null); await refresh(true); toast.success('تیم به‌روز شد'); }
+    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ویرایش تیم انجام نشد'); }
+    finally { setTeamSaving(false); }
+  }
+  async function turnRecommendationIntoWork(siteId: string, title: string) {
+    try { await commandApi.createWork(siteId, { title, kind: 'manual', priority: 'high', status: 'new',
+      description: 'از اقدام پیشنهادی نمای سبد سایت‌ها به میز عملیات اضافه شد.' });
+      await refresh(true); toast.success('پیشنهاد به کار قابل پیگیری تبدیل شد'); }
+    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ثبت کار انجام نشد'); }
+  }
+
+  return <div className='space-y-5'>
+    <section className='relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-l from-emerald-500/15 via-background to-sky-500/10 p-5 shadow-sm'>
+      <div className='pointer-events-none absolute -top-16 -left-12 size-56 rounded-full bg-emerald-500/15 blur-3xl' />
+      <div className='relative flex flex-wrap items-center justify-between gap-4'><div><div className='mb-2 flex items-center gap-2'><Badge variant='outline'>میز عملیات SEO</Badge><span className='text-muted-foreground text-xs'>به‌روزرسانی خودکار هر ۳۰ ثانیه</span></div>
+        <h2 className='text-xl font-bold sm:text-2xl'>هر مسئله، یک مسئول، یک موعد، یک نتیجه</h2>
+        <p className='text-muted-foreground mt-2 max-w-2xl text-sm leading-6'>از همهٔ سایت‌ها تا سطح هر کار: اولویت، تیم، مانع، تاریخچه و سنجش نتیجه در یک مسیر قابل پیگیری.</p></div>
+        <div className='flex gap-2'>{canEdit && <Button onClick={() => openTask('new')}>＋ کار جدید</Button>}
+          <Button variant='outline' onClick={() => void refresh()} disabled={loading}>به‌روزرسانی</Button></div></div>
+    </section>
+
+    {error && <Card className='border-rose-500/40'><CardContent className='pt-5 text-sm text-rose-600'>{error} <Button variant='outline' size='sm' onClick={() => void refresh()}>تلاش دوباره</Button></CardContent></Card>}
+    {loading && !data && <div className='text-muted-foreground rounded-xl border p-12 text-center text-sm'>در حال خواندن کارهای همهٔ سایت‌ها…</div>}
+    {data && <>
+      <section className='grid gap-3 sm:grid-cols-2 xl:grid-cols-6' aria-label='شاخص‌های عملیات'>
+        {([
+          ['کار باز', data.summary.open, 'all', 'text-sky-600'],
+          ['عقب‌افتاده', data.summary.overdue, 'overdue', 'text-rose-600'],
+          ['بی‌مسئول', data.summary.unassigned, 'unassigned', 'text-amber-600'],
+          ['مسدود', data.summary.blocked, 'blocked', 'text-orange-600'],
+          ['موعد این هفته', data.summary.due_week, 'due_week', 'text-violet-600'],
+          ['ساعت برآوردی باز', data.summary.hours_open, 'hours', 'text-emerald-600']
+        ] as const).map(([label, value, key, tone], index) => <motion.button key={label} initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * .045 }}
+          onClick={() => setFocus(key)} aria-pressed={focus === key} className={`rounded-xl border bg-card p-4 text-right shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${focus === key ? 'border-emerald-500/60 ring-1 ring-emerald-500/20' : 'border-border/70'}`}>
+          <span className='text-muted-foreground text-xs'>{label}</span><strong className={`mt-2 block text-2xl tabular-nums ${tone}`}>{num.format(value)}</strong>
+        </motion.button>)}
+      </section>
+
+      <div className='flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3'>
+        <Input aria-label='جست‌وجوی کار' value={search} onChange={(e) => setSearch(e.target.value)} placeholder='جست‌وجو در عنوان، URL و توضیح…' className='min-w-48 flex-1' />
+        <NativeSelect aria-label='فیلتر سایت' value={filters.site_id || ''} onChange={(e) => setFilters((f) => ({ ...f, site_id: e.target.value || undefined }))} className='w-40'><NativeSelectOption value=''>همهٔ سایت‌ها</NativeSelectOption>{sites.map((site) => <NativeSelectOption key={site.site_id} value={site.site_id}>{site.name}</NativeSelectOption>)}</NativeSelect>
+        <NativeSelect aria-label='فیلتر تیم' value={filters.team_id || ''} onChange={(e) => setFilters((f) => ({ ...f, team_id: e.target.value ? Number(e.target.value) : undefined }))} className='w-36'><NativeSelectOption value=''>همهٔ تیم‌ها</NativeSelectOption>{teams.map((team) => <NativeSelectOption key={team.id} value={String(team.id)}>{team.name}</NativeSelectOption>)}</NativeSelect>
+        <NativeSelect aria-label='فیلتر مسئول' value={filters.owner_id || ''} onChange={(e) => setFilters((f) => ({ ...f, owner_id: e.target.value ? Number(e.target.value) : undefined }))} className='w-40'><NativeSelectOption value=''>همهٔ مسئولان</NativeSelectOption>{people.filter((person) => person.active).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect>
+        <NativeSelect aria-label='فیلتر وضعیت' value={filters.status || ''} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value || undefined }))} className='w-40'><NativeSelectOption value=''>همهٔ وضعیت‌ها</NativeSelectOption>{(Object.keys(statusLabel) as WorkStatus[]).map((status) => <NativeSelectOption key={status} value={status}>{statusLabel[status]}</NativeSelectOption>)}</NativeSelect>
+        <NativeSelect aria-label='فیلتر اولویت' value={filters.priority || ''} onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value || undefined }))} className='w-32'><NativeSelectOption value=''>همهٔ اولویت‌ها</NativeSelectOption>{(Object.keys(priorityLabel) as WorkPriority[]).map((priority) => <NativeSelectOption key={priority} value={priority}>{priorityLabel[priority]}</NativeSelectOption>)}</NativeSelect>
+      </div>
+
+      <div className='flex flex-wrap gap-1.5 border-b pb-2' role='tablist' aria-label='نماهای میز عملیات'>
+        {views.map((entry) => <Button key={entry.key} size='sm' variant={view === entry.key ? 'default' : 'ghost'} role='tab' aria-selected={view === entry.key} onClick={() => setView(entry.key)}>{entry.label}</Button>)}
+        {focus !== 'all' && <Button size='sm' variant='outline' onClick={() => setFocus('all')}>حذف تمرکز</Button>}
+      </div>
+      {displayCount > data.items.length && <p className='rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs'>از {num.format(displayCount)} کار مطابق فیلتر، {num.format(data.items.length)} کار نخست نمایش داده می‌شود. برای دیدن بقیه، فیلترها را محدودتر کنید.</p>}
+
+      {view === 'command' && <div className='grid gap-4 xl:grid-cols-[1.55fr_1fr]'>
+        {portfolio && <Card className='xl:col-span-2'><CardHeader><CardTitle>نقشهٔ اقدام سایت‌ها</CardTitle><CardDescription>پیشنهادهای این بخش از وضعیت اتصال، داده و گراف هر سایت می‌آیند. مدیر می‌تواند آن‌ها را به کارِ قابل پیگیری تبدیل کند.</CardDescription></CardHeader><CardContent className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>
+          {portfolio.sites.map((site) => { const exists = data.items.some((item) => item.site_id === site.site_id && item.title === site.next_action && !closedStatuses.has(item.status)); return <div key={site.site_id} className='rounded-xl border bg-background/70 p-3'><div className='flex items-center justify-between gap-2'><strong className='text-sm'>{site.name}</strong><Badge variant='outline'>{site.state === 'ready' ? 'آماده' : site.state === 'attention' ? 'نیازمند بررسی' : site.state === 'running' ? 'در حال اجرا' : 'راه‌اندازی ناقص'}</Badge></div><p className='text-muted-foreground mt-2 min-h-10 text-xs leading-5'>{site.state_reason}</p><p className='mt-2 text-sm font-medium'>قدم بعدی: {site.next_action}</p><div className='mt-3 flex gap-2'><Link className='text-primary self-center text-xs hover:underline' href={`/dashboard/reports?site=${encodeURIComponent(site.site_id)}`}>گزارش سایت</Link>{canEdit && site.next_action && <Button size='sm' variant='outline' disabled={exists} onClick={() => void turnRecommendationIntoWork(site.site_id, site.next_action)}>{exists ? 'در میز کار' : 'تبدیل به کار'}</Button>}</div></div>; })}
+          {!portfolio.sites.length && <p className='text-muted-foreground text-sm'>سایتی ثبت نشده است.</p>}
+        </CardContent></Card>}
+        <Card><CardHeader><CardTitle>صف اقدام‌های فوری</CardTitle><CardDescription>مسدودها، موعدگذشته‌ها و کارهای بی‌مسئول در اولویت بررسی‌اند.</CardDescription></CardHeader><CardContent className='space-y-2'>
+          {items.filter((item) => item.status === 'blocked' || isOverdue(item) || (!item.owner_id && !closedStatuses.has(item.status))).slice(0, 8).map((item) =>
+            <button key={item.id} onClick={() => openTask(item)} className='flex w-full items-start justify-between gap-3 rounded-lg border p-3 text-right transition-colors hover:bg-muted/50'>
+              <span><strong className='block text-sm'>{item.title}</strong><span className='text-muted-foreground mt-1 block text-xs'>{item.site_name} · {item.owner_name || 'بی‌مسئول'} · {dateText(item.due_at)}</span></span>
+              <Badge variant='outline' className={statusTone(item.status)}>{item.status === 'blocked' ? 'مانع' : isOverdue(item) ? 'عقب‌افتاده' : 'بی‌مسئول'}</Badge>
+            </button>)}
+          {!items.length && <p className='text-muted-foreground py-10 text-center text-sm'>هنوز کاری ثبت نشده است. از «کار جدید» اولین مسیر اجرایی را بسازید.</p>}
+          {items.length > 0 && !items.some((item) => item.status === 'blocked' || isOverdue(item) || !item.owner_id) && <p className='text-muted-foreground py-10 text-center text-sm'>در فیلتر فعلی کار فوری دیده نمی‌شود.</p>}
+        </CardContent></Card>
+        <div className='space-y-4'><Card><CardHeader><CardTitle>بار کاری مسئولان</CardTitle><CardDescription>تعداد کارهای باز و عقب‌افتاده، نه ساعات واقعی صرف‌شده.</CardDescription></CardHeader><CardContent><div className='h-60'>
+          {ownerBars.length ? <ResponsiveContainer width='100%' height='100%'><BarChart data={ownerBars} layout='vertical' margin={{ left: 8, right: 8 }}><CartesianGrid strokeDasharray='3 3' horizontal={false} opacity={.25} /><XAxis type='number' allowDecimals={false} /><YAxis type='category' dataKey='name' width={92} tick={{ fontSize: 11 }} /><Tooltip /><Bar dataKey='باز' fill='#1abb9c' radius={[0, 5, 5, 0]} /><Bar dataKey='عقب‌افتاده' fill='#f97373' radius={[0, 5, 5, 0]} /></BarChart></ResponsiveContainer> : <p className='text-muted-foreground pt-20 text-center text-sm'>دادهٔ کار موجود نیست.</p>}
+        </div></CardContent></Card>
+        <Card><CardHeader><CardTitle>پوشش سایت‌ها</CardTitle><CardDescription>از وضعیت کل سبد به جزئیات هر سایت بروید.</CardDescription></CardHeader><CardContent className='space-y-2'>
+          {data.by_site.map((site) => <button key={site.key} onClick={() => setFilters((f) => ({ ...f, site_id: site.key }))} className='flex w-full items-center justify-between rounded-lg border p-2.5 text-sm hover:bg-muted/50'><span>{site.name}</span><span className='text-muted-foreground text-xs'>{num.format(site.open)} باز · {num.format(site.overdue)} عقب‌افتاده</span></button>)}
+          {!data.by_site.length && <p className='text-muted-foreground text-sm'>هنوز کار سایتی ثبت نشده است.</p>}
+        </CardContent></Card></div>
+        <Card className='xl:col-span-2'><CardHeader><CardTitle>جریان اخیر اجرا</CardTitle><CardDescription>ثبت و تغییر وضعیت‌ها از دفتر تاریخچهٔ کارها خوانده می‌شود.</CardDescription></CardHeader><CardContent className='grid gap-2 md:grid-cols-2 xl:grid-cols-3'>
+          {data.recent.map((event) => <div key={event.id} className='rounded-lg border p-3'><div className='text-xs text-muted-foreground'>{new Date(event.created_at).toLocaleString('fa-IR')} · {event.site_name}</div><div className='mt-1 font-medium text-sm'>{event.title}</div><div className='text-muted-foreground mt-1 text-xs'>{event.event_type === 'created' ? 'ثبت شد' : 'تغییر کرد'} · {event.actor_username || 'سیستم'}{event.note ? ` · ${event.note}` : ''}</div></div>)}
+          {!data.recent.length && <p className='text-muted-foreground text-sm'>هنوز رویدادی ثبت نشده است.</p>}
+        </CardContent></Card>
+        <Card><CardHeader><CardTitle>توزیع مراحل کار</CardTitle><CardDescription>مبنای نمودار، تعداد کارهای ثبت‌شده در فیلتر فعلی است.</CardDescription></CardHeader><CardContent><div className='h-64'>{statusChart.length ? <ResponsiveContainer width='100%' height='100%'><PieChart><Pie data={statusChart} dataKey='value' nameKey='name' innerRadius={58} outerRadius={86} paddingAngle={4} animationDuration={850}>{statusChart.map((row, index) => <Cell key={row.name} fill={['#1abb9c', '#38bdf8', '#a78bfa', '#f59e0b', '#ef4444', '#64748b'][index % 6]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer> : <p className='text-muted-foreground pt-20 text-center text-sm'>هنوز مرحله‌ای ثبت نشده است.</p>}</div><div className='flex flex-wrap gap-2'>{statusChart.map((row) => <Badge key={row.name} variant='outline'>{row.name} · {num.format(row.value)}</Badge>)}</div></CardContent></Card>
+        <Card><CardHeader><CardTitle>بار تیم‌ها</CardTitle><CardDescription>کار باز هر تیم برای توزیع بهتر مسئولیت.</CardDescription></CardHeader><CardContent><div className='h-64'>{data.by_team.length ? <ResponsiveContainer width='100%' height='100%'><BarChart data={data.by_team.slice(0, 8)} margin={{ left: 8, right: 8 }}><CartesianGrid strokeDasharray='3 3' opacity={.2} /><XAxis dataKey='name' tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey='open' name='کار باز' fill='#8b5cf6' radius={[6, 6, 0, 0]} animationDuration={850} /></BarChart></ResponsiveContainer> : <p className='text-muted-foreground pt-20 text-center text-sm'>با تعریف تیم و واگذاری کار، نمودار شکل می‌گیرد.</p>}</div></CardContent></Card>
+      </div>}
+
+      {view === 'sheet' && <Card><CardHeader><CardTitle>شیت مدیریت کارها</CardTitle><CardDescription>مرور همهٔ سایت‌ها، مسئولیت، موعد، اولویت و مرحلهٔ اجرا. برای تغییر هر ردیف، آن را باز کنید.</CardDescription></CardHeader><CardContent>
+        <div className='overflow-x-auto rounded-lg border'><table className='w-full min-w-[1050px] text-right text-sm'><thead className='bg-muted/50 text-xs'><tr><th className='p-3'>کار / منبع</th><th>سایت</th><th>تیم</th><th>مسئول</th><th>اولویت</th><th>وضعیت</th><th>موعد</th><th>ساعت</th><th className='p-3'>جزئیات</th></tr></thead><tbody>
+          {items.map((item) => <tr key={item.id} className='border-t transition-colors hover:bg-muted/40'><td className='max-w-64 p-3'><strong className='block truncate'>{item.title}</strong>{item.url && <span className='text-muted-foreground block truncate text-[11px]' dir='ltr'>{item.url}</span>}</td><td>{item.site_name}</td><td>{item.team_name || '—'}</td><td>{item.owner_name || <span className='text-amber-600'>بی‌مسئول</span>}</td><td><Badge variant='outline'>{priorityLabel[item.priority]}</Badge></td><td><Badge variant='outline' className={statusTone(item.status)}>{statusLabel[item.status]}</Badge></td><td className={isOverdue(item) ? 'text-rose-600' : ''}>{dateText(item.due_at)}</td><td>{item.estimated_hours ?? '—'}</td><td className='p-3'><Button size='sm' variant='outline' onClick={() => openTask(item)}>باز کردن</Button></td></tr>)}
+        </tbody></table></div>{!items.length && <p className='text-muted-foreground py-10 text-center text-sm'>کاری مطابق فیلتر پیدا نشد.</p>}
+      </CardContent></Card>}
+
+      {view === 'kanban' && <div className='space-y-2'><p className='text-muted-foreground text-xs'>برای تغییر مرحله، کارت را باز کنید{canEdit ? ' یا به ستون مقصد بکشید؛ پیش از ذخیره، شرط‌های آن مرحله بررسی می‌شود.' : '.'}</p><div className='grid gap-3 lg:grid-cols-3 2xl:grid-cols-6'>
+        {([
+          ['ورودی', ['new', 'triaged']], ['آمادهٔ اجرا', ['approved', 'assigned']],
+          ['در حال اجرا', ['in_progress']], ['بازبینی و سنجش', ['review', 'published', 'measurement_pending']],
+          ['مسدود', ['blocked']], ['نهایی', ['verified', 'rejected', 'deferred']]
+        ] as [string, WorkStatus[]][]).map(([label, statuses]) => { const rows = items.filter((item) => statuses.includes(item.status)); return <Card key={label} className='min-w-0' onDragOver={(event) => { if (canEdit) event.preventDefault(); }} onDrop={(event) => { if (!canEdit) return; event.preventDefault(); const item = items.find((row) => row.id === Number(event.dataTransfer.getData('text/plain'))); if (item) { openTask(item); setForm((current) => ({ ...current, status: statuses[0] })); } }}><CardHeader className='pb-3'><CardTitle className='flex items-center justify-between text-sm'>{label}<Badge variant='secondary'>{num.format(rows.length)}</Badge></CardTitle></CardHeader><CardContent className='space-y-2'>
+          {rows.map((item) => <button key={item.id} draggable={canEdit} onDragStart={(event) => event.dataTransfer.setData('text/plain', String(item.id))} onClick={() => openTask(item)} className='w-full rounded-lg border bg-background p-3 text-right shadow-sm transition-transform hover:-translate-y-0.5 hover:shadow-md'><span className='text-muted-foreground block text-[11px]'>{item.site_name} · {priorityLabel[item.priority]}</span><strong className='mt-1 block text-sm'>{item.title}</strong><span className='text-muted-foreground mt-2 block text-xs'>{item.owner_name || 'بی‌مسئول'} · {dateText(item.due_at)}</span></button>)}
+          {!rows.length && <p className='text-muted-foreground py-6 text-center text-xs'>بدون کار</p>}
+        </CardContent></Card>; })}
+      </div></div>}
+
+      {view === 'timeline' && <div className='grid gap-4 xl:grid-cols-[1fr_1.3fr]'>
+        <Card><CardHeader><CardTitle>موعدهای ۲۱ روز آینده</CardTitle><CardDescription>بار برنامه‌ریزی‌شدهٔ کارهای باز بر اساس روز سررسید.</CardDescription></CardHeader><CardContent><div className='h-72'>{dueSeries.length ? <ResponsiveContainer width='100%' height='100%'><AreaChart data={dueSeries}><defs><linearGradient id='dueGradient' x1='0' y1='0' x2='0' y2='1'><stop offset='0%' stopColor='#1abb9c' stopOpacity={.42} /><stop offset='100%' stopColor='#1abb9c' stopOpacity={.02} /></linearGradient></defs><CartesianGrid strokeDasharray='3 3' opacity={.2} /><XAxis dataKey='day' tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} /><Tooltip /><Area type='monotone' dataKey='count' name='کار' stroke='#1abb9c' strokeWidth={3} fill='url(#dueGradient)' animationDuration={900} /></AreaChart></ResponsiveContainer> : <p className='text-muted-foreground pt-24 text-center text-sm'>در ۲۱ روز آینده موعدی ثبت نشده است.</p>}</div></CardContent></Card>
+        <Card><CardHeader><CardTitle>تقویم تحویل</CardTitle><CardDescription>زمان، مسئول و مرحلهٔ هر کار را در یک ردیف ببینید.</CardDescription></CardHeader><CardContent className='max-h-[490px] space-y-2 overflow-y-auto'>
+          {items.filter((item) => item.due_at && !closedStatuses.has(item.status)).toSorted((a, b) => (a.due_at || '').localeCompare(b.due_at || '')).map((item) => <button key={item.id} onClick={() => openTask(item)} className='flex w-full items-center gap-3 rounded-lg border p-3 text-right hover:bg-muted/50'><span className={`w-24 shrink-0 text-xs ${isOverdue(item) ? 'text-rose-600' : 'text-muted-foreground'}`}>{dateText(item.due_at)}</span><span className='min-w-0 flex-1'><strong className='block truncate text-sm'>{item.title}</strong><span className='text-muted-foreground text-xs'>{item.site_name} · {item.owner_name || 'بی‌مسئول'}</span></span><Badge variant='outline' className={statusTone(item.status)}>{statusLabel[item.status]}</Badge></button>)}
+          {!items.some((item) => item.due_at && !closedStatuses.has(item.status)) && <p className='text-muted-foreground py-10 text-center text-sm'>کاری با موعد در این فیلتر نیست.</p>}
+        </CardContent></Card>
+      </div>}
+
+      {view === 'graph' && <Card><CardHeader><CardTitle>گراف مسئولیت و اجرا</CardTitle><CardDescription>رابطهٔ هر سایت با کارها و ارتباط مستقیم هر کار با مسئول و تیمش؛ با کلیک روی کار، جزئیات آن را باز کنید.</CardDescription></CardHeader><CardContent><WorkGraph items={items} onWork={openTask} /></CardContent></Card>}
+
+      {view === 'teams' && <div className='grid gap-4 xl:grid-cols-[1fr_1.4fr]'><div className='space-y-4'>
+        <Card><CardHeader><CardTitle>تیم‌های اجرایی</CardTitle><CardDescription>ظرفیت کاری و عضویت هر تیم به کارهای واقعی وصل می‌شود.</CardDescription></CardHeader><CardContent className='space-y-2'>
+          {teams.map((team) => <div key={team.id} className='rounded-lg border p-3'><div className='flex items-center justify-between gap-3'><span className='flex items-center gap-2'><span className='size-3 rounded-full' style={{ background: team.color }} /><span><strong className='block text-sm'>{team.name} {!team.active && <Badge variant='outline'>غیرفعال</Badge>}</strong><span className='text-muted-foreground text-xs'>{team.description || 'بدون توضیح'}</span></span></span><span className='text-muted-foreground text-xs'>{num.format(team.members)} عضو · {num.format(team.open_work)} کار باز</span>{canEdit && <Button size='sm' variant='ghost' onClick={() => { setEditingTeamId(editingTeamId === team.id ? null : team.id); setTeamEdit({ name: team.name, description: team.description, color: team.color, active: team.active }); }}>ویرایش</Button>}</div>
+            {editingTeamId === team.id && <div className='mt-3 grid gap-2 border-t pt-3'><Input aria-label='نام ویرایش تیم' value={teamEdit.name} onChange={(e) => setTeamEdit((v) => ({ ...v, name: e.target.value }))} /><Input aria-label='شرح ویرایش تیم' value={teamEdit.description} onChange={(e) => setTeamEdit((v) => ({ ...v, description: e.target.value }))} /><div className='flex items-center gap-3'><Input aria-label='رنگ ویرایش تیم' type='color' className='h-9 w-18 p-1' value={teamEdit.color} onChange={(e) => setTeamEdit((v) => ({ ...v, color: e.target.value }))} /><label className='flex items-center gap-2 text-xs'><input type='checkbox' checked={teamEdit.active} onChange={(e) => setTeamEdit((v) => ({ ...v, active: e.target.checked }))} /> فعال</label><Button size='sm' disabled={teamSaving} onClick={saveTeam}>ذخیره</Button></div></div>}
+          </div>)}
+          {!teams.length && <p className='text-muted-foreground py-6 text-center text-sm'>هنوز تیمی تعریف نشده است.</p>}
+        </CardContent></Card>
+        {canEdit && <Card><CardHeader><CardTitle>تیم جدید</CardTitle></CardHeader><CardContent className='space-y-3'><Input aria-label='نام تیم' placeholder='مثلاً سئو فنی' value={teamName} onChange={(e) => setTeamName(e.target.value)} /><Input aria-label='توضیح تیم' placeholder='حوزهٔ مسئولیت تیم' value={teamDescription} onChange={(e) => setTeamDescription(e.target.value)} /><label className='flex items-center gap-2 text-xs'>رنگ تیم <Input aria-label='رنگ تیم' type='color' value={teamColor} onChange={(e) => setTeamColor(e.target.value)} className='h-10 w-20 p-1' /></label><Button onClick={createTeam} disabled={teamSaving || teamName.trim().length < 2}>ایجاد تیم</Button></CardContent></Card>}
+      </div><Card><CardHeader><CardTitle>اعضا و مسئولیت‌ها</CardTitle><CardDescription>مدیر می‌تواند عضو را به تیم اختصاص دهد. نقش دسترسی کاربر از صفحهٔ مدیریت کاربران تنظیم می‌شود.</CardDescription></CardHeader><CardContent className='space-y-2'>
+        {people.filter((person) => person.active).map((person) => <div key={person.id} className='flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3'><span><strong className='block text-sm'>{person.full_name}</strong><span className='text-muted-foreground text-xs'>{person.role === 'admin' ? 'مدیر' : person.role === 'analyst' ? 'تحلیل‌گر' : 'اپراتور کال‌سنتر'}</span></span><NativeSelect disabled={!canEdit} aria-label={`تیم ${person.full_name}`} value={person.team_id?.toString() || ''} onChange={(e) => void assignMember(person, e.target.value)} className='w-44'><NativeSelectOption value=''>بدون تیم</NativeSelectOption>{teams.filter((team) => team.active).map((team) => <NativeSelectOption key={team.id} value={String(team.id)}>{team.name}</NativeSelectOption>)}</NativeSelect></div>)}
+        {canEdit && <Link className='text-primary mt-3 inline-block text-xs hover:underline' href='/dashboard/users'>مدیریت نقش و حساب کاربران ←</Link>}
+      </CardContent></Card></div>}
+    </>}
+
+    <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) setEditing(null); }}><DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-2xl' dir='rtl'><DialogHeader><DialogTitle>{editing === 'new' ? 'کار جدید' : editing?.title}</DialogTitle><DialogDescription>هر کار باید مسیر اجرا و نتیجهٔ قابل بررسی داشته باشد. تاریخچهٔ تغییرات در همین پنجره دیده می‌شود.</DialogDescription></DialogHeader>
+      {editing && <div className='grid gap-3 sm:grid-cols-2'>
+        <label className='space-y-1 text-xs'>سایت<NativeSelect disabled={editing !== 'new' || !canEdit} value={form.site_id} onChange={(e) => setForm((f) => ({ ...f, site_id: e.target.value }))}><NativeSelectOption value=''>انتخاب سایت</NativeSelectOption>{sites.map((site) => <NativeSelectOption key={site.site_id} value={site.site_id}>{site.name}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>عنوان<Input disabled={!canEdit} value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs sm:col-span-2'>شرح کار<Textarea disabled={!canEdit} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs sm:col-span-2'>URL مرتبط<Input disabled={!canEdit} dir='ltr' value={form.url} onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs'>تیم<NativeSelect disabled={!canEdit} value={form.team_id} onChange={(e) => setForm((f) => ({ ...f, team_id: e.target.value }))}><NativeSelectOption value=''>بدون تیم</NativeSelectOption>{teams.filter((team) => team.active).map((team) => <NativeSelectOption key={team.id} value={String(team.id)}>{team.name}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>مسئول<NativeSelect disabled={!canEdit} value={form.owner_id} onChange={(e) => { const person = people.find((row) => row.id === Number(e.target.value)); setForm((f) => ({ ...f, owner_id: e.target.value, team_id: f.team_id || person?.team_id?.toString() || '' })); }}><NativeSelectOption value=''>بی‌مسئول</NativeSelectOption>{people.filter((person) => person.active && (!form.team_id || person.team_id?.toString() === form.team_id || person.id.toString() === form.owner_id)).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>وضعیت<NativeSelect disabled={!canEdit} value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as WorkStatus }))}>{(Object.keys(statusLabel) as WorkStatus[]).map((status) => <NativeSelectOption key={status} value={status}>{statusLabel[status]}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>اولویت<NativeSelect disabled={!canEdit} value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as WorkPriority }))}>{(Object.keys(priorityLabel) as WorkPriority[]).map((priority) => <NativeSelectOption key={priority} value={priority}>{priorityLabel[priority]}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>موعد<Input disabled={!canEdit} type='datetime-local' value={form.due_at} onChange={(e) => setForm((f) => ({ ...f, due_at: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs'>ساعت برآوردی<Input disabled={!canEdit} type='number' min={0} max={1000} step={.5} value={form.estimated_hours} onChange={(e) => setForm((f) => ({ ...f, estimated_hours: e.target.value }))} /></label>
+        {form.status === 'blocked' && <label className='space-y-1 text-xs sm:col-span-2'>دلیل مانع<Textarea disabled={!canEdit} value={form.blocked_reason} onChange={(e) => setForm((f) => ({ ...f, blocked_reason: e.target.value }))} /></label>}
+        {form.status === 'verified' && <label className='space-y-1 text-xs sm:col-span-2'>نتیجهٔ سنجش<Textarea disabled={!canEdit} value={form.verification_note} onChange={(e) => setForm((f) => ({ ...f, verification_note: e.target.value }))} /></label>}
+        {canEdit && <label className='space-y-1 text-xs sm:col-span-2'>یادداشت این تغییر<Input value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder='چرا این تصمیم گرفته شد؟' /></label>}
+        <div className='flex flex-wrap gap-2 sm:col-span-2'>{canEdit && <Button onClick={saveTask} disabled={saving}>{saving ? 'در حال ذخیره…' : 'ذخیرهٔ کار'}</Button>}{editing !== 'new' && <Button variant='outline' onClick={() => void loadEvents(editing)}>نمایش تاریخچه</Button>}</div>
+        {events && <div className='space-y-2 border-t pt-3 sm:col-span-2'><strong className='text-sm'>تاریخچهٔ کار</strong>{events.map((event) => <div key={event.id} className='rounded-lg border p-2 text-xs'><span className='text-muted-foreground'>{new Date(event.created_at).toLocaleString('fa-IR')}</span> · {event.event_type === 'created' ? 'ایجاد' : 'ویرایش'} · {event.actor_username || 'سیستم'} {event.note && <span>· {event.note}</span>}</div>)}</div>}
+      </div>}
+    </DialogContent></Dialog>
+  </div>;
+}

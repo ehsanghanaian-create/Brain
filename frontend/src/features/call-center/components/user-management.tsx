@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Icons } from '@/components/icons';
 import { callCenterApi, roleLabel, type PanelUser, type UserRole } from '../api';
+import { commandApi, type WorkTeam } from '@/features/workspace/api';
 
 export function UserManagement() {
   const [users, setUsers] = useState<PanelUser[]>([]);
@@ -19,6 +20,8 @@ export function UserManagement() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>('call_center');
+  const [teamId, setTeamId] = useState('');
+  const [teams, setTeams] = useState<WorkTeam[]>([]);
   const [resetId, setResetId] = useState<number | null>(null);
   const [resetUsername, setResetUsername] = useState('');
   const [resetPassword, setResetPassword] = useState('');
@@ -34,6 +37,7 @@ export function UserManagement() {
   );
   useEffect(() => {
     load();
+    commandApi.teams().then(setTeams).catch(() => {});
   }, [load]);
 
   async function add(e: React.FormEvent) {
@@ -47,12 +51,14 @@ export function UserManagement() {
         username: username.trim(),
         password,
         role,
+        team_id: teamId ? Number(teamId) : null,
         active: true
       });
       setName('');
       setEmail('');
       setUsername('');
       setPassword('');
+      setTeamId('');
       await load();
       toast.success('عضو تیم ثبت شد');
     } catch (e) {
@@ -140,6 +146,13 @@ export function UserManagement() {
                   ))}
                 </NativeSelect>
               </label>
+              <label htmlFor='team-group' className='block space-y-1.5 text-sm font-medium'>
+                تیم اجرایی
+                <NativeSelect id='team-group' value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+                  <NativeSelectOption value=''>بدون تیم</NativeSelectOption>
+                  {teams.filter((team) => team.active).map((team) => <NativeSelectOption key={team.id} value={String(team.id)}>{team.name}</NativeSelectOption>)}
+                </NativeSelect>
+              </label>
               {error && (
                 <p role='alert' className='text-destructive text-sm'>
                   {error}
@@ -173,6 +186,7 @@ export function UserManagement() {
                 <span className='min-w-36 flex-1'>
                   <strong className='block text-sm'>{user.full_name}</strong>
                   <span className='text-muted-foreground block text-xs' dir='ltr'>@{user.username || 'بدون نام کاربری'}</span>
+                  <span className='text-muted-foreground block text-xs'>{teams.find((team) => team.id === user.team_id)?.name || 'بدون تیم'}</span>
                   <span className='text-muted-foreground block text-xs' dir='ltr'>
                     {user.email}
                   </span>

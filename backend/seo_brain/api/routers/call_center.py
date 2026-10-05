@@ -199,6 +199,7 @@ class UserIn(BaseModel):
     username: str = Field(min_length=3, max_length=40, pattern=r"^[a-zA-Z][a-zA-Z0-9_.-]*$")
     password: str = Field(min_length=12, max_length=256)
     role: Role = "call_center"
+    team_id: int | None = Field(default=None, ge=1)
     active: bool = True
 
 
@@ -208,6 +209,7 @@ class UserPatch(BaseModel):
     username: str | None = Field(default=None, min_length=3, max_length=40, pattern=r"^[a-zA-Z][a-zA-Z0-9_.-]*$")
     password: str | None = Field(default=None, min_length=12, max_length=256)
     role: Role | None = None
+    team_id: int | None = Field(default=None, ge=1)
     active: bool | None = None
 
 
@@ -280,7 +282,7 @@ def users(eng: Engine = Depends(engine)) -> list[dict]:
 @router.get("/operators")
 def operators(eng: Engine = Depends(engine)) -> list[dict]:
     with eng.connect() as cx:
-        rows = cx.execute(text("SELECT id, full_name, active FROM panel_users ORDER BY active DESC, full_name")).mappings().all()
+        rows = cx.execute(text("SELECT id, full_name, active, team_id, role FROM panel_users ORDER BY active DESC, full_name")).mappings().all()
     return [dict(row) for row in rows]
 
 
@@ -302,10 +304,12 @@ def create_user(body: UserIn, request: Request, eng: Engine = Depends(engine)) -
             raise ApiError(409, "این نام کاربری قبلاً ثبت شده است", code="conflict")
         if cx.execute(text("SELECT 1 FROM panel_users WHERE email=:email"), values).first():
             raise ApiError(409, "این ایمیل قبلاً ثبت شده است", code="conflict")
-        uid = cx.execute(text("""INSERT INTO panel_users(full_name,email,username,password_hash,role,active,created_at,updated_at)
-            VALUES (:full_name,:email,:username,:password_hash,:role,:active,:at,:at)"""), values).lastrowid
+        if values["team_id"] is not None and not cx.execute(text("SELECT 1 FROM panel_teams WHERE id=:id AND active=1"), {"id": values["team_id"]}).first():
+            raise ApiError(422, "تیم فعال پیدا نشد", code="validation_error")
+        uid = cx.execute(text("""INSERT INTO panel_users(full_name,email,username,password_hash,role,team_id,active,created_at,updated_at)
+            VALUES (:full_name,:email,:username,:password_hash,:role,:team_id,:active,:at,:at)"""), values).lastrowid
         row = cx.execute(text("SELECT * FROM panel_users WHERE id=:id"), {"id": uid}).mappings().one()
-    request.state.audit_fields = ["full_name", "email", "username", "role", "active"]
+    request.state.audit_fields = ["full_name", "email", "username", "role", "team_id", "active"]
     return _user_row(row)
 
 
@@ -316,7 +320,7 @@ def update_user(user_id: int, body: UserPatch, request: Request, eng: Engine = D
         raise ApiError(403, "فقط مدیر می‌تواند کاربر را تغییر دهد", code="forbidden")
     if not values:
         raise ApiError(400, "تغییری ارسال نشده است", code="bad_request")
-    if any(value is None for value in values.values()):
+    if any(value is None for key, value in values.items() if key != "team_id"):
         raise ApiError(422, "فیلدهای کاربر نمی‌توانند خالی باشند", code="validation_error")
     if "email" in values and values["email"] is not None:
         values["email"] = values["email"].strip().lower()
@@ -342,6 +346,8 @@ def update_user(user_id: int, body: UserPatch, request: Request, eng: Engine = D
             raise ApiError(409, "این نام کاربری قبلاً ثبت شده است", code="conflict")
         if "email" in values and cx.execute(text("SELECT 1 FROM panel_users WHERE email=:email AND id<>:id"), {"email": values["email"], "id": user_id}).first():
             raise ApiError(409, "این ایمیل قبلاً ثبت شده است", code="conflict")
+        if values.get("team_id") is not None and not cx.execute(text("SELECT 1 FROM panel_teams WHERE id=:id AND active=1"), {"id": values["team_id"]}).first():
+            raise ApiError(422, "تیم فعال پیدا نشد", code="validation_error")
         cx.execute(text("UPDATE panel_users SET " + ", ".join(f"{key}=:{key}" for key in values) + ", updated_at=:at WHERE id=:id"), {**values, "at": now(), "id": user_id})
         if "username" in values or "password_hash" in values or "role" in values or values.get("active") == 0:
             cx.execute(text("UPDATE panel_sessions SET revoked_at=:at WHERE user_id=:id AND revoked_at IS NULL"), {"at": now(), "id": user_id})

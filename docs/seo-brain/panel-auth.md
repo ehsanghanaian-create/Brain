@@ -15,7 +15,7 @@ Roles:
 | Role | Dashboard | API |
 | --- | --- | --- |
 | admin | All pages | Full access, including user management and audit |
-| analyst | Overview, reports, sites, graph, traffic, opportunities, ads data | Read-only analytical endpoints |
+| analyst | Overview, work command center, reports, sites, graph, traffic, opportunities, ads data | Read-only analytical and work endpoints |
 | call_center | Call-center page | Call ledger and safe operator/site/traffic lookups |
 
 Backend role checks are applied to bearer sessions. Direct URL entry or a hand-crafted browser API request does not bypass them. Trusted service-token requests remain available for automation and must not be exposed to users. Disabling a user or changing their role/password invalidates existing sessions. The last active admin cannot be disabled or demoted.

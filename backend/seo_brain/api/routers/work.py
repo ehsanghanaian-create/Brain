@@ -1,11 +1,11 @@
-"""Site-scoped action ledger for SEO work; individual API authentication is a later gate."""
+"""Site-scoped action ledger for SEO work and its event history."""
 from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import IntegrityError
@@ -16,6 +16,7 @@ router = APIRouter(prefix="/sites/{site_id}/work", tags=["work"], dependencies=[
 Kind = Literal["manual", "issue", "opportunity", "content"]
 Status = Literal["new", "triaged", "approved", "assigned", "in_progress", "review", "published",
                  "measurement_pending", "verified", "blocked", "rejected", "deferred"]
+Priority = Literal["critical", "high", "normal", "low"]
 ACTIVE = {"approved", "assigned", "in_progress", "review", "published", "measurement_pending", "verified", "blocked"}
 
 
@@ -40,6 +41,9 @@ class WorkIn(BaseModel):
     query: str | None = Field(default=None, max_length=500)
     status: Status = "new"
     owner_id: int | None = Field(default=None, ge=1)
+    team_id: int | None = Field(default=None, ge=1)
+    priority: Priority = "normal"
+    estimated_hours: float | None = Field(default=None, ge=0, le=1000)
     due_at: datetime | None = None
     blocked_reason: str | None = Field(default=None, max_length=1000)
     verification_note: str | None = Field(default=None, max_length=3000)
@@ -53,6 +57,9 @@ class WorkPatch(BaseModel):
     query: str | None = Field(default=None, max_length=500)
     status: Status | None = None
     owner_id: int | None = Field(default=None, ge=1)
+    team_id: int | None = Field(default=None, ge=1)
+    priority: Priority | None = None
+    estimated_hours: float | None = Field(default=None, ge=0, le=1000)
     due_at: datetime | None = None
     blocked_reason: str | None = Field(default=None, max_length=1000)
     verification_note: str | None = Field(default=None, max_length=3000)
@@ -60,13 +67,15 @@ class WorkPatch(BaseModel):
 
 
 def _record(cx, site_id: str, item_id: int, event_type: str, before: dict | None,
-            after: dict, note: str | None) -> None:
+            after: dict, note: str | None, actor: dict | None = None) -> None:
     cx.execute(text("""INSERT INTO work_item_events
-        (site_id,work_item_id,event_type,before_json,after_json,note,created_at)
-        VALUES (:s,:id,:event,:before,:after,:note,:at)"""),
+        (site_id,work_item_id,event_type,before_json,after_json,note,actor_id,actor_username,created_at)
+        VALUES (:s,:id,:event,:before,:after,:note,:actor_id,:actor_username,:at)"""),
         {"s": site_id, "id": item_id, "event": event_type,
          "before": json.dumps(before, ensure_ascii=False) if before else None,
-         "after": json.dumps(after, ensure_ascii=False), "note": note, "at": now()})
+         "after": json.dumps(after, ensure_ascii=False), "note": note,
+         "actor_id": actor["id"] if actor else None, "actor_username": actor["username"] if actor else None,
+         "at": now()})
 
 
 def _validate(cx, site_id: str, values: dict) -> None:
@@ -81,6 +90,11 @@ def _validate(cx, site_id: str, values: dict) -> None:
                             {"id": values["owner_id"]}).first()
         if not exists:
             raise HTTPException(422, "owner must be an active panel user")
+    if values.get("team_id") is not None:
+        exists = cx.execute(text("SELECT 1 FROM panel_teams WHERE id=:id AND active=1"),
+                            {"id": values["team_id"]}).first()
+        if not exists:
+            raise HTTPException(422, "team must be active")
     kind, source_id = values.get("kind"), values.get("source_id")
     if kind == "manual" and source_id is not None:
         raise HTTPException(422, "manual work cannot reference a source id")
@@ -106,8 +120,9 @@ def list_work(site_id: str, status: Status | None = None, owner_id: int | None =
     where = " AND ".join(clauses)
     with eng.connect() as cx:
         total = cx.execute(text(f"SELECT COUNT(*) FROM work_items w WHERE {where}"), args).scalar_one()
-        rows = cx.execute(text(f"""SELECT w.*, u.full_name AS owner_name FROM work_items w
-            LEFT JOIN panel_users u ON u.id=w.owner_id WHERE {where}
+        rows = cx.execute(text(f"""SELECT w.*, u.full_name AS owner_name, t.name AS team_name FROM work_items w
+            LEFT JOIN panel_users u ON u.id=w.owner_id
+            LEFT JOIN panel_teams t ON t.id=w.team_id WHERE {where}
             ORDER BY CASE WHEN w.status='blocked' THEN 0 WHEN w.due_at IS NOT NULL AND w.due_at<:now THEN 1 ELSE 2 END,
                      w.due_at, w.id DESC LIMIT :lim OFFSET :off"""), {**args, "now": now()}).mappings().all()
         summary = cx.execute(text("""SELECT COUNT(*) AS total,
@@ -120,7 +135,7 @@ def list_work(site_id: str, status: Status | None = None, owner_id: int | None =
 
 
 @router.post("", status_code=201)
-def create_work(site_id: str, body: WorkIn, eng: Engine = Depends(engine)) -> dict:
+def create_work(site_id: str, body: WorkIn, request: Request, eng: Engine = Depends(engine)) -> dict:
     if body.status in ("rejected", "deferred") and not body.note:
         raise HTTPException(422, "rejected or deferred work requires a reason")
     values = body.model_dump(exclude={"note"})
@@ -134,16 +149,17 @@ def create_work(site_id: str, body: WorkIn, eng: Engine = Depends(engine)) -> di
             item_id = result.lastrowid
             row = dict(cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id"),
                                   {"s": site_id, "id": item_id}).mappings().one())
-            _record(cx, site_id, item_id, "created", None, row, body.note)
+            _record(cx, site_id, item_id, "created", None, row, body.note, getattr(request.state, "panel_user", None))
     except IntegrityError as exc:
         raise HTTPException(409, "work already exists for this source") from exc
+    request.state.audit_fields = list(body.model_fields_set)
     return row
 
 
 @router.patch("/{item_id}")
-def update_work(site_id: str, item_id: int, body: WorkPatch, eng: Engine = Depends(engine)) -> dict:
+def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, eng: Engine = Depends(engine)) -> dict:
     patch = body.model_dump(exclude_unset=True, exclude={"note"})
-    if any(key in patch and patch[key] is None for key in ("title", "description", "status")):
+    if any(key in patch and patch[key] is None for key in ("title", "description", "status", "priority")):
         raise HTTPException(422, "title, description and status cannot be null")
     if "due_at" in patch:
         patch["due_at"] = _due_utc(patch["due_at"])
@@ -164,7 +180,8 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, eng: Engine = Depen
                         " WHERE site_id=:s AND id=:id"), {**patch, "s": site_id, "id": item_id})
         after = dict(cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id"),
                                 {"s": site_id, "id": item_id}).mappings().one())
-        _record(cx, site_id, item_id, "updated", before, after, body.note)
+        _record(cx, site_id, item_id, "updated", before, after, body.note, getattr(request.state, "panel_user", None))
+    request.state.audit_fields = list(body.model_fields_set)
     return after
 
 
@@ -174,7 +191,7 @@ def work_events(site_id: str, item_id: int, eng: Engine = Depends(engine)) -> li
         if not cx.execute(text("SELECT 1 FROM work_items WHERE site_id=:s AND id=:id"),
                           {"s": site_id, "id": item_id}).first():
             raise HTTPException(404, "work item not found")
-        rows = cx.execute(text("""SELECT id,event_type,before_json,after_json,note,created_at
+        rows = cx.execute(text("""SELECT id,event_type,before_json,after_json,note,actor_id,actor_username,created_at
             FROM work_item_events WHERE site_id=:s AND work_item_id=:id ORDER BY id"""),
             {"s": site_id, "id": item_id}).mappings().all()
     return [dict(row) for row in rows]

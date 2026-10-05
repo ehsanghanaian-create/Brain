@@ -65,3 +65,24 @@ def test_work_site_isolation_and_source_validation(client):
     assert client.get("/api/v1/sites/other/work").json()["total"] == 0
     assert client.patch(f"/api/v1/sites/other/work/{item['id']}", json={"status": "triaged"}).status_code == 404
     assert client.get(f"/api/v1/sites/other/work/{item['id']}/events").status_code == 404
+
+
+def test_cross_site_command_center_teams_and_ownership(client):
+    team = client.post("/api/v1/work/teams", json={"name": "SEO", "color": "#1abb9c"})
+    assert team.status_code == 201, team.text
+    team_id = team.json()["id"]
+    with client.eng.begin() as cx:
+        cx.execute(text("UPDATE panel_users SET team_id=:team WHERE id=1"), {"team": team_id})
+    created = client.post("/api/v1/sites/demo/work", json={"title": "بررسی صفحه", "team_id": team_id,
+        "priority": "critical", "estimated_hours": 4, "owner_id": 1,
+        "due_at": "2026-01-01T00:00:00Z", "status": "in_progress"})
+    assert created.status_code == 201, created.text
+    assert client.post("/api/v1/sites/other/work", json={"title": "سنجش دوم", "team_id": 999}).status_code == 422
+    overview = client.get("/api/v1/work/overview").json()
+    assert overview["summary"]["total"] == 1
+    assert overview["summary"]["overdue"] == 1
+    assert overview["summary"]["hours_open"] == 4
+    assert overview["items"][0]["team_name"] == "SEO"
+    assert overview["by_owner"][0]["name"] == "Operator"
+    assert client.get("/api/v1/work/overview?team_id=999").json()["summary"]["total"] == 0
+    assert client.get("/api/v1/work/teams").json()[0]["open_work"] == 1

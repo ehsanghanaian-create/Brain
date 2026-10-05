@@ -14,9 +14,9 @@ def test_call_center_source_and_operator_flow():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     migrations = Path(__file__).parents[3] / "database" / "migrations"
     with eng.begin() as cx:
-        for filename in ("0011_ads_click_events.sql", "0018_traffic_intel.sql", "0020_call_center.sql",
+        for filename in ("0011_ads_click_events.sql", "0018_traffic_intel.sql", "0020_call_center.sql", "0022_work_items.sql",
                          "0023_call_outcomes.sql", "0024_call_attribution.sql", "0025_call_attribution_lock.sql",
-                         "0026_panel_auth.sql"):
+                         "0026_panel_auth.sql", "0028_work_command_center.sql", "0029_work_event_actor.sql"):
             cx.connection.driver_connection.executescript((migrations / filename).read_text(encoding="utf-8"))
     app = FastAPI()
     app.include_router(call_center.router, prefix="/api/v1")

@@ -16,6 +16,7 @@ import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { LivePortfolioSignals } from './live-portfolio-signals';
+import { WorkPulse } from '@/features/workspace/components/work-pulse';
 
 const fa = new Intl.NumberFormat('fa-IR');
 const TYPE_FA: Record<string, string> = {
@@ -199,6 +200,8 @@ export function PortfolioDashboard({ data, health }: { data: PortfolioOverview; 
         <div className='relative flex flex-col justify-between gap-4 lg:flex-row lg:items-center'><div className='space-y-2'><div className='flex flex-wrap items-center gap-2'><Badge variant='outline' className='border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'><span className='size-1.5 rounded-full bg-emerald-500' /> بک‌اند متصل</Badge><span className='text-muted-foreground text-xs'>به‌روزرسانی {formatDate(data.generated_at)}</span></div><div><h2 className='text-xl font-bold tracking-tight sm:text-2xl'>نمای فرماندهی سبد سایت‌ها</h2><p className='text-muted-foreground mt-1 max-w-2xl text-sm leading-6'>وضعیت داده، گراف دانش و فرصت‌های عملیاتی همه سایت‌ها در یک نگاه؛ از اینجا مشخص است قدم بعدی روی کدام سایت باید انجام شود.</p></div></div><div className='flex flex-wrap items-center gap-2'>{graphCandidates.length > 0 && <Button onClick={rebuildMissingGraphs} disabled={bulkGraphBusy}><IconNetwork className={cn(bulkGraphBusy && 'animate-pulse')} />{bulkGraphBusy ? 'در حال صف‌گذاری…' : `ساخت گراف ${fa.format(graphCandidates.length)} سایت سالم`}</Button>}<Link href='/dashboard/sites' className={buttonVariants({ variant: 'outline' })}><IconWorld /> مدیریت سایت‌ها</Link><Link href='/dashboard/sites/new' className={buttonVariants({ variant: graphCandidates.length ? 'outline' : 'default' })}><IconPlus /> افزودن سایت</Link></div></div>
         {graphCandidates.length > 0 && <div className='relative mt-4 flex flex-col gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-xs sm:flex-row sm:items-center sm:justify-between'><span><strong>{fa.format(graphCandidates.length)} سایت سالم فقط گراف ندارند.</strong> اجرای گروهی از محتوای موجود استفاده می‌کند و سایت‌های خطادار را وارد صف نمی‌کند.</span><span className='text-muted-foreground'>{graphCandidates.map((site) => site.name).join('، ')}</span></div>}
       </section>
+
+      <WorkPulse />
 
       <LivePortfolioSignals initial={data} />
 

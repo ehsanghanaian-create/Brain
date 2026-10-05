@@ -77,7 +77,7 @@ def role_allowed(role: str, path: str, method: str) -> bool:
             return False
         if path == "/api/v1/call-center/operators":
             return True
-        allowed = ("/api/v1/portfolio", "/api/v1/sites", "/api/v1/reports", "/api/v1/traffic",
+        allowed = ("/api/v1/portfolio", "/api/v1/sites", "/api/v1/reports", "/api/v1/work", "/api/v1/traffic",
                    "/api/v1/graph", "/api/v1/keywords", "/api/v1/ads-data", "/api/v1/call-center/analytics")
         return any(path == item or path.startswith(item + "/") for item in allowed)
     return False

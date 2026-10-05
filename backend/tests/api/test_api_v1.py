@@ -162,6 +162,60 @@ def test_panel_login_role_access_and_audit(client):
     assert client.get('/api/v1/call-center/calls', headers=op_headers).status_code == 401
 
 
+def test_project_membership_controls_collaboration(client):
+    from seo_brain.api.panel_auth import hash_password
+    _seed(client)
+    with client.eng.begin() as cx:
+        for username, role in [('admin', 'admin'), ('lead', 'analyst'), ('worker', 'analyst'), ('outsider', 'analyst')]:
+            cx.execute(text("""INSERT INTO panel_users(full_name,email,username,password_hash,role,active,created_at,updated_at)
+                VALUES (:name,:email,:name,:hash,:role,1,:at,:at)"""), {
+                'name': username, 'email': f'{username}@example.test', 'hash': hash_password('test-password-123'),
+                'role': role, 'at': datetime.now(timezone.utc).isoformat()})
+        ids = {row.username: row.id for row in cx.execute(text('SELECT id,username FROM panel_users')).all()}
+    def headers(username):
+        token = client.post('/api/v1/auth/login', json={'username': username, 'password': 'test-password-123'}).json()['token']
+        return {'Authorization': 'Bearer ' + token}
+    admin, lead, worker, outsider = [headers(name) for name in ('admin', 'lead', 'worker', 'outsider')]
+    path = '/api/v1/sites/demo/work'
+    assert client.post(path, headers=outsider, json={'title': 'Outside task'}).status_code == 403
+    for name, responsibility in [('lead', 'lead'), ('worker', 'contributor')]:
+        assert client.put(f'/api/v1/work/projects/demo/members/{ids[name]}', headers=admin,
+                          json={'user_id': ids[name], 'responsibility': responsibility}).status_code == 200
+    assert next(row for row in client.get('/api/v1/work/projects', headers=lead).json()
+                if row['site_id'] == 'demo')['my_responsibility'] == 'lead'
+    assert client.post(path, headers=worker, json={'title': 'Unapproved task'}).status_code == 403
+    assert client.post(path, headers=lead, json={'title': 'Not a member', 'owner_id': ids['outsider'],
+        'due_at': (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(), 'status': 'assigned'}).status_code == 422
+    due = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    created = client.post(path, headers=lead, json={'title': 'Assigned SEO task', 'owner_id': ids['worker'],
+        'due_at': due, 'status': 'assigned'}).json()
+    assert client.post('/api/v1/work/projects/demo/milestones', headers=worker,
+                       json={'title': 'Worker milestone'}).status_code == 403
+    milestone = client.post('/api/v1/work/projects/demo/milestones', headers=lead,
+                            json={'title': 'Technical audit complete'})
+    assert milestone.status_code == 201
+    assert client.patch(f'/api/v1/work/projects/demo/milestones/{milestone.json()["id"]}', headers=lead,
+                        json={'description': 'Ready for review'}).status_code == 200
+    item_path = f'{path}/{created["id"]}'
+    assert client.patch(item_path, headers=outsider, json={'status': 'in_progress'}).status_code == 403
+    assert client.patch(item_path, headers=worker, json={'priority': 'critical'}).status_code == 403
+    assert client.patch(item_path, headers=worker, json={'status': 'verified', 'verification_note': 'done'}).status_code == 403
+    progressed = client.patch(item_path, headers=worker, json={'status': 'in_progress', 'progress_percent': 50,
+        'note': 'Initial technical audit complete'})
+    assert progressed.status_code == 200 and progressed.json()['progress_percent'] == 50
+    commented = client.patch(item_path, headers=worker, json={'note': 'Waiting for crawl output'})
+    assert commented.status_code == 200
+    events = client.get(f'{item_path}/events', headers=admin).json()
+    assert events[-1]['event_type'] == 'comment' and events[-1]['actor_username'] == 'worker'
+    time_path = f'/api/v1/work/projects/demo/tasks/{created["id"]}/time'
+    time_body = {'user_id': ids['worker'], 'minutes': 45, 'work_date': datetime.now(timezone.utc).date().isoformat(), 'note': 'Crawl review'}
+    assert client.post(time_path, headers=outsider, json=time_body).status_code == 403
+    assert client.post(time_path, headers=worker, json={**time_body, 'user_id': ids['lead']}).status_code == 403
+    logged = client.post(time_path, headers=worker, json=time_body)
+    assert logged.status_code == 201 and logged.json()['minutes'] == 45
+    assert client.patch(item_path, headers=lead, json={'status': 'verified', 'verification_note': 'Search Console checked'}).status_code == 200
+
+
 def test_panel_login_locks_after_repeated_failures(client):
     for _ in range(5):
         response = client.post('/api/v1/auth/login', json={"username": "unknown", "password": "incorrect"})

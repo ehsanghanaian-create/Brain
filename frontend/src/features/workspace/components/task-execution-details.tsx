@@ -9,13 +9,13 @@ import { commandApi, type CommandWorkItem, type TaskDependency, type TaskTimeEnt
 
 const number = new Intl.NumberFormat('fa-IR');
 
-export function TaskExecutionDetails({ item, items, people, canEdit }: {
-  item: CommandWorkItem; items: CommandWorkItem[]; people: WorkPerson[]; canEdit: boolean;
+export function TaskExecutionDetails({ item, items, people, canEdit, canLogTime, canLogOthers, meId }: {
+  item: CommandWorkItem; items: CommandWorkItem[]; people: WorkPerson[]; canEdit: boolean; canLogTime: boolean; canLogOthers: boolean; meId: number | null;
 }) {
   const [dependencies, setDependencies] = useState<TaskDependency[]>([]);
   const [entries, setEntries] = useState<TaskTimeEntry[]>([]);
   const [dependencyId, setDependencyId] = useState('');
-  const [userId, setUserId] = useState(item.owner_id?.toString() || '');
+  const [userId, setUserId] = useState(meId?.toString() || item.owner_id?.toString() || '');
   const [minutes, setMinutes] = useState('');
   const [workDate, setWorkDate] = useState(new Date().toISOString().slice(0, 10));
   const [note, setNote] = useState('');
@@ -27,7 +27,7 @@ export function TaskExecutionDetails({ item, items, people, canEdit }: {
     catch (cause) { toast.error(cause instanceof Error ? cause.message : 'جزئیات اجرا دریافت نشد'); }
   }, [item.id, item.site_id]);
   useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => { setUserId(item.owner_id?.toString() || ''); }, [item.id, item.owner_id]);
+  useEffect(() => { setUserId(meId?.toString() || item.owner_id?.toString() || ''); }, [item.id, item.owner_id, meId]);
   const spent = entries.reduce((sum, entry) => sum + entry.minutes, 0);
 
   async function addDependency() {
@@ -62,7 +62,7 @@ export function TaskExecutionDetails({ item, items, people, canEdit }: {
     <div className='space-y-2 border-t pt-4'><div className='flex items-center justify-between'><strong className='text-sm'>زمان صرف‌شده</strong><span className='text-muted-foreground text-xs'>{number.format(spent / 60)} از {number.format(item.estimated_hours || 0)} ساعت برآوردی</span></div>
       {entries.map((entry) => <div key={entry.id} className='flex justify-between gap-2 rounded-lg border p-2 text-xs'><span>{entry.user_name} · {entry.note || 'کار ثبت‌شده'}</span><span className='text-muted-foreground'>{new Date(entry.work_date).toLocaleDateString('fa-IR')} · {number.format(entry.minutes)} دقیقه</span></div>)}
       {!entries.length && <p className='text-muted-foreground text-xs'>هنوز زمانی ثبت نشده است.</p>}
-      {canEdit && <div className='grid gap-2 sm:grid-cols-2'><NativeSelect aria-label='انجام‌دهندهٔ زمان' value={userId} onChange={(e) => setUserId(e.target.value)}><NativeSelectOption value=''>انتخاب فرد</NativeSelectOption>{people.filter((person) => person.active).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect><Input aria-label='زمان به دقیقه' type='number' min={1} max={1440} placeholder='دقیقه' value={minutes} onChange={(e) => setMinutes(e.target.value)} /><Input aria-label='تاریخ کار' type='date' value={workDate} onChange={(e) => setWorkDate(e.target.value)} /><Input aria-label='شرح زمان' placeholder='چه کاری انجام شد؟' value={note} onChange={(e) => setNote(e.target.value)} /><Button size='sm' disabled={busy || !userId || !minutes || !workDate} onClick={logTime}>ثبت زمان</Button></div>}
+      {canLogTime && <div className='grid gap-2 sm:grid-cols-2'><NativeSelect disabled={!canLogOthers} aria-label='انجام‌دهندهٔ زمان' value={userId} onChange={(e) => setUserId(e.target.value)}><NativeSelectOption value=''>انتخاب فرد</NativeSelectOption>{people.filter((person) => person.active && (canLogOthers || person.id === meId)).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect><Input aria-label='زمان به دقیقه' type='number' min={1} max={1440} placeholder='دقیقه' value={minutes} onChange={(e) => setMinutes(e.target.value)} /><Input aria-label='تاریخ کار' type='date' value={workDate} onChange={(e) => setWorkDate(e.target.value)} /><Input aria-label='شرح زمان' placeholder='چه کاری انجام شد؟' value={note} onChange={(e) => setNote(e.target.value)} /><Button size='sm' disabled={busy || !userId || !minutes || !workDate} onClick={logTime}>ثبت زمان</Button></div>}
     </div>
   </div>;
 }

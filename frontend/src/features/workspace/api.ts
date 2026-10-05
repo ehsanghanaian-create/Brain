@@ -15,7 +15,8 @@ export type WorkTeam = { id: number; name: string; color: string; description: s
 export type WorkPerson = { id: number; full_name: string; active: boolean; team_id: number | null; role: string };
 export type ProjectSummary = { site_id: string; name: string; canonical_url: string; members: number; tasks: number;
   open_tasks: number; blocked_tasks: number; unassigned_tasks: number; overdue_tasks: number;
-  progress_percent: number; estimated_hours: number; spent_hours: number; milestones: number };
+  progress_percent: number; estimated_hours: number; spent_hours: number; milestones: number;
+  my_responsibility: 'admin' | 'lead' | 'contributor' | 'viewer' | null };
 export type ProjectMember = { site_id: string; user_id: number; responsibility: 'lead' | 'contributor' | 'viewer';
   full_name: string; username: string; role: string; active: boolean; created_at: string };
 export type ProjectMilestone = { id: number; site_id: string; title: string; description: string;

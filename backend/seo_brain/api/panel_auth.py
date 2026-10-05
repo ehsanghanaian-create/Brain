@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import secrets
+import re
 
 from fastapi import HTTPException, Request
 from sqlalchemy import Engine, text
@@ -74,7 +75,13 @@ def role_allowed(role: str, path: str, method: str) -> bool:
         return method == "GET" and path.endswith(("/traffic/overview", "/traffic/calls")) and path.startswith("/api/v1/sites/")
     if role == "analyst":
         if method != "GET":
-            return False
+            return bool(
+                (method == "POST" and re.fullmatch(r"/api/v1/sites/[^/]+/work", path))
+                or (method == "PATCH" and re.fullmatch(r"/api/v1/sites/[^/]+/work/\d+", path))
+                or (method == "POST" and re.fullmatch(r"/api/v1/work/projects/[^/]+/tasks/\d+/time", path))
+                or (method in {"POST", "PATCH"} and re.fullmatch(r"/api/v1/work/projects/[^/]+/milestones(?:/\d+)?", path))
+                or (method in {"POST", "DELETE"} and re.fullmatch(r"/api/v1/work/projects/[^/]+/tasks/\d+/dependencies(?:/\d+)?", path))
+            )
         if path == "/api/v1/call-center/operators":
             return True
         allowed = ("/api/v1/portfolio", "/api/v1/sites", "/api/v1/reports", "/api/v1/work", "/api/v1/traffic",

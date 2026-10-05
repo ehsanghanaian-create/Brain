@@ -15,9 +15,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { api, type PortfolioOverview, type Site } from '@/lib/api/client';
 import type { WorkStatus } from '@/features/reports/types';
 import { commandApi, type CommandFilters, type CommandOverview, type CommandWorkItem, type WorkPerson,
-  type WorkPriority, type WorkTeam } from '../api';
+  type WorkPriority, type WorkTeam, type ProjectSummary, type ProjectMember } from '../api';
 import { WorkGraph } from './work-graph';
 import { ProjectExecution } from './project-execution';
+import { TeamPlanner } from './team-planner';
 import { TaskExecutionDetails } from './task-execution-details';
 
 const num = new Intl.NumberFormat('fa-IR');
@@ -30,7 +31,7 @@ const statusLabel: Record<WorkStatus, string> = {
 const priorityLabel: Record<WorkPriority, string> = { critical: 'فوری', high: 'بالا', normal: 'معمولی', low: 'پایین' };
 const activeStatuses = new Set<WorkStatus>(['approved', 'assigned', 'in_progress', 'review', 'published', 'measurement_pending', 'verified', 'blocked']);
 const closedStatuses = new Set<WorkStatus>(['verified', 'rejected', 'deferred']);
-type View = 'command' | 'projects' | 'sheet' | 'kanban' | 'timeline' | 'graph' | 'teams';
+type View = 'command' | 'mine' | 'projects' | 'planner' | 'sheet' | 'kanban' | 'timeline' | 'graph' | 'teams';
 type Focus = 'all' | 'overdue' | 'unassigned' | 'blocked' | 'due_week' | 'hours';
 type TaskForm = { site_id: string; title: string; description: string; url: string; status: WorkStatus;
   priority: WorkPriority; owner_id: string; team_id: string; due_at: string; estimated_hours: string;
@@ -40,7 +41,7 @@ const blankForm: TaskForm = { site_id: '', title: '', description: '', url: '', 
   owner_id: '', team_id: '', due_at: '', start_at: '', progress_percent: '0', parent_id: '', milestone_id: '',
   estimated_hours: '', blocked_reason: '', verification_note: '', note: '' };
 const views: { key: View; label: string }[] = [
-  { key: 'command', label: 'فرماندهی' }, { key: 'projects', label: 'پروژه‌ها' }, { key: 'sheet', label: 'شیت کارها' },
+  { key: 'command', label: 'فرماندهی' }, { key: 'mine', label: 'کارهای من' }, { key: 'projects', label: 'پروژه‌ها' }, { key: 'planner', label: 'برنامهٔ تیم' }, { key: 'sheet', label: 'شیت کارها' },
   { key: 'kanban', label: 'کانبان' }, { key: 'timeline', label: 'تایم‌لاین' },
   { key: 'graph', label: 'گراف مسیر' }, { key: 'teams', label: 'تیم‌ها' }
 ];
@@ -61,6 +62,8 @@ export function WorkCommandCenter() {
   const [people, setPeople] = useState<WorkPerson[]>([]);
   const [teams, setTeams] = useState<WorkTeam[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioOverview | null>(null);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [meId, setMeId] = useState<number | null>(null);
   const [role, setRole] = useState<'admin' | 'analyst' | 'call_center'>('analyst');
   const [filters, setFilters] = useState<CommandFilters>({ limit: 500 });
   const [search, setSearch] = useState('');
@@ -74,6 +77,7 @@ export function WorkCommandCenter() {
   const [saving, setSaving] = useState(false);
   const [events, setEvents] = useState<Awaited<ReturnType<typeof commandApi.events>> | null>(null);
   const [milestones, setMilestones] = useState<Awaited<ReturnType<typeof commandApi.milestones>>>([]);
+  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
   const [teamName, setTeamName] = useState('');
   const [teamColor, setTeamColor] = useState('#1abb9c');
   const [teamDescription, setTeamDescription] = useState('');
@@ -87,12 +91,12 @@ export function WorkCommandCenter() {
     const currentRequest = ++requestId.current;
     if (!quiet) setLoading(true);
     try {
-      const [overview, teamRows, personRows, siteRows, me, portfolioRows] = await Promise.all([
+      const [overview, teamRows, personRows, siteRows, me, portfolioRows, projectRows] = await Promise.all([
         commandApi.overview(filters), commandApi.teams(), commandApi.people(),
-        api<Site[]>('/sites'), commandApi.me(), api<PortfolioOverview>('/portfolio/overview')
+        api<Site[]>('/sites'), commandApi.me(), api<PortfolioOverview>('/portfolio/overview'), commandApi.projects()
       ]);
       if (currentRequest === requestId.current) {
-        setData(overview); setTeams(teamRows); setPeople(personRows); setSites(siteRows); setRole(me.role); setPortfolio(portfolioRows); setError('');
+        setData(overview); setTeams(teamRows); setPeople(personRows); setSites(siteRows); setRole(me.role); setMeId(me.id); setProjects(projectRows); setPortfolio(portfolioRows); setError('');
       }
     } catch (cause) { if (currentRequest === requestId.current) setError(cause instanceof Error ? cause.message : 'دریافت داده انجام نشد'); }
     finally { if (currentRequest === requestId.current) setLoading(false); }
@@ -103,7 +107,9 @@ export function WorkCommandCenter() {
     return previous.q === q ? previous : { ...previous, q };
   }), 300); return () => clearTimeout(timer); }, [search]);
   useEffect(() => { if (!editing || !form.site_id) return; let active = true;
-    void commandApi.milestones(form.site_id).then((rows) => { if (active) setMilestones(rows); }).catch(() => { if (active) setMilestones([]); });
+    void Promise.all([commandApi.milestones(form.site_id), commandApi.projectMembers(form.site_id)])
+      .then(([rows, members]) => { if (active) { setMilestones(rows); setProjectMembers(members); } })
+      .catch(() => { if (active) { setMilestones([]); setProjectMembers([]); } });
     return () => { active = false; };
   }, [editing, form.site_id]);
 
@@ -122,10 +128,20 @@ export function WorkCommandCenter() {
       return { day: date.toLocaleDateString('fa-IR', { month: 'short', day: 'numeric' }), count: days.get(date.toISOString().slice(0, 10)) || 0 }; }); }, [data]);
   const statusChart = useMemo(() => (data?.by_status ?? []).map((row) => ({ name: statusLabel[row.key], value: row.count })), [data]);
   const displayCount = data?.summary.total ?? 0;
+  const projectRole = (siteId: string) => projects.find((project) => project.site_id === siteId)?.my_responsibility;
+  const canLead = (siteId: string) => canEdit || projectRole(siteId) === 'lead';
+  const canUpdate = (item: CommandWorkItem) => canLead(item.site_id) ||
+    (projectRole(item.site_id) === 'contributor' && item.owner_id === meId);
+  const canManageEditing = editing === 'new' ? canLead(form.site_id) : editing ? canLead(editing.site_id) : false;
+  const canUpdateEditing = editing !== null && (editing === 'new' ? canManageEditing : canUpdate(editing));
+  const myItems = useMemo(() => (data?.items ?? []).filter((item) => item.owner_id === meId && !closedStatuses.has(item.status))
+    .toSorted((a, b) => (a.status === 'blocked' ? -1 : b.status === 'blocked' ? 1 : 0) ||
+      (isOverdue(a) ? -1 : isOverdue(b) ? 1 : 0) ||
+      (a.due_at || '9999').localeCompare(b.due_at || '9999')), [data, meId]);
 
   function openTask(item: CommandWorkItem | 'new') {
     setEvents(null); setEditing(item);
-    setForm(item === 'new' ? { ...blankForm, site_id: filters.site_id || sites[0]?.site_id || '' } : {
+    setForm(item === 'new' ? { ...blankForm, site_id: (filters.site_id && canLead(filters.site_id) ? filters.site_id : projects.find((project) => canLead(project.site_id))?.site_id) || '' } : {
       site_id: item.site_id, title: item.title, description: item.description, url: item.url || '',
       status: item.status, priority: item.priority, owner_id: item.owner_id?.toString() || '',
       team_id: item.team_id?.toString() || '', due_at: dateTimeInput(item.due_at),
@@ -153,7 +169,10 @@ export function WorkCommandCenter() {
       note: form.note.trim() || null };
     try {
       if (editing === 'new') await commandApi.createWork(form.site_id, body);
-      else await commandApi.updateWork(editing, body);
+      else await commandApi.updateWork(editing, canManageEditing ? body : {
+        status: form.status, progress_percent: Number(form.progress_percent || 0),
+        blocked_reason: form.blocked_reason.trim() || null, note: form.note.trim() || null
+      });
       setEditing(null); await refresh(true); toast.success('کار و تاریخچهٔ آن ذخیره شد');
     } catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ذخیره انجام نشد'); }
     finally { setSaving(false); }
@@ -191,19 +210,19 @@ export function WorkCommandCenter() {
   }
 
   return <div className='space-y-5'>
-    <section className='relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-l from-emerald-500/15 via-background to-sky-500/10 p-5 shadow-sm'>
+    <section className='relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-l from-emerald-500/15 via-background to-sky-500/10 p-4 shadow-sm'>
       <div className='pointer-events-none absolute -top-16 -left-12 size-56 rounded-full bg-emerald-500/15 blur-3xl' />
       <div className='relative flex flex-wrap items-center justify-between gap-4'><div><div className='mb-2 flex items-center gap-2'><Badge variant='outline'>میز عملیات SEO</Badge><span className='text-muted-foreground text-xs'>به‌روزرسانی خودکار هر ۳۰ ثانیه</span></div>
         <h2 className='text-xl font-bold sm:text-2xl'>هر مسئله، یک مسئول، یک موعد، یک نتیجه</h2>
-        <p className='text-muted-foreground mt-2 max-w-2xl text-sm leading-6'>از همهٔ سایت‌ها تا سطح هر کار: اولویت، تیم، مانع، تاریخچه و سنجش نتیجه در یک مسیر قابل پیگیری.</p></div>
-        <div className='flex gap-2'>{canEdit && <Button onClick={() => openTask('new')}>＋ کار جدید</Button>}
+        <p className='text-muted-foreground mt-1 max-w-2xl text-sm leading-5'>اولویت‌ها، مسئولان، موعدها و پیشرفت واقعی پروژه‌های سئو در یک جا.</p></div>
+        <div className='flex gap-2'>{(canEdit || projects.some((project) => project.my_responsibility === 'lead')) && <Button onClick={() => openTask('new')}>＋ کار جدید</Button>}
           <Button variant='outline' onClick={() => void refresh()} disabled={loading}>به‌روزرسانی</Button></div></div>
     </section>
 
     {error && <Card className='border-rose-500/40'><CardContent className='pt-5 text-sm text-rose-600'>{error} <Button variant='outline' size='sm' onClick={() => void refresh()}>تلاش دوباره</Button></CardContent></Card>}
     {loading && !data && <div className='text-muted-foreground rounded-xl border p-12 text-center text-sm'>در حال خواندن کارهای همهٔ سایت‌ها…</div>}
     {data && <>
-      <section className='grid gap-3 sm:grid-cols-2 xl:grid-cols-6' aria-label='شاخص‌های عملیات'>
+      <section className='grid grid-cols-2 gap-2 md:grid-cols-3 2xl:grid-cols-6' aria-label='شاخص‌های عملیات'>
         {([
           ['کار باز', data.summary.open, 'all', 'text-sky-600'],
           ['عقب‌افتاده', data.summary.overdue, 'overdue', 'text-rose-600'],
@@ -212,8 +231,8 @@ export function WorkCommandCenter() {
           ['موعد این هفته', data.summary.due_week, 'due_week', 'text-violet-600'],
           ['ساعت برآوردی باز', data.summary.hours_open, 'hours', 'text-emerald-600']
         ] as const).map(([label, value, key, tone], index) => <motion.button key={label} initial={reduced ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * .045 }}
-          onClick={() => setFocus(key)} aria-pressed={focus === key} className={`rounded-xl border bg-card p-4 text-right shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${focus === key ? 'border-emerald-500/60 ring-1 ring-emerald-500/20' : 'border-border/70'}`}>
-          <span className='text-muted-foreground text-xs'>{label}</span><strong className={`mt-2 block text-2xl tabular-nums ${tone}`}>{num.format(value)}</strong>
+          onClick={() => setFocus(key)} aria-pressed={focus === key} className={`rounded-xl border bg-card p-3 text-right shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${focus === key ? 'border-emerald-500/60 ring-1 ring-emerald-500/20' : 'border-border/70'}`}>
+          <span className='text-muted-foreground text-xs'>{label}</span><strong className={`mt-1 block text-xl tabular-nums ${tone}`}>{num.format(value)}</strong>
         </motion.button>)}
       </section>
 
@@ -254,14 +273,26 @@ export function WorkCommandCenter() {
           {!data.by_site.length && <p className='text-muted-foreground text-sm'>هنوز کار سایتی ثبت نشده است.</p>}
         </CardContent></Card></div>
         <Card className='xl:col-span-2'><CardHeader><CardTitle>جریان اخیر اجرا</CardTitle><CardDescription>ثبت و تغییر وضعیت‌ها از دفتر تاریخچهٔ کارها خوانده می‌شود.</CardDescription></CardHeader><CardContent className='grid gap-2 md:grid-cols-2 xl:grid-cols-3'>
-          {data.recent.map((event) => <div key={event.id} className='rounded-lg border p-3'><div className='text-xs text-muted-foreground'>{new Date(event.created_at).toLocaleString('fa-IR')} · {event.site_name}</div><div className='mt-1 font-medium text-sm'>{event.title}</div><div className='text-muted-foreground mt-1 text-xs'>{event.event_type === 'created' ? 'ثبت شد' : 'تغییر کرد'} · {event.actor_username || 'سیستم'}{event.note ? ` · ${event.note}` : ''}</div></div>)}
+          {data.recent.map((event) => <div key={event.id} className='rounded-lg border p-3'><div className='text-xs text-muted-foreground'>{new Date(event.created_at).toLocaleString('fa-IR')} · {event.site_name}</div><div className='mt-1 font-medium text-sm'>{event.title}</div><div className='text-muted-foreground mt-1 text-xs'>{event.event_type === 'created' ? 'ثبت شد' : event.event_type === 'comment' ? 'یادداشت گذاشت' : 'تغییر کرد'} · {event.actor_username || 'سیستم'}{event.note ? ` · ${event.note}` : ''}</div></div>)}
           {!data.recent.length && <p className='text-muted-foreground text-sm'>هنوز رویدادی ثبت نشده است.</p>}
         </CardContent></Card>
         <Card><CardHeader><CardTitle>توزیع مراحل کار</CardTitle><CardDescription>مبنای نمودار، تعداد کارهای ثبت‌شده در فیلتر فعلی است.</CardDescription></CardHeader><CardContent><div className='h-64'>{statusChart.length ? <ResponsiveContainer width='100%' height='100%'><PieChart><Pie data={statusChart} dataKey='value' nameKey='name' innerRadius={58} outerRadius={86} paddingAngle={4} animationDuration={850}>{statusChart.map((row, index) => <Cell key={row.name} fill={['#1abb9c', '#38bdf8', '#a78bfa', '#f59e0b', '#ef4444', '#64748b'][index % 6]} />)}</Pie><Tooltip /></PieChart></ResponsiveContainer> : <p className='text-muted-foreground pt-20 text-center text-sm'>هنوز مرحله‌ای ثبت نشده است.</p>}</div><div className='flex flex-wrap gap-2'>{statusChart.map((row) => <Badge key={row.name} variant='outline'>{row.name} · {num.format(row.value)}</Badge>)}</div></CardContent></Card>
         <Card><CardHeader><CardTitle>بار تیم‌ها</CardTitle><CardDescription>کار باز هر تیم برای توزیع بهتر مسئولیت.</CardDescription></CardHeader><CardContent><div className='h-64'>{data.by_team.length ? <ResponsiveContainer width='100%' height='100%'><BarChart data={data.by_team.slice(0, 8)} margin={{ left: 8, right: 8 }}><CartesianGrid strokeDasharray='3 3' opacity={.2} /><XAxis dataKey='name' tick={{ fontSize: 11 }} /><YAxis allowDecimals={false} /><Tooltip /><Bar dataKey='open' name='کار باز' fill='#8b5cf6' radius={[6, 6, 0, 0]} animationDuration={850} /></BarChart></ResponsiveContainer> : <p className='text-muted-foreground pt-20 text-center text-sm'>با تعریف تیم و واگذاری کار، نمودار شکل می‌گیرد.</p>}</div></CardContent></Card>
       </div>}
 
-      {view === 'projects' && <ProjectExecution items={data.items} people={people} canEdit={canEdit} onTask={openTask} />}
+      {view === 'mine' && <div className='grid gap-4 xl:grid-cols-[1.5fr_1fr]'>
+        <Card><CardHeader><CardTitle>صف کارهای من</CardTitle><CardDescription>کارهای مسدود و عقب‌افتاده بالاترند؛ هر ردیف را باز کنید و پیشرفت یا زمان انجام را ثبت کنید.</CardDescription></CardHeader><CardContent className='space-y-2'>
+          {myItems.map((item) => <button key={item.id} onClick={() => openTask(item)} className='flex w-full items-start justify-between gap-3 rounded-xl border p-3 text-right transition-colors hover:bg-muted/50'><span className='min-w-0'><strong className='block truncate text-sm'>{item.title}</strong><span className='text-muted-foreground mt-1 block text-xs'>{item.site_name} · {dateText(item.due_at)} · {num.format(item.progress_percent || 0)}٪ پیشرفت</span></span><Badge variant='outline' className={statusTone(item.status)}>{isOverdue(item) ? 'عقب‌افتاده' : statusLabel[item.status]}</Badge></button>)}
+          {!myItems.length && <p className='text-muted-foreground py-10 text-center text-sm'>کار بازی به شما واگذار نشده است. راهبر پروژه می‌تواند از بخش پروژه‌ها شما را عضو و مسئول کار کند.</p>}
+        </CardContent></Card>
+        <div className='space-y-4'><Card><CardHeader><CardTitle>وضعیت شخصی</CardTitle></CardHeader><CardContent className='grid grid-cols-2 gap-3 text-center text-sm'><div className='rounded-lg bg-muted p-4'><strong className='block text-2xl'>{num.format(myItems.length)}</strong>کار باز</div><div className='rounded-lg bg-rose-500/10 p-4'><strong className='block text-2xl text-rose-600'>{num.format(myItems.filter(isOverdue).length)}</strong>عقب‌افتاده</div><div className='rounded-lg bg-amber-500/10 p-4'><strong className='block text-2xl text-amber-600'>{num.format(myItems.filter((item) => item.status === 'blocked').length)}</strong>مانع‌دار</div><div className='rounded-lg bg-sky-500/10 p-4'><strong className='block text-2xl text-sky-600'>{num.format(myItems.reduce((sum, item) => sum + (item.estimated_hours || 0), 0))}</strong>ساعت برآوردی باز</div></CardContent></Card>
+          <Card><CardHeader><CardTitle>پروژه‌های من</CardTitle></CardHeader><CardContent className='space-y-2'>{projects.filter((project) => project.my_responsibility || canEdit).map((project) => <button key={project.site_id} onClick={() => { setFilters((current) => ({ ...current, site_id: project.site_id })); setView('projects'); }} className='flex w-full justify-between rounded-lg border p-3 text-sm hover:bg-muted/50'><span>{project.name}</span><span className='text-muted-foreground'>{canEdit || project.my_responsibility === 'admin' ? 'مدیر' : project.my_responsibility === 'lead' ? 'راهبر' : project.my_responsibility === 'contributor' ? 'مجری' : 'ناظر'}</span></button>)}{!projects.some((project) => project.my_responsibility || canEdit) && <p className='text-muted-foreground text-xs'>عضویت پروژه‌ای ثبت نشده است.</p>}</CardContent></Card>
+        </div>
+      </div>}
+
+      {view === 'projects' && <ProjectExecution items={data.items} people={people} canEdit={canEdit} preferredSiteId={filters.site_id} onTask={openTask} />}
+
+      {view === 'planner' && <TeamPlanner items={items} people={people} onTask={openTask} />}
 
       {view === 'sheet' && <Card><CardHeader><CardTitle>شیت مدیریت کارها</CardTitle><CardDescription>مرور همهٔ سایت‌ها، مسئولیت، موعد، اولویت و مرحلهٔ اجرا. برای تغییر هر ردیف، آن را باز کنید.</CardDescription></CardHeader><CardContent>
         <div className='overflow-x-auto rounded-lg border'><table className='w-full min-w-[1050px] text-right text-sm'><thead className='bg-muted/50 text-xs'><tr><th className='p-3'>کار / منبع</th><th>سایت</th><th>تیم</th><th>مسئول</th><th>اولویت</th><th>وضعیت</th><th>موعد</th><th>ساعت</th><th className='p-3'>جزئیات</th></tr></thead><tbody>
@@ -306,26 +337,26 @@ export function WorkCommandCenter() {
 
     <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) setEditing(null); }}><DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-2xl' dir='rtl'><DialogHeader><DialogTitle>{editing === 'new' ? 'کار جدید' : editing?.title}</DialogTitle><DialogDescription>هر کار باید مسیر اجرا و نتیجهٔ قابل بررسی داشته باشد. تاریخچهٔ تغییرات در همین پنجره دیده می‌شود.</DialogDescription></DialogHeader>
       {editing && <div className='grid gap-3 sm:grid-cols-2'>
-        <label className='space-y-1 text-xs'>سایت<NativeSelect disabled={editing !== 'new' || !canEdit} value={form.site_id} onChange={(e) => setForm((f) => ({ ...f, site_id: e.target.value }))}><NativeSelectOption value=''>انتخاب سایت</NativeSelectOption>{sites.map((site) => <NativeSelectOption key={site.site_id} value={site.site_id}>{site.name}</NativeSelectOption>)}</NativeSelect></label>
-        <label className='space-y-1 text-xs'>عنوان<Input disabled={!canEdit} value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} /></label>
-        <label className='space-y-1 text-xs sm:col-span-2'>شرح کار<Textarea disabled={!canEdit} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></label>
-        <label className='space-y-1 text-xs sm:col-span-2'>URL مرتبط<Input disabled={!canEdit} dir='ltr' value={form.url} onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))} /></label>
-        <label className='space-y-1 text-xs'>تیم<NativeSelect disabled={!canEdit} value={form.team_id} onChange={(e) => setForm((f) => ({ ...f, team_id: e.target.value }))}><NativeSelectOption value=''>بدون تیم</NativeSelectOption>{teams.filter((team) => team.active).map((team) => <NativeSelectOption key={team.id} value={String(team.id)}>{team.name}</NativeSelectOption>)}</NativeSelect></label>
-        <label className='space-y-1 text-xs'>مسئول<NativeSelect disabled={!canEdit} value={form.owner_id} onChange={(e) => { const person = people.find((row) => row.id === Number(e.target.value)); setForm((f) => ({ ...f, owner_id: e.target.value, team_id: f.team_id || person?.team_id?.toString() || '' })); }}><NativeSelectOption value=''>بی‌مسئول</NativeSelectOption>{people.filter((person) => person.active && (!form.team_id || person.team_id?.toString() === form.team_id || person.id.toString() === form.owner_id)).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect></label>
-        <label className='space-y-1 text-xs'>وضعیت<NativeSelect disabled={!canEdit} value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as WorkStatus }))}>{(Object.keys(statusLabel) as WorkStatus[]).map((status) => <NativeSelectOption key={status} value={status}>{statusLabel[status]}</NativeSelectOption>)}</NativeSelect></label>
-        <label className='space-y-1 text-xs'>اولویت<NativeSelect disabled={!canEdit} value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as WorkPriority }))}>{(Object.keys(priorityLabel) as WorkPriority[]).map((priority) => <NativeSelectOption key={priority} value={priority}>{priorityLabel[priority]}</NativeSelectOption>)}</NativeSelect></label>
-        <label className='space-y-1 text-xs'>موعد<Input disabled={!canEdit} type='datetime-local' value={form.due_at} onChange={(e) => setForm((f) => ({ ...f, due_at: e.target.value }))} /></label>
-        <label className='space-y-1 text-xs'>شروع<Input disabled={!canEdit} type='datetime-local' value={form.start_at} onChange={(e) => setForm((f) => ({ ...f, start_at: e.target.value }))} /></label>
-        <label className='space-y-1 text-xs'>ساعت برآوردی<Input disabled={!canEdit} type='number' min={0} max={1000} step={.5} value={form.estimated_hours} onChange={(e) => setForm((f) => ({ ...f, estimated_hours: e.target.value }))} /></label>
-        <label className='space-y-1 text-xs'>درصد پیشرفت<Input disabled={!canEdit} type='number' min={0} max={100} value={form.progress_percent} onChange={(e) => setForm((f) => ({ ...f, progress_percent: e.target.value }))} /></label>
-        <label className='space-y-1 text-xs'>زیرکارِ<NativeSelect disabled={!canEdit} value={form.parent_id} onChange={(e) => setForm((f) => ({ ...f, parent_id: e.target.value }))}><NativeSelectOption value=''>کار اصلی</NativeSelectOption>{(data?.items || []).filter((item) => item.site_id === form.site_id && (editing === 'new' || item.id !== editing.id)).map((item) => <NativeSelectOption key={item.id} value={String(item.id)}>{item.title}</NativeSelectOption>)}</NativeSelect></label>
-        <label className='space-y-1 text-xs'>مایلستون<NativeSelect disabled={!canEdit} value={form.milestone_id} onChange={(e) => setForm((f) => ({ ...f, milestone_id: e.target.value }))}><NativeSelectOption value=''>بدون مایلستون</NativeSelectOption>{milestones.map((entry) => <NativeSelectOption key={entry.id} value={String(entry.id)}>{entry.title}</NativeSelectOption>)}</NativeSelect></label>
-        {form.status === 'blocked' && <label className='space-y-1 text-xs sm:col-span-2'>دلیل مانع<Textarea disabled={!canEdit} value={form.blocked_reason} onChange={(e) => setForm((f) => ({ ...f, blocked_reason: e.target.value }))} /></label>}
-        {form.status === 'verified' && <label className='space-y-1 text-xs sm:col-span-2'>نتیجهٔ سنجش<Textarea disabled={!canEdit} value={form.verification_note} onChange={(e) => setForm((f) => ({ ...f, verification_note: e.target.value }))} /></label>}
-        {canEdit && <label className='space-y-1 text-xs sm:col-span-2'>یادداشت این تغییر<Input value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder='چرا این تصمیم گرفته شد؟' /></label>}
-        <div className='flex flex-wrap gap-2 sm:col-span-2'>{canEdit && <Button onClick={saveTask} disabled={saving}>{saving ? 'در حال ذخیره…' : 'ذخیرهٔ کار'}</Button>}{editing !== 'new' && <Button variant='outline' onClick={() => void loadEvents(editing)}>نمایش تاریخچه</Button>}</div>
-        {events && <div className='space-y-2 border-t pt-3 sm:col-span-2'><strong className='text-sm'>تاریخچهٔ کار</strong>{events.map((event) => <div key={event.id} className='rounded-lg border p-2 text-xs'><span className='text-muted-foreground'>{new Date(event.created_at).toLocaleString('fa-IR')}</span> · {event.event_type === 'created' ? 'ایجاد' : 'ویرایش'} · {event.actor_username || 'سیستم'} {event.note && <span>· {event.note}</span>}</div>)}</div>}
-        {editing !== 'new' && <TaskExecutionDetails item={editing} items={data?.items || []} people={people} canEdit={canEdit} />}
+        <label className='space-y-1 text-xs'>سایت<NativeSelect disabled={editing !== 'new'} value={form.site_id} onChange={(e) => setForm((f) => ({ ...f, site_id: e.target.value }))}><NativeSelectOption value=''>انتخاب سایت</NativeSelectOption>{sites.filter((site) => canLead(site.site_id) || editing !== 'new').map((site) => <NativeSelectOption key={site.site_id} value={site.site_id}>{site.name}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>عنوان<Input disabled={!canManageEditing} value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs sm:col-span-2'>شرح کار<Textarea disabled={!canManageEditing} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs sm:col-span-2'>URL مرتبط<Input disabled={!canManageEditing} dir='ltr' value={form.url} onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs'>تیم<NativeSelect disabled={!canManageEditing} value={form.team_id} onChange={(e) => setForm((f) => ({ ...f, team_id: e.target.value }))}><NativeSelectOption value=''>بدون تیم</NativeSelectOption>{teams.filter((team) => team.active).map((team) => <NativeSelectOption key={team.id} value={String(team.id)}>{team.name}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>مسئول<NativeSelect disabled={!canManageEditing} value={form.owner_id} onChange={(e) => { const person = people.find((row) => row.id === Number(e.target.value)); setForm((f) => ({ ...f, owner_id: e.target.value, team_id: f.team_id || person?.team_id?.toString() || '' })); }}><NativeSelectOption value=''>بی‌مسئول</NativeSelectOption>{people.filter((person) => person.active && person.role !== 'call_center' && (person.role === 'admin' || projectMembers.some((member) => member.user_id === person.id && member.responsibility !== 'viewer') || person.id.toString() === form.owner_id) && (!form.team_id || person.team_id?.toString() === form.team_id || person.id.toString() === form.owner_id)).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>وضعیت<NativeSelect disabled={!canUpdateEditing} value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as WorkStatus }))}>{(Object.keys(statusLabel) as WorkStatus[]).filter((status) => canManageEditing || !['verified', 'rejected', 'deferred', 'approved', 'assigned'].includes(status)).map((status) => <NativeSelectOption key={status} value={status}>{statusLabel[status]}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>اولویت<NativeSelect disabled={!canManageEditing} value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as WorkPriority }))}>{(Object.keys(priorityLabel) as WorkPriority[]).map((priority) => <NativeSelectOption key={priority} value={priority}>{priorityLabel[priority]}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>موعد<Input disabled={!canManageEditing} type='datetime-local' value={form.due_at} onChange={(e) => setForm((f) => ({ ...f, due_at: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs'>شروع<Input disabled={!canManageEditing} type='datetime-local' value={form.start_at} onChange={(e) => setForm((f) => ({ ...f, start_at: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs'>ساعت برآوردی<Input disabled={!canManageEditing} type='number' min={0} max={1000} step={.5} value={form.estimated_hours} onChange={(e) => setForm((f) => ({ ...f, estimated_hours: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs'>درصد پیشرفت<Input disabled={!canUpdateEditing} type='number' min={0} max={100} value={form.progress_percent} onChange={(e) => setForm((f) => ({ ...f, progress_percent: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs'>زیرکارِ<NativeSelect disabled={!canManageEditing} value={form.parent_id} onChange={(e) => setForm((f) => ({ ...f, parent_id: e.target.value }))}><NativeSelectOption value=''>کار اصلی</NativeSelectOption>{(data?.items || []).filter((item) => item.site_id === form.site_id && (editing === 'new' || item.id !== editing.id)).map((item) => <NativeSelectOption key={item.id} value={String(item.id)}>{item.title}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>مایلستون<NativeSelect disabled={!canManageEditing} value={form.milestone_id} onChange={(e) => setForm((f) => ({ ...f, milestone_id: e.target.value }))}><NativeSelectOption value=''>بدون مایلستون</NativeSelectOption>{milestones.map((entry) => <NativeSelectOption key={entry.id} value={String(entry.id)}>{entry.title}</NativeSelectOption>)}</NativeSelect></label>
+        {form.status === 'blocked' && <label className='space-y-1 text-xs sm:col-span-2'>دلیل مانع<Textarea disabled={!canUpdateEditing} value={form.blocked_reason} onChange={(e) => setForm((f) => ({ ...f, blocked_reason: e.target.value }))} /></label>}
+        {form.status === 'verified' && <label className='space-y-1 text-xs sm:col-span-2'>نتیجهٔ سنجش<Textarea disabled={!canManageEditing} value={form.verification_note} onChange={(e) => setForm((f) => ({ ...f, verification_note: e.target.value }))} /></label>}
+        {canUpdateEditing && <label className='space-y-1 text-xs sm:col-span-2'>یادداشت این تغییر<Input value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder='پیشرفت، مانع یا تصمیم انجام‌شده را ثبت کنید' /></label>}
+        <div className='flex flex-wrap gap-2 sm:col-span-2'>{canUpdateEditing && <Button onClick={saveTask} disabled={saving}>{saving ? 'در حال ذخیره…' : 'ذخیرهٔ کار'}</Button>}{editing !== 'new' && <Button variant='outline' onClick={() => void loadEvents(editing)}>نمایش تاریخچه</Button>}</div>
+        {events && <div className='space-y-2 border-t pt-3 sm:col-span-2'><strong className='text-sm'>تاریخچهٔ کار</strong>{events.map((event) => <div key={event.id} className='rounded-lg border p-2 text-xs'><span className='text-muted-foreground'>{new Date(event.created_at).toLocaleString('fa-IR')}</span> · {event.event_type === 'created' ? 'ایجاد' : event.event_type === 'comment' ? 'یادداشت' : 'ویرایش'} · {event.actor_username || 'سیستم'} {event.note && <span>· {event.note}</span>}</div>)}</div>}
+        {editing !== 'new' && <TaskExecutionDetails item={editing} items={data?.items || []} people={people} canEdit={canManageEditing} canLogTime={canUpdate(editing)} canLogOthers={canEdit} meId={meId} />}
       </div>}
     </DialogContent></Dialog>
   </div>;

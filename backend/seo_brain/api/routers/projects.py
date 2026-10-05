@@ -10,6 +10,7 @@ from sqlalchemy import Engine, text
 from sqlalchemy.exc import IntegrityError
 
 from ..deps import engine
+from ..project_access import require_assignee, require_lead
 from .work import _date_utc, now
 
 router = APIRouter(prefix="/work/projects", tags=["project-execution"])
@@ -57,7 +58,7 @@ class TimeIn(BaseModel):
 
 
 @router.get("")
-def list_projects(eng: Engine = Depends(engine)) -> list[dict]:
+def list_projects(request: Request, eng: Engine = Depends(engine)) -> list[dict]:
     """Progress counts leaf work once and uses saved progress, never synthetic traffic metrics."""
     with eng.connect() as cx:
         rows = cx.execute(text("""SELECT s.site_id,s.name,s.canonical_url,
@@ -80,13 +81,18 @@ def list_projects(eng: Engine = Depends(engine)) -> list[dict]:
             GROUP BY w.site_id""")).mappings().all()
         spent = cx.execute(text("SELECT site_id,COALESCE(SUM(minutes),0) AS minutes FROM work_time_entries GROUP BY site_id")).mappings().all()
         milestones = cx.execute(text("SELECT site_id,COUNT(*) AS count FROM work_milestones GROUP BY site_id")).mappings().all()
+        actor = getattr(request.state, "panel_user", None)
+        assignments = cx.execute(text("SELECT site_id,responsibility FROM site_assignments WHERE user_id=:id"),
+                                 {"id": actor["id"]}).mappings().all() if actor else []
     by_progress = {row["site_id"]: row for row in progress}
     by_spent = {row["site_id"]: row["minutes"] for row in spent}
     by_milestone = {row["site_id"]: row["count"] for row in milestones}
+    my_roles = {row["site_id"]: row["responsibility"] for row in assignments}
     return [{**dict(row), "progress_percent": round(float(by_progress[row["site_id"]]["progress_percent"] or 0), 1) if row["site_id"] in by_progress else 0,
              "estimated_hours": float(by_progress[row["site_id"]]["estimated_hours"] or 0) if row["site_id"] in by_progress else 0,
              "spent_hours": round(by_spent.get(row["site_id"], 0) / 60, 2),
-             "milestones": by_milestone.get(row["site_id"], 0)} for row in rows]
+             "milestones": by_milestone.get(row["site_id"], 0),
+             "my_responsibility": "admin" if not actor or actor["role"] == "admin" else my_roles.get(row["site_id"])} for row in rows]
 
 
 @router.get("/{site_id}/members")
@@ -107,8 +113,12 @@ def assign_member(site_id: str, user_id: int, body: AssignmentIn, request: Reque
         raise HTTPException(422, "user id mismatch")
     with eng.begin() as cx:
         _site(cx, site_id)
-        if not cx.execute(text("SELECT 1 FROM panel_users WHERE id=:id AND active=1"), {"id": user_id}).first():
+        member_role = cx.execute(text("SELECT role FROM panel_users WHERE id=:id AND active=1"),
+                                 {"id": user_id}).scalar_one_or_none()
+        if not member_role:
             raise HTTPException(422, "member must be an active panel user")
+        if member_role == "call_center" and body.responsibility != "viewer":
+            raise HTTPException(422, "call center operators cannot execute SEO project work")
         cx.execute(text("""INSERT INTO site_assignments(site_id,user_id,responsibility,created_at)
             VALUES (:s,:id,:role,:at) ON CONFLICT(site_id,user_id)
             DO UPDATE SET responsibility=excluded.responsibility"""),
@@ -149,6 +159,7 @@ def create_milestone(site_id: str, body: MilestoneIn, request: Request, eng: Eng
     values["due_at"] = _date_utc(body.due_at, "milestone due date")
     with eng.begin() as cx:
         _site(cx, site_id)
+        require_lead(cx, request, site_id)
         result = cx.execute(text("""INSERT INTO work_milestones(site_id,title,description,due_at,created_at,updated_at)
             VALUES (:s,:title,:description,:due_at,:at,:at)"""), {**values, "s": site_id, "at": now()})
         row = cx.execute(text("SELECT * FROM work_milestones WHERE id=:id"), {"id": result.lastrowid}).mappings().one()
@@ -169,6 +180,7 @@ def update_milestone(site_id: str, milestone_id: int, body: MilestonePatch, requ
     if "due_at" in values:
         values["due_at"] = _date_utc(body.due_at, "milestone due date")
     with eng.begin() as cx:
+        require_lead(cx, request, site_id)
         if not cx.execute(text("SELECT 1 FROM work_milestones WHERE id=:id AND site_id=:s"),
                           {"id": milestone_id, "s": site_id}).first():
             raise HTTPException(404, "milestone not found")
@@ -195,6 +207,7 @@ def add_dependency(site_id: str, item_id: int, body: DependencyIn, request: Requ
                    eng: Engine = Depends(engine)) -> dict:
     with eng.begin() as cx:
         _item(cx, site_id, item_id)
+        require_lead(cx, request, site_id)
         _item(cx, site_id, body.depends_on_id)
         if item_id == body.depends_on_id:
             raise HTTPException(422, "work cannot depend on itself")
@@ -220,6 +233,7 @@ def remove_dependency(site_id: str, item_id: int, depends_on_id: int, request: R
                       eng: Engine = Depends(engine)) -> None:
     with eng.begin() as cx:
         _item(cx, site_id, item_id)
+        require_lead(cx, request, site_id)
         result = cx.execute(text("DELETE FROM work_dependencies WHERE work_item_id=:id AND depends_on_id=:dep"),
                             {"id": item_id, "dep": depends_on_id})
         if result.rowcount == 0:
@@ -241,10 +255,13 @@ def time_entries(site_id: str, item_id: int, eng: Engine = Depends(engine)) -> l
 def log_time(site_id: str, item_id: int, body: TimeIn, request: Request,
              eng: Engine = Depends(engine)) -> dict:
     with eng.begin() as cx:
-        _item(cx, site_id, item_id)
+        item = _item(cx, site_id, item_id)
+        require_assignee(cx, request, site_id, item["owner_id"])
+        actor = getattr(request.state, "panel_user", None)
+        if actor and actor["role"] != "admin" and body.user_id != actor["id"]:
+            raise HTTPException(403, "time can only be logged for the signed-in user")
         if not cx.execute(text("SELECT 1 FROM panel_users WHERE id=:id AND active=1"), {"id": body.user_id}).first():
             raise HTTPException(422, "time owner must be active")
-        actor = getattr(request.state, "panel_user", None)
         values = {**body.model_dump(), "work_date": body.work_date.isoformat(), "s": site_id,
                   "item": item_id, "actor": actor["id"] if actor else None, "at": now()}
         result = cx.execute(text("""INSERT INTO work_time_entries(site_id,work_item_id,user_id,minutes,work_date,note,actor_id,created_at)

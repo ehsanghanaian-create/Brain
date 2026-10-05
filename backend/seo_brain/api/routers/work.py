@@ -11,6 +11,7 @@ from sqlalchemy import Engine, text
 from sqlalchemy.exc import IntegrityError
 
 from ..deps import engine, require_site
+from ..project_access import project_responsibility, require_assignee, require_lead
 
 router = APIRouter(prefix="/sites/{site_id}/work", tags=["work"], dependencies=[Depends(require_site)])
 Kind = Literal["manual", "issue", "opportunity", "content"]
@@ -94,7 +95,8 @@ def _record(cx, site_id: str, item_id: int, event_type: str, before: dict | None
          "at": now()})
 
 
-def _validate(cx, site_id: str, values: dict, item_id: int | None = None) -> None:
+def _validate(cx, site_id: str, values: dict, item_id: int | None = None,
+              strict_owner: bool = False) -> None:
     if values.get("status") in ACTIVE and (not values.get("owner_id") or not values.get("due_at")):
         raise HTTPException(422, "active work requires an owner and due date")
     if values.get("status") == "blocked" and not values.get("blocked_reason"):
@@ -102,10 +104,16 @@ def _validate(cx, site_id: str, values: dict, item_id: int | None = None) -> Non
     if values.get("status") == "verified" and not values.get("verification_note"):
         raise HTTPException(422, "verified work requires a verification note")
     if values.get("owner_id") is not None:
-        exists = cx.execute(text("SELECT 1 FROM panel_users WHERE id=:id AND active=1"),
-                            {"id": values["owner_id"]}).first()
-        if not exists:
+        owner = cx.execute(text("SELECT role FROM panel_users WHERE id=:id AND active=1"),
+                           {"id": values["owner_id"]}).scalar_one_or_none()
+        if not owner:
             raise HTTPException(422, "owner must be an active panel user")
+        if strict_owner and owner == "call_center":
+            raise HTTPException(422, "call center operators cannot own SEO project work")
+        if strict_owner and owner != "admin" and not cx.execute(text("""SELECT 1 FROM site_assignments
+            WHERE site_id=:site AND user_id=:user AND responsibility IN ('lead','contributor')"""),
+            {"site": site_id, "user": values["owner_id"]}).first():
+            raise HTTPException(422, "owner must be a lead or contributor in this project")
     if values.get("team_id") is not None:
         exists = cx.execute(text("SELECT 1 FROM panel_teams WHERE id=:id AND active=1"),
                             {"id": values["team_id"]}).first()
@@ -180,7 +188,8 @@ def create_work(site_id: str, body: WorkIn, request: Request, eng: Engine = Depe
     values.update(site_id=site_id, created_at=now(), updated_at=now())
     try:
         with eng.begin() as cx:
-            _validate(cx, site_id, values)
+            require_lead(cx, request, site_id)
+            _validate(cx, site_id, values, strict_owner=getattr(request.state, "panel_user", None) is not None)
             cols = list(values)
             result = cx.execute(text(f"INSERT INTO work_items({','.join(cols)}) VALUES({','.join(':'+c for c in cols)})"), values)
             item_id = result.lastrowid
@@ -209,11 +218,19 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
                              {"s": site_id, "id": item_id}).mappings().first()
         if not current:
             raise HTTPException(404, "work item not found")
+        require_assignee(cx, request, site_id, current["owner_id"])
+        if project_responsibility(cx, request, site_id) == "contributor":
+            allowed = {"status", "progress_percent", "blocked_reason", "note"}
+            if not body.model_fields_set <= allowed:
+                raise HTTPException(403, "contributors may only update status, progress and blocker notes")
+            if patch.get("status") in {"verified", "rejected", "deferred", "approved", "assigned"}:
+                raise HTTPException(403, "project lead approval is required for this status")
         before = dict(current)
         merged = {**before, **patch}
         if patch.get("status") in ("rejected", "deferred") and patch["status"] != before["status"] and not body.note:
             raise HTTPException(422, "rejected or deferred work requires a reason")
-        _validate(cx, site_id, merged, item_id)
+        _validate(cx, site_id, merged, item_id,
+                  strict_owner=getattr(request.state, "panel_user", None) is not None and "owner_id" in patch)
         if merged["status"] == "verified" and before["status"] != "verified":
             unfinished = cx.execute(text("""SELECT 1 FROM work_dependencies d
                 JOIN work_items prerequisite ON prerequisite.id=d.depends_on_id
@@ -225,7 +242,12 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
                 {"s": site_id, "id": item_id}).first()
             if unfinished_child:
                 raise HTTPException(422, "child work is not complete")
+        if merged == before and not body.note:
+            return before
         if merged == before:
+            _record(cx, site_id, item_id, "comment", before, before, body.note,
+                    getattr(request.state, "panel_user", None))
+            request.state.audit_fields = ["note"]
             return before
         patch["updated_at"] = now()
         cx.execute(text("UPDATE work_items SET " + ",".join(f"{key}=:{key}" for key in patch) +

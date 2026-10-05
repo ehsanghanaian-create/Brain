@@ -191,6 +191,11 @@ def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> 
 
 def run_tick(engine: Engine, queue, max_sites: int = 2, stale_after_minutes: int = 120) -> dict[str, Any]:
     """One scheduler pass: recover stale runs, then enqueue the existing jobs for due integrations (staggered)."""
+    try:
+        from ..api.routers.call_center import reconcile_calls
+        reconcile_calls(limit=500, force=False, eng=engine)
+    except Exception as e:  # noqa: BLE001 — attribution must not stop scheduled syncs
+        log.warning(f"scheduler: call attribution recheck failed: {e.__class__.__name__}: {e}")
     recovered = recover_stale_runs(engine, stale_after_minutes)
     # calendar auto-publish: plans whose date/time arrived, on autopilot sites → the mode-gated writer job
     published: list[dict] = []

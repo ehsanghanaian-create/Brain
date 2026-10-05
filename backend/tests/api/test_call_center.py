@@ -12,11 +12,11 @@ from seo_brain.api.routers import call_center
 
 def test_call_center_source_and_operator_flow():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    sql = (Path(__file__).parents[3] / "database" / "migrations" / "0020_call_center.sql").read_text(encoding="utf-8")
-    outcomes_sql = (Path(__file__).parents[3] / "database" / "migrations" / "0023_call_outcomes.sql").read_text(encoding="utf-8")
+    migrations = Path(__file__).parents[3] / "database" / "migrations"
     with eng.begin() as cx:
-        cx.connection.driver_connection.executescript(sql)
-        cx.connection.driver_connection.executescript(outcomes_sql)
+        for filename in ("0011_ads_click_events.sql", "0018_traffic_intel.sql", "0020_call_center.sql",
+                         "0023_call_outcomes.sql", "0024_call_attribution.sql", "0025_call_attribution_lock.sql"):
+            cx.connection.driver_connection.executescript((migrations / filename).read_text(encoding="utf-8"))
     app = FastAPI()
     app.include_router(call_center.router, prefix="/api/v1")
     app.dependency_overrides[call_center.engine] = lambda: eng

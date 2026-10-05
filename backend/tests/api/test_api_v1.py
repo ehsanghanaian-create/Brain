@@ -55,6 +55,53 @@ def test_health_reports_migrations(client):
     assert body["status"] == "ok" and "0002" in body["migrations"]["applied"] and body["migrations"]["pending"] == []
 
 
+def test_call_attribution_uses_actual_call_time_and_preserves_manual_choice(client):
+    _seed(client)
+    at = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=1)
+    ts = at.isoformat()
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO track_sessions(session_id,site_id,visitor_id,day,started_at,last_seen_at,channel)
+            VALUES ('organic-session','demo','visitor',:day,:ts,:ts,'organic')"""), {"day": ts[:10], "ts": ts})
+        cx.execute(text("""INSERT INTO track_events(site_id,session_id,day,ts,type,label)
+            VALUES ('demo','organic-session',:day,:ts,'tel_click','02100000000')"""), {"day": ts[:10], "ts": ts})
+    created = client.post('/api/v1/call-center/calls', json={"site_id": "demo", "occurred_at": ts,
+        "customer_name": "Test Caller", "phone": "09120000000"})
+    assert created.status_code == 201, created.text
+    row = created.json()
+    assert row["source"] == "seo" and row["source_confidence"] == "probable" and row["auto_attributed"] == 1
+    assert row["attribution_event"].startswith("track:")
+    second = client.post('/api/v1/call-center/calls', json={"site_id": "demo", "occurred_at": ts,
+        "customer_name": "Another Caller"})
+    assert second.status_code == 201 and second.json()["source"] == "unknown"
+    # A second possible caller click makes the identity ambiguous on recheck.
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO track_events(site_id,session_id,day,ts,type,label)
+            VALUES ('demo','organic-session',:day,:ts,'tel_click','02100000000')"""), {"day": ts[:10], "ts": ts})
+    reconciled = client.post('/api/v1/call-center/reconcile', params={"site_id": "demo"})
+    assert reconciled.status_code == 200 and reconciled.json()["changed"] == 1
+    row = client.get('/api/v1/call-center/calls', params={"site_id": "demo"}).json()["items"][0]
+    assert row["source"] == "unknown" and row["auto_attributed"] == 0
+    manual = client.patch(f'/api/v1/call-center/calls/{row["id"]}', json={"source": "ads", "source_basis": "manual"})
+    assert manual.status_code == 200 and manual.json()["auto_attributed"] == 0
+    client.post('/api/v1/call-center/reconcile', params={"site_id": "demo"})
+    assert client.get('/api/v1/call-center/calls', params={"site_id": "demo"}).json()["items"][0]["source"] == "ads"
+
+
+def test_late_click_reconciliation_marks_ads_probable(client):
+    _seed(client)
+    at = (datetime.now(timezone.utc) - timedelta(hours=4)).replace(microsecond=0).isoformat()
+    created = client.post('/api/v1/call-center/calls', json={"site_id": "demo", "occurred_at": at,
+        "phone": "09120000001"})
+    assert created.status_code == 201 and created.json()["source"] == "unknown"
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO ads_click_events(event_uuid,site_id,event_type,received_at,ip_address,ip_hash,gclid)
+            VALUES ('test-late-click','demo','tel_click',:at,'127.0.0.1','test-hash','test-gclid')"""), {"at": at})
+    result = client.post('/api/v1/call-center/reconcile', params={"site_id": "demo"})
+    assert result.status_code == 200 and result.json()["changed"] == 1
+    row = client.get('/api/v1/call-center/calls', params={"site_id": "demo"}).json()["items"][0]
+    assert row["source"] == "ads" and row["source_confidence"] == "probable"
+
+
 def test_sites_crud_and_workspace(client):
     assert client.get("/api/v1/sites").json() == []
     _seed(client)

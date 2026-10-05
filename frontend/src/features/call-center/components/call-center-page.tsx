@@ -62,6 +62,7 @@ const colors: Record<CallSource, string> = {
   unknown: '#9aa7b6'
 };
 const channels = Object.keys(sourceLabel) as CallSource[];
+const localNow = () => new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Tehran' }).replace(' ', 'T').slice(0, 16);
 const csvCell = (value: string | number | boolean | null | undefined) => {
   const raw = String(value ?? '');
   const safe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
@@ -198,6 +199,9 @@ export function CallCenterPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState<Draft>(blank);
+  const [quick, setQuick] = useState({ occurred_at: '', customer_name: '', phone: '', brand: '', model: '', region: '', issue: '', warranty: false });
+  const [quickSite, setQuickSite] = useState('');
+  const [quickSaving, setQuickSaving] = useState(false);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -314,7 +318,7 @@ export function CallCenterPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      const values = {
+      const values: Partial<CallRecord> = {
         ...draft,
         occurred_at: draft.occurred_at ? new Date(draft.occurred_at).toISOString() : null,
         follow_up_at: draft.follow_up_at ? new Date(draft.follow_up_at).toISOString() : null,
@@ -322,6 +326,7 @@ export function CallCenterPage() {
         operator_id: draft.operator_id ? Number(draft.operator_id) : null,
         site_id: draft.site_id || null
       };
+      if (editingId !== null && records.find((row) => row.id === editingId)?.source === draft.source) delete values.source;
       if (editingId === null) await callCenterApi.addCall(values);
       else await callCenterApi.patchCall(editingId, values);
       setDraft(blank);
@@ -333,6 +338,26 @@ export function CallCenterPage() {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
+    }
+  }
+  async function saveQuick(e: React.FormEvent) {
+    e.preventDefault();
+    if (!quick.phone.trim() && !quick.customer_name.trim()) {
+      toast.error('نام یا شماره تماس را وارد کنید');
+      return;
+    }
+    setQuickSaving(true);
+    try {
+      const row = await callCenterApi.addCall({ ...quick, site_id: quickSite || siteId || null,
+        occurred_at: quick.occurred_at || localNow(),
+        source: 'unknown' });
+      setQuick({ occurred_at: localNow(), customer_name: '', phone: '', brand: '', model: '', region: '', issue: '', warranty: false });
+      toast.success(row.auto_attributed ? `ثبت شد؛ منبع ${sourceLabel[row.source]} به‌صورت احتمالی تشخیص داده شد` : 'تماس ثبت شد؛ منبع هنوز نامشخص است');
+      await load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      setQuickSaving(false);
     }
   }
   async function update(id: number, patch: Partial<CallRecord>) {
@@ -509,7 +534,7 @@ export function CallCenterPage() {
             </div>
             <h2 className='text-2xl font-bold'>فرماندهی تماس‌ها</h2>
             <p className='mt-1 text-sm text-white/65'>
-              تماس واقعی را ثبت کنید، منبع آن را مشخص کنید و عملکرد سئو و ادز را جدا ببینید.
+              تماس واقعی را سریع ثبت کنید؛ سیستم منبع را از شواهد کلیک پیشنهاد می‌دهد و اپراتور می‌تواند اصلاح کند.
             </p>
           </div>
           <div className='flex flex-wrap gap-2'>
@@ -522,13 +547,12 @@ export function CallCenterPage() {
             </Button>
             <Button
               onClick={() => {
-                setDraft({ ...blank, site_id: siteId });
-                setEditingId(null);
-                setFormOpen(true);
+                setQuick((current) => ({ ...current, occurred_at: current.occurred_at || localNow() }));
+                document.getElementById('quick-call-entry')?.scrollIntoView({ behavior: reduced ? 'instant' : 'smooth', block: 'center' });
               }}
               className='bg-[#1abb9c] text-white hover:bg-[#169f85]'
             >
-              <Icons.add className='size-4' /> ثبت تماس
+              <Icons.add className='size-4' /> ثبت سریع در جدول
             </Button>
           </div>
         </div>
@@ -651,7 +675,7 @@ export function CallCenterPage() {
         <Metric
           title='تماس‌های سئو'
           value={analytics.by_source.seo}
-          caption='انتساب ثبت‌شده توسط اپراتور'
+          caption='انتساب خودکار احتمالی یا انتخاب اپراتور'
           color={colors.seo}
           onClick={() => {
             setSource('seo');
@@ -965,7 +989,7 @@ export function CallCenterPage() {
         </CardContent>
       </Card>
 
-      {formOpen && (
+      {formOpen && editingId !== null && (
         <motion.section
           id='call-entry-form'
           initial={reduced ? false : { opacity: 0, y: 14 }}
@@ -1198,13 +1222,32 @@ export function CallCenterPage() {
             <div>
               <CardTitle className='text-base'>دفتر تماس‌ها</CardTitle>
               <CardDescription>
-                ردیف‌های اخیر؛ منبع و وضعیت را می‌توانید مستقیم در جدول اصلاح کنید.
+                مثل شیت، تماس را در ردیف اول وارد کنید. زمان تماس واقعی را ثبت کنید تا منبع از کلیک‌های همان بازه پیشنهاد شود.
               </CardDescription>
             </div>
-            <Badge variant='outline'>{number.format(recordTotal)} ردیف</Badge>
+            <div className='flex items-center gap-2'><Badge variant='outline'>{number.format(recordTotal)} ردیف</Badge>
+              <Button variant='outline' size='sm' onClick={async () => {
+                try { const result = await callCenterApi.reconcile(siteId || undefined); toast.success(`${number.format(result.checked)} تماس بررسی شد؛ ${number.format(result.changed)} منبع تغییر کرد`); await load(); }
+                catch (error) { toast.error(error instanceof Error ? error.message : String(error)); }
+              }}>بازبینی منبع</Button></div>
           </div>
         </CardHeader>
         <CardContent>
+          <form id='quick-call-entry' onSubmit={saveQuick} className='mb-3 rounded-lg border border-primary/30 bg-primary/5 p-3'>
+            <div className='mb-2 flex items-center justify-between gap-2'><strong className='text-sm'>ردیف جدید</strong><span className='text-muted-foreground text-xs'>منبع خودکار بررسی می‌شود؛ در صورت نیاز از ستون منبع اصلاح کنید.</span></div>
+            <div className='grid gap-2 md:grid-cols-2 xl:grid-cols-[170px_140px_1fr_150px_120px_120px_120px_1.5fr_auto]'>
+              <Input aria-label='زمان واقعی تماس' title='زمان واقعی تماس' type='datetime-local' dir='ltr' value={quick.occurred_at} onFocus={() => setQuick((v) => ({ ...v, occurred_at: v.occurred_at || localNow() }))} onChange={(e) => setQuick((v) => ({ ...v, occurred_at: e.target.value }))} />
+              <NativeSelect aria-label='سایت تماس' value={quickSite || siteId} onChange={(e) => setQuickSite(e.target.value)}><NativeSelectOption value=''>سایت نامشخص</NativeSelectOption>{sites.map((s) => <NativeSelectOption key={s.site_id} value={s.site_id}>{s.name}</NativeSelectOption>)}</NativeSelect>
+              <Input aria-label='نام تماس‌گیرنده' placeholder='نام تماس‌گیرنده' value={quick.customer_name} onChange={(e) => setQuick((v) => ({ ...v, customer_name: e.target.value }))} />
+              <Input aria-label='شماره تماس‌گیرنده' placeholder='شماره تماس' dir='ltr' inputMode='tel' value={quick.phone} onChange={(e) => setQuick((v) => ({ ...v, phone: e.target.value }))} />
+              <Input aria-label='برند خودرو' placeholder='برند' value={quick.brand} onChange={(e) => setQuick((v) => ({ ...v, brand: e.target.value }))} />
+              <Input aria-label='مدل خودرو' placeholder='مدل' value={quick.model} onChange={(e) => setQuick((v) => ({ ...v, model: e.target.value }))} />
+              <Input aria-label='منطقه' placeholder='منطقه' value={quick.region} onChange={(e) => setQuick((v) => ({ ...v, region: e.target.value }))} />
+              <Input aria-label='شرح تماس' placeholder='شرح تماس' value={quick.issue} onChange={(e) => setQuick((v) => ({ ...v, issue: e.target.value }))} />
+              <Button type='submit' disabled={quickSaving}>{quickSaving ? '...' : 'ثبت ردیف'}</Button>
+            </div>
+            <label className='mt-2 inline-flex items-center gap-1 text-xs'><input type='checkbox' checked={quick.warranty} onChange={(e) => setQuick((v) => ({ ...v, warranty: e.target.checked }))} /> گارانتی</label>
+          </form>
           <div className='overflow-x-auto'>
             <table className='w-full min-w-[950px] text-sm'>
               <thead>
@@ -1262,8 +1305,8 @@ export function CallCenterPage() {
                           </NativeSelectOption>
                         ))}
                       </NativeSelect>
-                      <span className='text-muted-foreground block pt-1 text-[10px]'>
-                        {row.source_basis === 'manual' ? 'انتخاب اپراتور' : row.source_basis}
+                      <span className='text-muted-foreground block pt-1 text-[10px]' title={row.attribution_event ?? undefined}>
+                        {row.auto_attributed ? 'پیشنهاد از کلیک تماس · احتمالی' : row.source === 'unknown' ? 'بدون شواهد کافی' : row.source_basis === 'manual' ? 'انتخاب اپراتور' : row.source_basis}
                       </span>
                     </td>
                     <td className='p-3'>

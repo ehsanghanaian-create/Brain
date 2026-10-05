@@ -35,6 +35,10 @@ export type CallRecord = {
   order_value: number | null;
   follow_up_at: string | null;
   source_confidence: SourceConfidence;
+  attribution_event: string | null;
+  attribution_checked_at: string | null;
+  auto_attributed: boolean;
+  attribution_locked: boolean;
   operator_id: number | null;
   operator_name: string | null;
   import_key: string | null;
@@ -119,6 +123,8 @@ export const callCenterApi = {
     api<CallRecord>('/call-center/calls', { method: 'POST', json: body }),
   patchCall: (id: number, body: Partial<CallRecord>) =>
     api<CallRecord>(`/call-center/calls/${id}`, { method: 'PATCH', json: body }),
+  reconcile: (siteId?: string) =>
+    api<{ checked: number; changed: number }>(`/call-center/reconcile?${params({ site_id: siteId })}`, { method: 'POST' }),
   importCalls: (file: File, mapping: Record<string, string>, dryRun: boolean, siteId?: string) => {
     const form = new FormData();
     form.set('file', file);

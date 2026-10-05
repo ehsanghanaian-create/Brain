@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Engine, text
 
 from ...call_center.sheet_import import import_workbook
+from ...call_center.attribution import suggest
 from ..deps import engine
 from ..errors import ApiError
 
@@ -353,6 +354,14 @@ def create_call(body: CallIn, eng: Engine = Depends(engine)) -> dict:
             raise ApiError(409, "این ردیف قبلاً وارد شده است", code="conflict")
         if values["operator_id"] and not cx.execute(text("SELECT 1 FROM panel_users WHERE id=:operator_id AND active=1"), values).first():
             raise ApiError(422, "اپراتور فعال پیدا نشد", code="validation_error")
+        attribution = suggest(cx, values["site_id"], values["occurred_at"]) if values["source"] == "unknown" else {}
+        if attribution.get("auto_attributed"):
+            values.update({key: attribution[key] for key in ("source", "source_confidence", "source_basis")})
+        values["attribution_event"] = attribution.get("attribution_event")
+        values["attribution_checked_at"] = attribution.get("attribution_checked_at")
+        values["auto_attributed"] = attribution.get("auto_attributed", 0)
+        values["attribution_locked"] = int(values["source"] != "unknown" and not values["auto_attributed"])
+        columns += ("attribution_event", "attribution_checked_at", "auto_attributed", "attribution_locked")
         result = cx.execute(text("INSERT INTO call_center_calls(" + ",".join(columns) + ",created_at,updated_at) VALUES (" + ",".join(":" + c for c in columns) + ",:at,:at)"), values)
         row = cx.execute(text("SELECT c.*, u.full_name AS operator_name FROM call_center_calls c LEFT JOIN panel_users u ON u.id=c.operator_id WHERE c.id=:id"), {"id": result.lastrowid}).mappings().one()
     return _call_row(row)
@@ -376,7 +385,7 @@ def update_call(call_id: int, body: CallPatch, eng: Engine = Depends(engine)) ->
     values["at"] = now()
     values["id"] = call_id
     with eng.begin() as cx:
-        current = cx.execute(text("SELECT outcome, order_value FROM call_center_calls WHERE id=:id"), values).mappings().first()
+        current = cx.execute(text("SELECT outcome, order_value, site_id, occurred_at, source, auto_attributed FROM call_center_calls WHERE id=:id"), values).mappings().first()
         if not current:
             raise ApiError(404, "تماس پیدا نشد", code="not_found")
         resulting_outcome = values.get("outcome", current["outcome"])
@@ -385,9 +394,40 @@ def update_call(call_id: int, body: CallPatch, eng: Engine = Depends(engine)) ->
             raise ApiError(422, "ارزش سفارش فقط برای نتیجهٔ سفارش ثبت می‌شود", code="validation_error")
         if values.get("operator_id") is not None and not cx.execute(text("SELECT 1 FROM panel_users WHERE id=:operator_id AND active=1"), values).first():
             raise ApiError(422, "اپراتور فعال پیدا نشد", code="validation_error")
+        if "source" in values:
+            values.update(auto_attributed=0, attribution_event=None, attribution_locked=1, source_confidence="unknown")
+        elif ("site_id" in values or "occurred_at" in values) and (current["source"] == "unknown" or current["auto_attributed"]):
+            attribution = suggest(cx, values.get("site_id", current["site_id"]), values.get("occurred_at", current["occurred_at"]), call_id)
+            values.update(attribution)
         cx.execute(text("UPDATE call_center_calls SET " + ", ".join(f"{key}=:{key}" for key in values if key not in ("id", "at")) + ", updated_at=:at WHERE id=:id"), values)
         row = cx.execute(text("SELECT c.*, u.full_name AS operator_name FROM call_center_calls c LEFT JOIN panel_users u ON u.id=c.operator_id WHERE c.id=:id"), values).mappings().one()
     return _call_row(row)
+
+
+@router.post("/reconcile")
+def reconcile_calls(site_id: str | None = None, limit: int = Query(500, ge=1, le=2000), force: bool = True,
+                    eng: Engine = Depends(engine)) -> dict:
+    """Recheck late-entered calls after web click logs arrive; manual decisions are preserved."""
+    checked = changed = 0
+    with eng.begin() as cx:
+        rows = cx.execute(text("""SELECT id, site_id, occurred_at, source, auto_attributed
+            FROM call_center_calls WHERE attribution_locked=0 AND (source='unknown' OR auto_attributed=1)
+              AND (:site_id IS NULL OR site_id=:site_id)
+              AND site_id IS NOT NULL AND occurred_at IS NOT NULL
+              AND (:force=1 OR attribution_checked_at IS NULL OR attribution_checked_at < :retry_before)
+            ORDER BY attribution_checked_at IS NOT NULL, attribution_checked_at, id DESC LIMIT :limit"""),
+            {"site_id": site_id, "limit": limit, "force": int(force),
+             "retry_before": (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(timespec="seconds")}).mappings().all()
+        for row in rows:
+            result = suggest(cx, row["site_id"], row["occurred_at"], row["id"])
+            checked += 1
+            if result["source"] != row["source"]:
+                changed += 1
+            cx.execute(text("""UPDATE call_center_calls SET source=:source, source_basis=:source_basis,
+                source_confidence=:source_confidence, attribution_event=:attribution_event,
+                attribution_checked_at=:attribution_checked_at, auto_attributed=:auto_attributed,
+                updated_at=:updated_at WHERE id=:id"""), {**result, "id": row["id"], "updated_at": now()})
+    return {"checked": checked, "changed": changed}
 
 
 @router.get("/analytics")

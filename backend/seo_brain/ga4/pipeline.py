@@ -125,13 +125,20 @@ class Ga4Pipeline:
         with self.engine.connect() as cx:
             d = cx.execute(text("SELECT MIN(date), MAX(date), COUNT(*), COUNT(DISTINCT page_path), SUM(sessions), SUM(total_users), SUM(conversions) "
                                 "FROM ga4_daily WHERE site_id=:s AND source='page'"), {"s": site_id}).first()
+            site = cx.execute(text("SELECT MIN(date), MAX(date), COUNT(*), SUM(sessions), SUM(conversions) "
+                                   "FROM ga4_site_daily WHERE site_id=:s AND channel=''"), {"s": site_id}).first()
             snaps = cx.execute(text("SELECT COUNT(*) FROM content_metrics WHERE site_id=:s AND ga4_sessions IS NOT NULL"), {"s": site_id}).scalar() or 0
             last = cx.execute(text("SELECT finished_at FROM sync_runs WHERE site_id=:s AND source='ga4' AND status='completed' ORDER BY started_at DESC LIMIT 1"), {"s": site_id}).scalar()
             top = [{"path": r[0], "sessions": int(r[1] or 0), "conversions": round(float(r[2] or 0), 1)} for r in
                    cx.execute(text("SELECT page_path, SUM(sessions), SUM(conversions) FROM ga4_daily WHERE site_id=:s AND source='page' "
                                    "GROUP BY page_path ORDER BY SUM(sessions) DESC LIMIT 5"), {"s": site_id}).all()]
-        return {"date_from": d[0], "date_to": d[1], "rows": int(d[2] or 0), "pages": int(d[3] or 0),
-                "sessions": int(d[4] or 0), "users": int(d[5] or 0), "conversions": round(float(d[6] or 0), 1),
+        has_site = bool(site[2])
+        return {"date_from": site[0] if has_site else d[0], "date_to": site[1] if has_site else d[1],
+                "rows": int(d[2] or 0), "pages": int(d[3] or 0),
+                "sessions": int((site[3] if has_site else d[4]) or 0),
+                "users": None if has_site else int(d[5] or 0),
+                "conversions": round(float((site[4] if has_site else d[6]) or 0), 1),
+                "metric_source": "ga4_site_daily" if has_site else "ga4_daily_page_rows",
                 "content_snapshots": int(snaps), "last_ga4_sync": last, "top_pages": top}
 
     def status(self, site_id: str, job_queue=None) -> dict[str, Any]:

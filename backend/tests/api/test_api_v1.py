@@ -1,9 +1,12 @@
 """API tests against an isolated temporary database (no dependency on data/seo.db)."""
 import json
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from openpyxl import Workbook
 
 from seo_brain.api import deps
 from seo_brain.api.main import create_app
@@ -113,6 +116,80 @@ def test_portfolio_overview_is_one_consistent_snapshot(client):
     assert body["sites"][0]["state"] == "attention"
     assert body["sites"][0]["next_action"] == "اصلاح اتصال وردپرس"
     assert body["sites"][0]["issues"][0]["severity"] == "blocking"
+
+
+def test_portfolio_exposes_source_coverage_and_work_backlog(client):
+    _seed(client)
+    today = datetime.now(timezone.utc).date().isoformat()
+    past = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO gsc_property_daily
+            (site_id,date,search_type,property,clicks,impressions,position,sync_run_id,observed_at)
+            VALUES ('demo',:d,'web','sc-domain:demo.example',2,20,4,'g1',:t)"""), {"d": today, "t": past})
+        cx.execute(text("""INSERT INTO work_items
+            (site_id,title,status,due_at,created_at,updated_at)
+            VALUES ('demo','Fix title','new',:due,:now,:now)"""), {"due": past, "now": past})
+    body = client.get("/api/v1/portfolio/overview").json()
+    assert body["sites"][0]["data_coverage"]["gsc"] == {"last_date": today, "days_28": 1}
+    assert body["sites"][0]["data_coverage"]["ga4"] == {"last_date": None, "days_28": 0}
+    assert body["sites"][0]["work"] == {"open": 1, "overdue": 1, "unassigned": 1}
+    assert body["totals"]["overdue_work"] == 1
+
+
+def test_call_center_csv_import_preview_mapping_and_deduplication(client):
+    _seed(client)
+    content = "مشتری,موبایل,کانال,شهر\nعلی,۰۹۱۲۳۴۵۶۷۸۹,ادز,تهران\nمینا,۰۹۳۵۱۲۳۴۵۶۷,گوگل,شیراز\n".encode("utf-8-sig")
+    path = "/api/v1/call-center/calls/import"
+    mapping = json.dumps({"customer_name": "مشتری", "phone": "موبایل", "source": "کانال", "region": "شهر"})
+    upload = lambda: {"file": ("calls.csv", content, "text/csv")}
+    preview = client.post(path, files=upload(), data={"mapping": mapping, "dry_run": "true", "default_site_id": "demo"})
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["rows_valid"] == 2 and preview.json()["rows_imported"] == 0
+    assert [row["source"] for row in preview.json()["preview"]] == ["ads", "seo"]
+    assert client.get("/api/v1/call-center/calls").json()["total"] == 0
+    done = client.post(path, files=upload(), data={"mapping": mapping, "dry_run": "false", "default_site_id": "demo"})
+    assert done.status_code == 200 and done.json()["rows_imported"] == 2
+    repeat = client.post(path, files=upload(), data={"mapping": mapping, "dry_run": "false", "default_site_id": "demo"})
+    assert repeat.json()["rows_skipped"] == 2 and repeat.json()["rows_imported"] == 0
+    calls = client.get("/api/v1/call-center/calls").json()
+    assert calls["total"] == 2 and {row["source_basis"] for row in calls["items"]} == {"import"}
+
+
+def test_call_center_workbook_import_preserves_warranty_and_unknown_source(client):
+    _seed(client)
+    workbook = Workbook()
+    non_warranty = workbook.active
+    non_warranty.title = "غیر گارانتی"
+    non_warranty.append([])
+    non_warranty.append(["ردیف", "تاریخ و ساعت ثبت", "نام و نام خانوادگی", "شماره تماس", "برند خودرو", "محدوده", "مدل خودرو", "مشکل خودرو", "کنسل شد؟"])
+    non_warranty.append([1, datetime(2026, 9, 1, 12), "Test A", 9123456789, "Brand", "Tehran", "X1", "Issue", True])
+    non_warranty.append([None, None, None, None, None, None, None, None, False])
+    warranty = workbook.create_sheet("گارانتی")
+    warranty.append(["ردیف", "تاریخ و ساعت ثبت", "نام و نام خانوادگی", "شماره تماس", "برند خودرو", "مدل خودرو"])
+    warranty.append([1, None, None, 9351234567, "Brand", "X2"])
+    buffer = BytesIO()
+    workbook.save(buffer)
+    data = buffer.getvalue()
+    path = "/api/v1/call-center/calls/import-workbook"
+    files = lambda: {"file": ("calls.xlsx", data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    preview = client.post(path, files=files(), data={"dry_run": "true", "site_id": "demo"})
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["rows_valid"] == 2 and preview.json()["rows_imported"] == 0
+    assert preview.json()["sheets"]["گارانتی"]["missing_date"] == 1
+    done = client.post(path, files=files(), data={"dry_run": "false", "site_id": "demo"})
+    assert done.status_code == 200 and done.json()["rows_imported"] == 2
+    assert client.post(path, files=files(), data={"dry_run": "false", "site_id": "demo"}).json()["rows_skipped"] == 2
+    calls = client.get("/api/v1/call-center/calls").json()["items"]
+    assert {row["source"] for row in calls} == {"unknown"}
+    assert {row["phone"] for row in calls} == {"09123456789", "09351234567"}
+    assert {row["warranty"] for row in calls} == {True, False}
+    assert {row["status"] for row in calls} == {"cancelled", "unreviewed"}
+    non_warranty.cell(3, 4, 9999999999)
+    changed_buffer = BytesIO()
+    workbook.save(changed_buffer)
+    changed = client.post(path, files={"file": ("changed.xlsx", changed_buffer.getvalue())}, data={"dry_run": "true"})
+    assert changed.json()["rows_changed"] == 1
+    assert changed.json()["conflicts"] == [{"sheet": "غیر گارانتی", "row": 3}]
 
 
 def test_memory_and_ai_orchestrator_endpoints(client):

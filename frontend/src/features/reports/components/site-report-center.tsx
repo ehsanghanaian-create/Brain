@@ -14,12 +14,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmptyState, ErrorState, LoadingState } from '@/components/seo-brain/states';
 import { KpiCard } from '@/components/seo-brain/kpi-card';
 import { ApiError, endpoints, type Site } from '@/lib/api/client';
+import { InventoryPanel } from '@/features/reports/components/inventory-panel';
+import { MonthlyProgressPanel } from '@/features/reports/components/monthly-progress-panel';
+import { WorkPanel } from '@/features/reports/components/work-panel';
 import type {
   BacklinkRow, ReportageRow, ReportBacklinks, ReportFull, ReportKeywordList,
   ReportMainKeyword, ReportOpportunities, ReportProblems, ReportReportages, ReportSummary
 } from '@/features/reports/types';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { toast } from 'sonner';
 
 const fa = new Intl.NumberFormat('fa-IR');
@@ -203,10 +206,10 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
               </div>
             </CardHeader>
             <CardContent className='grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8'>
-              <KpiCard label='ورودی ارگانیک' value={cur?.clicks ?? null} hint={prev ? undefined : `${days} روز اخیر GSC`} />
-              <KpiCard label='نمایش (Impression)' value={cur?.impressions ?? null} />
-              <KpiCard label='میانگین جایگاه' value={cur?.position != null ? Number(cur.position.toFixed(1)) : null} />
-              <KpiCard label='صفحات ایندکس‌پذیر' value={summary.counts.indexable_pages} />
+              <KpiCard label={g?.metric_ref?.source === 'gsc_property_daily' ? 'کلیک کل سایت' : 'کلیک ردیف‌های GSC'} value={cur?.clicks ?? null} hint={prev ? undefined : `${days} روز اخیر GSC`} />
+              <KpiCard label={g?.metric_ref?.source === 'gsc_property_daily' ? 'نمایش کل سایت' : 'نمایش ردیف‌های GSC'} value={cur?.impressions ?? null} />
+              <KpiCard label='میانگین جایگاه GSC' value={cur?.position != null ? Number(cur.position.toFixed(1)) : null} />
+              <KpiCard label='قابل ایندکس در خزش' value={summary.counts.indexable_pages} hint='فقط URLهای خزیده‌شده؛ وضعیت ایندکس گوگل نیست' />
               <KpiCard label='کوئری‌های GSC' value={summary.counts.gsc_queries} />
               <KpiCard label='بک‌لینک‌ها' value={summary.counts.backlinks} />
               <KpiCard label='دامنه‌های ارجاع‌دهنده' value={summary.counts.referring_domains} />
@@ -218,6 +221,7 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
                 {prev && <span>نمایش: <Delta cur={cur?.impressions} prev={prev.impressions} /></span>}
                 {prev && <span>جایگاه: <Delta cur={cur?.position} prev={prev.position} invert digits={1} /></span>}
                 {g?.window && <span dir='ltr'>{g.window.from} → {g.window.to}</span>}
+                {g?.metric_ref && <span>{g.metric_ref.source === 'gsc_property_daily' ? 'منبع: کل property' : 'منبع: ردیف‌های صفحه و عبارت؛ ممکن است ناقص باشد'} · پوشش {fa.format(g.metric_ref.covered_days)} از {fa.format(g.metric_ref.expected_days)} روز</span>}
               </CardContent>
             )}
           </Card>
@@ -232,8 +236,10 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
 
           <MainKeywordCard siteId={siteId} days={days} summary={summary} onChanged={refresh} />
 
-          {g?.available && g.timeseries && g.timeseries.length > 1 && (
+          {((g?.available && g.timeseries && g.timeseries.length > 1) ||
+            (summary.ga4.available && summary.ga4.timeseries && summary.ga4.timeseries.length > 1)) && (
             <div className='grid gap-4 lg:grid-cols-2'>
+              {g?.available && g.timeseries && g.timeseries.length > 1 && <>
               <Card>
                 <CardHeader className='pb-2'><CardTitle className='text-base'>روند ورودی ارگانیک (کلیک GSC)</CardTitle></CardHeader>
                 <CardContent>
@@ -265,13 +271,17 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
                   </ChartContainer>
                 </CardContent>
               </Card>
+              </>}
               {summary.ga4.available && summary.ga4.timeseries && summary.ga4.timeseries.length > 1 && (
                 <Card className='lg:col-span-2'>
                   <CardHeader className='pb-2'>
-                    <CardTitle className='text-base'>روند ترافیک GA4 (کل نشست‌ها)</CardTitle>
+                    <CardTitle className='text-base'>{summary.ga4.metric_ref?.source === 'ga4_site_daily' ? 'روند نشست‌های کل سایت در GA4' : 'روند نشست‌های صفحات در GA4'}</CardTitle>
                     {summary.ga4.totals && (
                       <CardDescription>
-                        {summary.ga4.date_from} تا {summary.ga4.date_to}: {num(summary.ga4.totals.sessions)} نشست · {num(summary.ga4.totals.users)} کاربر · {num(summary.ga4.totals.conversions)} تبدیل · تعامل {pct(summary.ga4.totals.engagement_rate)}
+                        {summary.ga4.window?.from} تا {summary.ga4.window?.to}: {num(summary.ga4.totals.sessions)} نشست · {num(summary.ga4.totals.conversions)} تبدیل
+                        {summary.ga4.metric_ref?.source === 'ga4_site_daily'
+                          ? <span className='block'>منبع: کل سایت · پوشش {fa.format(summary.ga4.metric_ref.covered_days)} از {fa.format(summary.ga4.metric_ref.expected_days)} روز. کاربر یکتای کل دوره از جمع روزها محاسبه نمی‌شود.</span>
+                          : <span className='block'>منبع: ردیف‌های صفحه‌ای؛ ممکن است نشست یا کاربر را چند بار بشمارد.</span>}
                       </CardDescription>
                     )}
                   </CardHeader>
@@ -288,11 +298,33 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
                   </CardContent>
                 </Card>
               )}
+              {summary.ga4.channels && summary.ga4.channels.length > 0 && (
+                <Card className='lg:col-span-2'>
+                  <CardHeader className='pb-2'>
+                    <CardTitle className='text-base'>نشست‌ها به تفکیک کانال</CardTitle>
+                    <CardDescription>منبع: GA4 در سطح کانال؛ هر میله مجموع نشست‌های همان کانال در بازهٔ انتخابی است.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <ChartContainer config={chartConfig} className='h-48 w-full' dir='ltr'>
+                      <BarChart data={summary.ga4.channels.slice(0, 8)} layout='vertical' margin={{ top: 4, right: 12, bottom: 0, left: 16 }}>
+                        <CartesianGrid horizontal={false} strokeDasharray='3 3' />
+                        <XAxis type='number' tick={{ fontSize: 10 }} />
+                        <YAxis type='category' dataKey='channel' width={110} tick={{ fontSize: 10 }} />
+                        <ChartTooltip content={<ChartTooltipContent />} />
+                        <Bar dataKey='sessions' fill='var(--color-sessions)' radius={4} animationDuration={700} />
+                      </BarChart>
+                    </ChartContainer>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           )}
 
           <Tabs defaultValue='keywords'>
             <TabsList className='flex-wrap'>
+              <TabsTrigger value='inventory'>موجودی صفحات</TabsTrigger>
+              <TabsTrigger value='monthly'>روند ماهانه</TabsTrigger>
+              <TabsTrigger value='work'>کارهای تیم</TabsTrigger>
               <TabsTrigger value='keywords'>کلمات کلیدی</TabsTrigger>
               <TabsTrigger value='problems'>
                 مشکلات {summary.counts.problems.total > 0 && <Badge variant='secondary' className='ms-1'>{fa.format(summary.counts.problems.total)}</Badge>}
@@ -302,6 +334,9 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
               <TabsTrigger value='reportages'>رپورتاژها</TabsTrigger>
               <TabsTrigger value='history'>تاریخچه همگام‌سازی</TabsTrigger>
             </TabsList>
+            <TabsContent value='inventory'><InventoryPanel siteId={siteId} refreshKey={refreshKey} /></TabsContent>
+            <TabsContent value='monthly'><MonthlyProgressPanel siteId={siteId} refreshKey={refreshKey} /></TabsContent>
+            <TabsContent value='work'><WorkPanel siteId={siteId} refreshKey={refreshKey} /></TabsContent>
             <TabsContent value='keywords'><KeywordsPanel siteId={siteId} days={days} /></TabsContent>
             <TabsContent value='problems'><ProblemsPanel siteId={siteId} refreshKey={refreshKey} /></TabsContent>
             <TabsContent value='opportunities'><OpportunitiesPanel siteId={siteId} refreshKey={refreshKey} /></TabsContent>
@@ -564,6 +599,13 @@ function ProblemsPanel({ siteId, refreshKey }: { siteId: string; refreshKey: num
   const [severity, setSeverity] = useState('');
   const [category, setCategory] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const createTask = async (item: ReportProblems['items'][number]) => {
+    try {
+      await endpoints.createSiteWork(siteId, { title: `بررسی ${item.title_fa}`, description: item.url || '',
+        kind: 'issue', source_id: item.id, url: item.url, status: 'new' });
+      toast.success('کار در میز تیم ثبت شد');
+    } catch (cause) { toast.error(cause instanceof ApiError ? cause.message : String(cause)); }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -614,6 +656,7 @@ function ProblemsPanel({ siteId, refreshKey }: { siteId: string; refreshKey: num
                       <div key={i} className='flex items-center gap-2 text-xs'>
                         <a href={safeHref(it.url) ?? '#'} target='_blank' rel='noreferrer' dir='ltr' className='max-w-xl truncate underline-offset-2 hover:underline' title={it.url ?? ''}>{it.url}</a>
                         {it.related_url && <span className='text-muted-foreground truncate' dir='ltr'>↔ {it.related_url}</span>}
+                        <Button size='sm' variant='outline' className='ms-auto shrink-0' onClick={() => createTask(it)}>ثبت کار</Button>
                       </div>
                     ))}
                     {items.length > 30 && <div className='text-muted-foreground text-xs'>و {fa.format(items.length - 30)} صفحه دیگر…</div>}
@@ -634,6 +677,13 @@ function ProblemsPanel({ siteId, refreshKey }: { siteId: string; refreshKey: num
 function OpportunitiesPanel({ siteId, refreshKey }: { siteId: string; refreshKey: number }) {
   const [data, setData] = useState<ReportOpportunities | null>(null);
   const [type, setType] = useState('');
+  const createTask = async (item: ReportOpportunities['items'][number]) => {
+    try {
+      await endpoints.createSiteWork(siteId, { title: `اقدام: ${item.type_fa}`, description: item.reason || '',
+        kind: 'opportunity', source_id: item.id, url: item.url, query: item.query, status: 'new' });
+      toast.success('فرصت در میز تیم ثبت شد');
+    } catch (cause) { toast.error(cause instanceof ApiError ? cause.message : String(cause)); }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -667,7 +717,7 @@ function OpportunitiesPanel({ siteId, refreshKey }: { siteId: string; refreshKey
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>نوع فرصت</TableHead><TableHead>کوئری</TableHead><TableHead>صفحه</TableHead><TableHead>امتیاز</TableHead><TableHead>توضیح</TableHead>
+                <TableHead>نوع فرصت</TableHead><TableHead>کوئری</TableHead><TableHead>صفحه</TableHead><TableHead>امتیاز</TableHead><TableHead>توضیح</TableHead><TableHead>اقدام</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -678,6 +728,7 @@ function OpportunitiesPanel({ siteId, refreshKey }: { siteId: string; refreshKey
                   <TableCell dir='ltr' className='max-w-52 truncate text-xs' title={it.url ?? ''}>{it.url ?? '—'}</TableCell>
                   <TableCell className='tabular-nums'>{num(it.score, 2)}</TableCell>
                   <TableCell className='text-muted-foreground max-w-72 truncate text-xs' title={it.reason ?? ''}>{it.reason ?? '—'}</TableCell>
+                  <TableCell><Button size='sm' variant='outline' onClick={() => createTask(it)}>ثبت کار</Button></TableCell>
                 </TableRow>
               ))}
             </TableBody>

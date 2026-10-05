@@ -77,7 +77,9 @@ def _one(cx, sql: str, **params) -> dict[str, Any] | None:
 # ---------------------------------------------------------------- GSC helpers
 
 def _gsc_bounds(cx, site_id: str) -> tuple[str | None, str | None]:
-    r = _one(cx, "SELECT MIN(date) AS a, MAX(date) AS b FROM gsc_daily WHERE site_id=:s", s=site_id)
+    r = _one(cx, """SELECT MIN(date) AS a, MAX(date) AS b FROM (
+        SELECT date FROM gsc_daily WHERE site_id=:s
+        UNION ALL SELECT date FROM gsc_property_daily WHERE site_id=:s AND search_type='web')""", s=site_id)
     return (r["a"], r["b"]) if r else (None, None)
 
 
@@ -94,7 +96,7 @@ _GSC_TOTALS = """
 SELECT COALESCE(SUM(clicks),0) AS clicks, COALESCE(SUM(impressions),0) AS impressions,
        CASE WHEN SUM(impressions)>0 THEN 1.0*SUM(clicks)/SUM(impressions) END AS ctr,
        CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) END AS position
-FROM gsc_daily WHERE site_id=:s AND date BETWEEN :a AND :b
+FROM {table} WHERE site_id=:s AND date BETWEEN :a AND :b {filter}
 """
 
 
@@ -103,16 +105,32 @@ def _gsc_block(cx, site_id: str, days: int) -> dict[str, Any]:
     if not hi:
         return {"available": False}
     cur_from, cur_to, prev_from, prev_to = _win(hi, days)
-    cur = _one(cx, _GSC_TOTALS, s=site_id, a=cur_from, b=cur_to) or {}
-    prev = _one(cx, _GSC_TOTALS, s=site_id, a=prev_from, b=prev_to) or {}
-    series = _rows(cx, """
+    property_count = (_one(cx, """SELECT COUNT(*) AS n FROM gsc_property_daily
+        WHERE site_id=:s AND search_type='web' AND date BETWEEN :a AND :b""",
+        s=site_id, a=cur_from, b=cur_to) or {}).get("n", 0)
+    source = "gsc_property_daily" if property_count else "gsc_daily"
+    table = source  # both values are constants above, never user input
+    source_filter = "AND search_type='web'" if property_count else ""
+    cur = _one(cx, _GSC_TOTALS.format(table=table, filter=source_filter), s=site_id, a=cur_from, b=cur_to) or {}
+    prev = _one(cx, _GSC_TOTALS.format(table=table, filter=source_filter), s=site_id, a=prev_from, b=prev_to) or {}
+    series = _rows(cx, f"""
         SELECT date, SUM(clicks) AS clicks, SUM(impressions) AS impressions,
                CASE WHEN SUM(impressions)>0 THEN ROUND(SUM(position*impressions)/SUM(impressions), 2) END AS position
-        FROM gsc_daily WHERE site_id=:s AND date BETWEEN :a AND :b GROUP BY date ORDER BY date""",
+        FROM {table} WHERE site_id=:s AND date BETWEEN :a AND :b {source_filter}
+        GROUP BY date ORDER BY date""",
         s=site_id, a=cur_from, b=cur_to)
+    provenance = _one(cx, f"""SELECT sync_run_id, {"property" if property_count else "NULL AS property"}
+        FROM {table} WHERE site_id=:s AND date BETWEEN :a AND :b {source_filter}
+        ORDER BY date DESC LIMIT 1""", s=site_id, a=cur_from, b=cur_to) or {}
+    metric_ref = {"source": source, "grain": "property_date" if property_count else "page_query_country_device_date",
+                  "site_id": site_id, "search_type": "web", "property": provenance.get("property"),
+                  "sync_run_id": provenance.get("sync_run_id"), "period_start": cur_from, "period_end": cur_to,
+                  "covered_days": len(series), "expected_days": days,
+                  "coverage_status": "ready" if property_count and len(series) == days else "partial"}
     return {"available": True, "date_from": lo, "date_to": hi,
             "window": {"from": cur_from, "to": cur_to, "days": days},
-            "totals": cur, "previous": prev if prev.get("impressions") else None, "timeseries": series}
+            "totals": cur, "previous": prev if prev.get("impressions") else None, "timeseries": series,
+            "metric_ref": metric_ref}
 
 
 def _keyword_perf(cx, site_id: str, keyword: str, days: int) -> dict[str, Any] | None:
@@ -215,18 +233,50 @@ def report_summary(site_id: str, days: int = Query(default=28, ge=7, le=365), en
         gsc = _gsc_block(cx, site_id, days)
 
         ga4 = {"available": False}
-        g = _one(cx, """
-            SELECT MIN(date) AS a, MAX(date) AS b, SUM(sessions) AS sessions, SUM(total_users) AS users,
-                   SUM(conversions) AS conversions,
-                   CASE WHEN SUM(sessions)>0 THEN SUM(engagement_rate*sessions)/SUM(sessions) END AS engagement_rate
-            FROM ga4_daily WHERE site_id=:s AND source='page'""", s=site_id)
-        if g and g.get("sessions"):
-            ga4_series = _rows(cx, """
-                SELECT date, SUM(sessions) AS sessions, SUM(total_users) AS users FROM ga4_daily
-                WHERE site_id=:s AND source='page' GROUP BY date ORDER BY date""", s=site_id)
-            ga4 = {"available": True, "date_from": g["a"], "date_to": g["b"], "totals": {
+        ga4_bounds = _one(cx, """
+            SELECT MIN(date) AS a, MAX(date) AS b FROM (
+                SELECT date FROM ga4_daily WHERE site_id=:s AND source='page'
+                UNION ALL SELECT date FROM ga4_site_daily WHERE site_id=:s AND channel='')""", s=site_id) or {}
+        if ga4_bounds.get("b"):
+            window_from, window_to, _, _ = _win(
+                gsc["window"]["to"] if gsc["available"] else ga4_bounds["b"], days)
+            site_days = (_one(cx, """SELECT COUNT(*) AS n FROM ga4_site_daily
+                WHERE site_id=:s AND channel='' AND date BETWEEN :a AND :b""",
+                s=site_id, a=window_from, b=window_to) or {}).get("n", 0)
+            if site_days:
+                g = _one(cx, """SELECT COALESCE(SUM(sessions),0) AS sessions, NULL AS users,
+                    COALESCE(SUM(conversions),0) AS conversions, NULL AS engagement_rate
+                    FROM ga4_site_daily WHERE site_id=:s AND channel='' AND date BETWEEN :a AND :b""",
+                    s=site_id, a=window_from, b=window_to) or {}
+                ga4_series = _rows(cx, """SELECT date, sessions, total_users AS users FROM ga4_site_daily
+                    WHERE site_id=:s AND channel='' AND date BETWEEN :a AND :b ORDER BY date""",
+                    s=site_id, a=window_from, b=window_to)
+                channels = _rows(cx, """SELECT channel, SUM(sessions) AS sessions,
+                    SUM(conversions) AS conversions FROM ga4_site_daily
+                    WHERE site_id=:s AND channel!='' AND date BETWEEN :a AND :b
+                    GROUP BY channel ORDER BY sessions DESC""", s=site_id, a=window_from, b=window_to)
+                source = "ga4_site_daily"
+            else:
+                g = _one(cx, """
+                    SELECT COALESCE(SUM(sessions),0) AS sessions, COALESCE(SUM(total_users),0) AS users,
+                           COALESCE(SUM(conversions),0) AS conversions,
+                           CASE WHEN SUM(sessions)>0 THEN SUM(engagement_rate*sessions)/SUM(sessions) END AS engagement_rate
+                    FROM ga4_daily WHERE site_id=:s AND source='page' AND date BETWEEN :a AND :b""",
+                    s=site_id, a=window_from, b=window_to) or {}
+                ga4_series = _rows(cx, """
+                    SELECT date, SUM(sessions) AS sessions, SUM(total_users) AS users FROM ga4_daily
+                    WHERE site_id=:s AND source='page' AND date BETWEEN :a AND :b
+                    GROUP BY date ORDER BY date""", s=site_id, a=window_from, b=window_to)
+                channels = []
+                source = "ga4_daily"
+            ga4 = {"available": True, "date_from": ga4_bounds["a"], "date_to": ga4_bounds["b"],
+                   "window": {"from": window_from, "to": window_to, "days": days}, "totals": {
                 "sessions": g["sessions"], "users": g["users"], "conversions": g["conversions"],
-                "engagement_rate": g["engagement_rate"]}, "timeseries": ga4_series}
+                "engagement_rate": g["engagement_rate"]}, "timeseries": ga4_series, "channels": channels,
+                "metric_ref": {"source": source, "grain": "site_date" if site_days else "page_date",
+                               "covered_days": len(ga4_series), "expected_days": days,
+                               "coverage_status": "ready" if site_days and len(ga4_series) == days else "partial",
+                               "period_start": window_from, "period_end": window_to}}
 
         sev = {r["severity"]: r["n"] for r in _rows(cx,
             "SELECT severity, COUNT(*) AS n FROM seo_problems WHERE site_id=:s GROUP BY severity", s=site_id)}
@@ -263,6 +313,156 @@ def report_summary(site_id: str, days: int = Query(default=28, ge=7, le=365), en
             "score_breakdown": {"problems_penalty": penalty, "connections_penalty": conn_penalty},
             "gsc": gsc, "ga4": ga4, "counts": counts, "main_keyword": main_keyword,
             "freshness": {"last_runs": {r["source"]: r["at"] for r in last_runs}, "auto_sync": plan}}
+
+
+_INVENTORY_CTE = """
+WITH known AS (
+    SELECT url, 1 AS wordpress, 0 AS crawled, 0 AS sitemap, 0 AS gsc,
+           created_at AS first_seen, updated_at AS last_seen
+    FROM posts WHERE site_id=:s AND url!=''
+    UNION ALL
+    SELECT url, 0, CASE WHEN last_crawled IS NOT NULL THEN 1 ELSE 0 END,
+           COALESCE(in_sitemap,0), 0, created_at, COALESCE(last_crawled,updated_at)
+    FROM pages WHERE site_id=:s AND url!=''
+    UNION ALL
+    SELECT page, 0, 0, 0, 1, MIN(date), MAX(date)
+    FROM gsc_daily WHERE site_id=:s AND page!='' GROUP BY page
+), inventory AS (
+    SELECT url, MAX(wordpress) AS wordpress, MAX(crawled) AS crawled,
+           MAX(sitemap) AS sitemap, MAX(gsc) AS gsc,
+           MIN(first_seen) AS first_seen, MAX(last_seen) AS last_seen
+    FROM known GROUP BY url
+)
+"""
+
+
+@router.get("/inventory")
+def page_inventory(site_id: str, q: str | None = None,
+                   source: Literal["wordpress", "crawl", "sitemap", "gsc"] | None = None,
+                   limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
+                   eng: Engine = Depends(engine)) -> dict[str, Any]:
+    """Known URLs across independent sources; discovered is not claimed as every URL on the site."""
+    clauses = []
+    params: dict[str, Any] = {"s": site_id, "lim": limit, "off": offset}
+    if q:
+        clauses.append("i.url LIKE :q")
+        params["q"] = "%" + q.strip() + "%"
+    if source:
+        clauses.append({"wordpress": "i.wordpress=1", "crawl": "i.crawled=1",
+                        "sitemap": "i.sitemap=1", "gsc": "i.gsc=1"}[source])
+    where = "WHERE " + " AND ".join(clauses) if clauses else ""
+    with eng.connect() as cx:
+        summary = _one(cx, _INVENTORY_CTE + """SELECT COUNT(*) AS discovered,
+            COALESCE(SUM(wordpress),0) AS wordpress, COALESCE(SUM(crawled),0) AS crawled,
+            COALESCE(SUM(sitemap),0) AS sitemap, COALESCE(SUM(gsc),0) AS gsc
+            FROM inventory""", s=site_id) or {}
+        total = (_one(cx, _INVENTORY_CTE + f"SELECT COUNT(*) AS n FROM inventory i {where}", **params) or {}).get("n", 0)
+        items = _rows(cx, _INVENTORY_CTE + f"""
+            SELECT i.url, i.wordpress, i.crawled, i.sitemap, i.gsc, i.first_seen, i.last_seen,
+                   p.type AS wp_type, p.status AS wp_status, p.title AS wp_title,
+                   c.status_code, c.crawl_status, c.indexable, c.indexability_reason,
+                   c.final_url, c.canonical, c.last_crawled
+            FROM inventory i
+            LEFT JOIN posts p ON p.site_id=:s AND p.url=i.url
+            LEFT JOIN pages c ON c.site_id=:s AND c.url=i.url
+            {where} ORDER BY i.url LIMIT :lim OFFSET :off""", **params)
+    for item in items:
+        item["sources"] = [key for key in ("wordpress", "sitemap", "crawled", "gsc") if item[key]]
+        item["indexability_source"] = "crawler" if item["indexable"] is not None else None
+    return {"summary": summary, "items": items, "total": total, "limit": limit, "offset": offset,
+            "coverage_note": "فقط URLهای شناخته‌شده از منابع متصل؛ شمار کل صفحات واقعی سایت نیست."}
+
+
+@router.get("/inventory/page")
+def inventory_page(site_id: str, url: str = Query(min_length=8), eng: Engine = Depends(engine)) -> dict[str, Any]:
+    """One URL's observed facts; canonical and redirects remain evidence, not an automatic identity merge."""
+    from urllib.parse import urlsplit
+    from ...normalizer import normalize_url
+
+    with eng.connect() as cx:
+        site = _one(cx, "SELECT canonical_url FROM sites WHERE site_id=:s", s=site_id) or {}
+        host = urlsplit(site.get("canonical_url") or "").hostname
+        normalized = normalize_url(url, site_host=host)
+        item = _one(cx, _INVENTORY_CTE + """SELECT * FROM inventory WHERE url=:url""",
+                    s=site_id, url=normalized)
+        if not item:
+            raise HTTPException(404, "URL not found in the known inventory")
+        post = _one(cx, """SELECT type,status,title,modified_gmt,yoast_title,yoast_description
+            FROM posts WHERE site_id=:s AND url=:url""", s=site_id, url=normalized)
+        crawl = _one(cx, """SELECT status_code,crawl_status,indexable,indexability_reason,canonical,final_url,
+            title,meta_description,word_count,depth,last_crawled,crawl_run_id,in_sitemap
+            FROM pages WHERE site_id=:s AND url=:url""", s=site_id, url=normalized)
+        search = _one(cx, """SELECT MIN(date) AS date_from, MAX(date) AS date_to,
+            SUM(clicks) AS clicks, SUM(impressions) AS impressions,
+            COUNT(DISTINCT query) AS query_count FROM gsc_daily WHERE site_id=:s AND page=:url""",
+            s=site_id, url=normalized)
+        problems = _rows(cx, """SELECT problem_type,severity,detail,created_at FROM seo_problems
+            WHERE site_id=:s AND url=:url ORDER BY created_at DESC LIMIT 50""", s=site_id, url=normalized)
+    return {"url": normalized, "sources": [k for k in ("wordpress", "sitemap", "crawled", "gsc") if item[k]],
+            "first_seen": item["first_seen"], "last_seen": item["last_seen"],
+            "wordpress": post, "crawl": crawl, "gsc_page_query_rows": search if search.get("date_to") else None,
+            "problems": problems, "note": "دادهٔ GSC صفحه از ردیف‌های page/query است و ممکن است کامل نباشد."}
+
+
+@router.get("/monthly")
+def monthly_progress(site_id: str, months: int = Query(12, ge=1, le=24),
+                     through: str | None = Query(None, pattern=r"^\d{4}-\d{2}$"),
+                     eng: Engine = Depends(engine)) -> dict[str, Any]:
+    """Monthly site trends with source and day coverage; no claim that a partial month is final."""
+    import calendar
+
+    try:
+        last = datetime.strptime(through, "%Y-%m").date() if through else datetime.now(timezone.utc).date().replace(day=1)
+    except ValueError as exc:
+        raise HTTPException(422, "invalid month") from exc
+    keys = []
+    year, month = last.year, last.month
+    for _ in range(months):
+        keys.append(f"{year:04d}-{month:02d}")
+        month -= 1
+        if month == 0:
+            year, month = year - 1, 12
+    keys.reverse()
+    with eng.connect() as cx:
+        rows = []
+        for key in keys:
+            first = key + "-01"
+            last_day = calendar.monthrange(int(key[:4]), int(key[5:]))[1]
+            end = f"{key}-{last_day:02d}"
+            property_days = (_one(cx, """SELECT COUNT(*) AS n FROM gsc_property_daily
+                WHERE site_id=:s AND search_type='web' AND date BETWEEN :a AND :b""",
+                s=site_id, a=first, b=end) or {}).get("n", 0)
+            gsc_source = "gsc_property_daily" if property_days else "gsc_daily"
+            extra = "AND search_type='web'" if property_days else ""
+            search = _one(cx, f"""SELECT COUNT(DISTINCT date) AS days, SUM(clicks) AS clicks,
+                SUM(impressions) AS impressions FROM {gsc_source}
+                WHERE site_id=:s AND date BETWEEN :a AND :b {extra}""", s=site_id, a=first, b=end) or {}
+            site_days = (_one(cx, """SELECT COUNT(*) AS n FROM ga4_site_daily
+                WHERE site_id=:s AND channel='' AND date BETWEEN :a AND :b""",
+                s=site_id, a=first, b=end) or {}).get("n", 0)
+            if site_days:
+                analytics = _one(cx, """SELECT COUNT(*) AS days, SUM(sessions) AS sessions,
+                    SUM(conversions) AS conversions FROM ga4_site_daily
+                    WHERE site_id=:s AND channel='' AND date BETWEEN :a AND :b""",
+                    s=site_id, a=first, b=end) or {}
+            else:
+                analytics = _one(cx, """SELECT COUNT(DISTINCT date) AS days, SUM(sessions) AS sessions,
+                    SUM(conversions) AS conversions FROM ga4_daily
+                    WHERE site_id=:s AND source='page' AND date BETWEEN :a AND :b""",
+                    s=site_id, a=first, b=end) or {}
+            complete_calendar = end < datetime.now(timezone.utc).date().isoformat()
+            rows.append({"month": key, "gsc": {
+                "clicks": search.get("clicks"), "impressions": search.get("impressions"),
+                "source": gsc_source if search.get("days") else None,
+                "covered_days": search.get("days") or 0, "expected_days": last_day,
+                "status": "ready" if property_days == last_day and complete_calendar else
+                          "partial" if search.get("days") else "missing"},
+                "ga4": {"sessions": analytics.get("sessions"), "conversions": analytics.get("conversions"),
+                        "source": ("ga4_site_daily" if site_days else "ga4_daily") if analytics.get("days") else None,
+                        "covered_days": analytics.get("days") or 0, "expected_days": last_day,
+                        "status": "ready" if site_days == last_day and complete_calendar else
+                                  "partial" if analytics.get("days") else "missing"}})
+    return {"site_id": site_id, "months": rows, "note": "ماه‌های ناقص و داده‌های صفحه‌ای برای نتیجه‌گیری قطعی مناسب نیستند."}
 
 
 # ---------------------------------------------------------------- main keyword
@@ -364,7 +564,7 @@ def report_problems(site_id: str, severity: Literal["high", "medium", "low"] | N
                     eng: Engine = Depends(engine)) -> dict[str, Any]:
     with eng.connect() as cx:
         rows = _rows(cx, """
-            SELECT problem_type, severity, url, related_url, detail, created_at FROM seo_problems
+            SELECT id, problem_type, severity, url, related_url, detail, created_at FROM seo_problems
             WHERE site_id=:s ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, problem_type
             LIMIT :lim""", s=site_id, lim=limit)
     items = []
@@ -395,7 +595,7 @@ def report_opportunities(site_id: str, opp_type: str | None = None,
                          eng: Engine = Depends(engine)) -> dict[str, Any]:
     with eng.connect() as cx:
         rows = _rows(cx, f"""
-            SELECT opp_type, url, related_url, query, score, reason, confidence, detail, created_at
+            SELECT id, opp_type, url, related_url, query, score, reason, confidence, detail, created_at
             FROM seo_opportunities WHERE site_id=:s {"AND opp_type=:t" if opp_type else ""}
             ORDER BY score DESC LIMIT :lim""", s=site_id, lim=limit, **({"t": opp_type} if opp_type else {}))
     for r in rows:

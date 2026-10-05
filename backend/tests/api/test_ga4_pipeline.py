@@ -71,6 +71,45 @@ def test_ga4_client_falls_back_to_legacy_conversions_metric(tmp_path, monkeypatc
     assert len(rows) == 1 and rows[0]["conversions"] == 1.0
 
 
+def test_ga4_site_daily_uses_no_page_dimension(tmp_path, monkeypatch):
+    total = {"rowCount": 1, "rows": [{"dimensionValues": [{"value": "20260810"}],
+             "metricValues": [{"value": "40"}, {"value": "31"}, {"value": "3"}]}]}
+    organic = {"rowCount": 1, "rows": [{"dimensionValues": [{"value": "20260810"}, {"value": "Organic Search"}],
+               "metricValues": [{"value": "25"}, {"value": "21"}, {"value": "2"}]}]}
+    c = _client_with([total, organic], tmp_path, monkeypatch)
+    seen = []
+    original = c.run_report
+
+    def capture(pid, body):
+        seen.append(body)
+        return original(pid, body)
+
+    c.run_report = capture
+    assert list(c.site_daily("123", date(2026, 8, 10), date(2026, 8, 10))) == [
+        {"date": "2026-08-10", "channel": "", "sessions": 40, "total_users": 31, "conversions": 3.0}]
+    assert list(c.site_daily("123", date(2026, 8, 10), date(2026, 8, 10), by_channel=True))[0]["channel"] == "Organic Search"
+    assert seen[0]["dimensions"] == [{"name": "date"}]
+    assert seen[1]["dimensions"] == [{"name": "date"}, {"name": "sessionDefaultChannelGroup"}]
+
+
+def test_ga4_site_window_replaces_stale_days(tmp_path):
+    from seo_brain.common.config import SiteConfig
+    from seo_brain.database.db import connect, ensure_site, init_db
+    from seo_brain.ga4.sync import store_site_rows
+
+    conn = connect(tmp_path / "site-totals.db")
+    init_db(conn)
+    site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
+    ensure_site(conn, site)
+    start, end = date(2026, 8, 10), date(2026, 8, 11)
+    rows = [{"date": "2026-08-10", "channel": "", "sessions": 40, "total_users": 31, "conversions": 3.0},
+            {"date": "2026-08-11", "channel": "", "sessions": 45, "total_users": 33, "conversions": 2.0}]
+    assert store_site_rows(conn, site, rows, "123", start, end, "run1") == 2
+    assert store_site_rows(conn, site, rows[:1], "123", start, end, "run2") == 1
+    got = conn.execute("SELECT date,sessions,sync_run_id FROM ga4_site_daily").fetchall()
+    assert [tuple(r) for r in got] == [("2026-08-10", 40, "run2")]
+
+
 # --------------------------------------------------------------------------- pipeline + endpoints
 @pytest.fixture
 def env(tmp_path, monkeypatch):
@@ -186,7 +225,7 @@ def test_upsert_idempotent_rerun_no_duplicates(env):
         dup = cx.execute(text("SELECT COUNT(*) FROM (SELECT node_id FROM graph_nodes WHERE site_id=:s GROUP BY node_id HAVING COUNT(*)>1)"), {"s": SID}).scalar()
         tables = {r[0] for r in cx.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
     assert daily == 3 and dup == 0
-    assert {t for t in tables if "ga4" in t} == {"ga4_daily"}       # exactly one new table
+    assert {t for t in tables if "ga4" in t} == {"ga4_daily", "ga4_site_daily"}
 
 
 def test_guards_and_permission_failure(env):

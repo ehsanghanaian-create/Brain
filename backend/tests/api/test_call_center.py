@@ -13,8 +13,10 @@ from seo_brain.api.routers import call_center
 def test_call_center_source_and_operator_flow():
     eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     sql = (Path(__file__).parents[3] / "database" / "migrations" / "0020_call_center.sql").read_text(encoding="utf-8")
+    outcomes_sql = (Path(__file__).parents[3] / "database" / "migrations" / "0023_call_outcomes.sql").read_text(encoding="utf-8")
     with eng.begin() as cx:
         cx.connection.driver_connection.executescript(sql)
+        cx.connection.driver_connection.executescript(outcomes_sql)
     app = FastAPI()
     app.include_router(call_center.router, prefix="/api/v1")
     app.dependency_overrides[call_center.engine] = lambda: eng
@@ -32,9 +34,19 @@ def test_call_center_source_and_operator_flow():
     })
     assert record.status_code == 201, record.text
     assert record.json()["phone"] == "09123456789"
+    assert client.patch(f"/api/v1/call-center/calls/{record.json()['id']}", json={"order_value": 100}).status_code == 422
     assert client.patch(f"/api/v1/call-center/calls/{record.json()['id']}", json={"operator_id": 999}).status_code == 422
     summary = client.get("/api/v1/call-center/analytics").json()
     assert summary["total"] == 1 and summary["by_source"]["seo"] == 1
+    assert summary["by_outcome"]["pending"] == 1
+
+    won = client.patch(f"/api/v1/call-center/calls/{record.json()['id']}", json={
+        "outcome": "order", "order_value": 2500000, "source_confidence": "confirmed"})
+    assert won.status_code == 200, won.text
+    funnel = client.get("/api/v1/call-center/analytics").json()["by_source_outcome"]["seo"]
+    assert funnel == {"total": 1, "qualified": 1, "orders": 1,
+                      "order_value": 2500000, "unknown_confidence": 0}
+    assert client.patch(f"/api/v1/call-center/calls/{record.json()['id']}", json={"outcome": "qualified"}).status_code == 422
 
     changed = client.patch(f"/api/v1/call-center/calls/{record.json()['id']}", json={"source": "ads", "source_basis": "manual"})
     assert changed.status_code == 200

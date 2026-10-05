@@ -140,6 +140,26 @@ function AttentionPanel({ data }: { data: PortfolioOverview }) {
   );
 }
 
+function DataAndWorkCoverage({ sites, totals }: { sites: PortfolioSite[]; totals: PortfolioOverview['totals'] }) {
+  const age = (value: string | null) => value ? Math.max(0, Math.floor((Date.now() - Date.parse(`${value}T00:00:00Z`)) / 86400000)) : null;
+  const sourceCell = (site: PortfolioSite, source: 'gsc' | 'ga4') => {
+    const coverage = site.data_coverage[source];
+    const daysOld = age(coverage.last_date);
+    return <span className={cn('text-xs tabular-nums', daysOld === null || daysOld > 7 ? 'text-amber-700 dark:text-amber-300' : 'text-foreground')}>
+      {daysOld === null ? 'بدون داده' : `${fa.format(coverage.days_28)} روز از ۲۸ · آخرین: ${fa.format(daysOld)} روز پیش`}
+    </span>;
+  };
+  const ordered = sites.toSorted((a, b) => (b.work.overdue - a.work.overdue) || (b.work.unassigned - a.work.unassigned));
+  return <Card className='border-border/70 shadow-sm'>
+    <CardHeader><CardTitle className='text-base'>پوشش داده و پیگیری تیم</CardTitle><CardDescription>روزهای دارای دادهٔ سطح سایت در ۲۸ روز اخیر؛ شمار کارهای باز، بی‌مسئول و عقب‌افتاده</CardDescription></CardHeader>
+    <CardContent>
+      <div className='mb-3 flex flex-wrap gap-2 text-xs'><Badge variant='secondary'>{fa.format(totals.open_work)} کار باز</Badge><Badge variant='outline' className='text-rose-700 dark:text-rose-300'>{fa.format(totals.overdue_work)} عقب‌افتاده</Badge><Badge variant='outline'>{fa.format(totals.unassigned_work)} بی‌مسئول</Badge></div>
+      <div className='overflow-x-auto'><table className='w-full min-w-[690px] text-right text-sm'><thead><tr className='border-b text-xs text-muted-foreground'><th className='py-2 font-medium'>سایت</th><th className='py-2 font-medium'>GSC</th><th className='py-2 font-medium'>GA4</th><th className='py-2 font-medium'>کارهای باز</th><th className='py-2 font-medium'>عقب‌افتاده / بی‌مسئول</th></tr></thead><tbody>{ordered.map((site) => <tr key={site.site_id} className='border-b last:border-0'><td className='py-2.5 font-medium'><Link className='hover:underline' href={`/dashboard/reports?site=${encodeURIComponent(site.site_id)}`}>{site.name}</Link></td><td>{sourceCell(site, 'gsc')}</td><td>{sourceCell(site, 'ga4')}</td><td className='tabular-nums'>{fa.format(site.work.open)}</td><td className='tabular-nums'>{fa.format(site.work.overdue)} / {fa.format(site.work.unassigned)}</td></tr>)}</tbody></table></div>
+      <p className='text-muted-foreground mt-3 text-xs'>نبود داده یا تعداد روز کم، پوشش ناقص را نشان می‌دهد؛ وضعیت اتصال و اجرای همگام‌سازی را در صفحهٔ هر سایت بررسی کنید.</p>
+    </CardContent>
+  </Card>;
+}
+
 export function PortfolioDashboard({ data, health }: { data: PortfolioOverview; health: Health | null }) {
   const router = useRouter();
   const [query, setQuery] = useState('');
@@ -181,6 +201,8 @@ export function PortfolioDashboard({ data, health }: { data: PortfolioOverview; 
       </section>
 
       <LivePortfolioSignals initial={data} />
+
+      <DataAndWorkCoverage sites={data.sites} totals={data.totals} />
 
       <section aria-label='شاخص‌های کلیدی' className='grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4'>
         <MetricCard title='سایت‌های آماده' value={data.totals.ready_sites} description={`از ${fa.format(data.totals.sites)} سایت ثبت‌شده، این تعداد داده و گراف قابل استفاده دارند.`} icon={IconWorld} lineClass='bg-emerald-500' iconClass='bg-emerald-500/10 text-emerald-600' footer={<div className='space-y-2'><div className='flex justify-between'><span className='text-muted-foreground'>آمادگی سبد</span><span className='font-semibold'>{fa.format(readiness)}٪</span></div><Progress value={readiness} className='h-1.5' /></div>} />

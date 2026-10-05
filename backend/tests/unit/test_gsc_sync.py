@@ -1,6 +1,8 @@
 from seo_brain.common.config import SiteConfig, GraphConfig
 from seo_brain.database.db import connect, init_db, ensure_site
-from seo_brain.gsc.sync import store_rows, aggregate
+from datetime import date
+
+from seo_brain.gsc.sync import store_rows, store_property_rows, aggregate
 
 
 def _site():
@@ -34,3 +36,17 @@ def test_store_and_aggregate(tmp_path):
     q2 = conn.execute("select is_important from queries where query='چری'").fetchone()
     assert q2[0] == 0
     assert agg["queries"] == 2 and agg["important_queries"] == 1
+
+
+def test_property_totals_are_independent_and_window_replaces_old_rows(tmp_path):
+    conn = connect(tmp_path / "property.db")
+    init_db(conn)
+    site = _site()
+    ensure_site(conn, site)
+    start, end = date(2026, 8, 10), date(2026, 8, 11)
+    first = [{"keys": ["2026-08-10"], "clicks": 20, "impressions": 200, "position": 5.0},
+             {"keys": ["2026-08-11"], "clicks": 30, "impressions": 300, "position": 6.0}]
+    assert store_property_rows(conn, site, first, "sc-domain:example.com", start, end, "run1") == 2
+    assert store_property_rows(conn, site, first[:1], "sc-domain:example.com", start, end, "run2") == 1
+    got = conn.execute("SELECT date, clicks, sync_run_id FROM gsc_property_daily").fetchall()
+    assert [tuple(r) for r in got] == [("2026-08-10", 20, "run2")]

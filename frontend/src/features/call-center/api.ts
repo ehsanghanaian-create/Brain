@@ -3,6 +3,8 @@ import { api } from '@/lib/api/client';
 export type CallSource = 'seo' | 'ads' | 'direct' | 'referral' | 'unknown';
 export type CallStatus = 'new' | 'follow_up' | 'resolved' | 'cancelled' | 'unreviewed';
 export type SourceBasis = 'manual' | 'customer' | 'gclid' | 'utm' | 'import';
+export type CallOutcome = 'pending' | 'qualified' | 'unqualified' | 'order' | 'lost';
+export type SourceConfidence = 'confirmed' | 'probable' | 'unknown';
 export type UserRole = 'admin' | 'analyst' | 'call_center';
 export type PanelUser = {
   id: number;
@@ -29,6 +31,10 @@ export type CallRecord = {
   source_note: string;
   campaign: string;
   status: CallStatus;
+  outcome: CallOutcome;
+  order_value: number | null;
+  follow_up_at: string | null;
+  source_confidence: SourceConfidence;
   operator_id: number | null;
   operator_name: string | null;
   import_key: string | null;
@@ -42,6 +48,9 @@ export type CallAnalytics = {
   by_model: [string, number][];
   by_region: [string, number][];
   by_status: Record<CallStatus, number>;
+  by_outcome: Record<CallOutcome, number>;
+  by_source_outcome: Record<CallSource, { total: number; qualified: number; orders: number;
+    order_value: number; unknown_confidence: number }>;
   warranty: number;
   daily: {
     date: string;
@@ -55,6 +64,31 @@ export type CallAnalytics = {
   undated: number;
   future: number;
   generated_at: string;
+};
+export type CallImportResult = {
+  columns: string[];
+  mapping: Record<string, string | null>;
+  rows_total: number;
+  rows_valid: number;
+  rows_imported: number;
+  rows_skipped: number;
+  errors_count: number;
+  errors: { row: number; error: string }[];
+  preview: { customer_name: string; phone: string; occurred_at: string | null; source: CallSource; site_id: string | null; region: string; outcome: CallOutcome }[];
+  dry_run: boolean;
+};
+export type CallWorkbookResult = {
+  dry_run: boolean;
+  sha256: string;
+  sheets: Record<string, { candidates: number; valid: number; imported: number; skipped_existing: number;
+    missing_date: number; short_phone: number; future_date: number; cancelled: number; changed_rows: number }>;
+  rows_valid: number;
+  rows_imported: number;
+  rows_skipped: number;
+  rows_changed: number;
+  conflicts: { sheet: string; row: number }[];
+  source: CallSource;
+  source_reason: string;
 };
 
 const params = (values: Record<string, string | number | undefined>) => {
@@ -85,6 +119,21 @@ export const callCenterApi = {
     api<CallRecord>('/call-center/calls', { method: 'POST', json: body }),
   patchCall: (id: number, body: Partial<CallRecord>) =>
     api<CallRecord>(`/call-center/calls/${id}`, { method: 'PATCH', json: body }),
+  importCalls: (file: File, mapping: Record<string, string>, dryRun: boolean, siteId?: string) => {
+    const form = new FormData();
+    form.set('file', file);
+    form.set('dry_run', String(dryRun));
+    form.set('mapping', JSON.stringify(mapping));
+    if (siteId) form.set('default_site_id', siteId);
+    return api<CallImportResult>('/call-center/calls/import', { method: 'POST', body: form });
+  },
+  importWorkbook: (file: File, dryRun: boolean, siteId?: string) => {
+    const form = new FormData();
+    form.set('file', file);
+    form.set('dry_run', String(dryRun));
+    if (siteId) form.set('site_id', siteId);
+    return api<CallWorkbookResult>('/call-center/calls/import-workbook', { method: 'POST', body: form });
+  },
   analytics: (days: number, site_id?: string, source?: CallSource) =>
     api<CallAnalytics>(`/call-center/analytics?${params({ days, site_id, source })}`)
 };
@@ -102,6 +151,13 @@ export const statusLabel: Record<CallStatus, string> = {
   resolved: 'انجام‌شده',
   cancelled: 'کنسل‌شده',
   unreviewed: 'بازبینی نشده'
+};
+export const outcomeLabel: Record<CallOutcome, string> = {
+  pending: 'در انتظار نتیجه', qualified: 'واجدکیفیت', unqualified: 'فاقدکیفیت',
+  order: 'سفارش', lost: 'از دست‌رفته'
+};
+export const confidenceLabel: Record<SourceConfidence, string> = {
+  confirmed: 'قطعی', probable: 'محتمل', unknown: 'نامشخص'
 };
 export const roleLabel: Record<UserRole, string> = {
   admin: 'مدیر',

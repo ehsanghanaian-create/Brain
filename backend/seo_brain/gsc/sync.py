@@ -17,6 +17,35 @@ from ..normalizer import normalize_url
 log = logging.getLogger("gsc.sync")
 
 
+def store_property_rows(conn: sqlite3.Connection, site: SiteConfig, rows: list[dict],
+                        property_url: str, start: date, end: date, run_id: str) -> int:
+    """Replace a finalized property/date window only after the API response is complete."""
+    parsed: list[dict] = []
+    for row in rows:
+        keys = row.get("keys") or []
+        if len(keys) != 1 or not (start.isoformat() <= keys[0] <= end.isoformat()):
+            raise ValueError("GSC property response has an unexpected date key")
+        parsed.append({"date": keys[0], "clicks": int(row.get("clicks", 0)),
+                       "impressions": int(row.get("impressions", 0)), "position": float(row.get("position", 0))})
+    conn.execute("SAVEPOINT gsc_property_window")
+    try:
+        conn.execute("DELETE FROM gsc_property_daily WHERE site_id=? AND search_type='web' AND date BETWEEN ? AND ?",
+                     (site.site_id, start.isoformat(), end.isoformat()))
+        for row in parsed:
+            upsert(conn, "gsc_property_daily", {
+                "site_id": site.site_id, "date": row["date"], "search_type": "web", "property": property_url,
+                "clicks": row["clicks"], "impressions": row["impressions"], "position": row["position"],
+                "sync_run_id": run_id, "observed_at": utcnow(),
+            }, ["site_id", "date", "search_type"])
+        conn.execute("RELEASE SAVEPOINT gsc_property_window")
+    except Exception:
+        conn.execute("ROLLBACK TO SAVEPOINT gsc_property_window")
+        conn.execute("RELEASE SAVEPOINT gsc_property_window")
+        raise
+    conn.commit()
+    return len(parsed)
+
+
 def store_rows(conn: sqlite3.Connection, site: SiteConfig, rows, dimensions: list[str], run_id: str) -> int:
     n = 0
     idx = {d: i for i, d in enumerate(dimensions)}
@@ -107,11 +136,15 @@ def sync_gsc(conn: sqlite3.Connection, site: SiteConfig, start: date, end: date,
         if "date" not in dims:
             dims = ["date"] + dims
         n = store_rows(conn, site, client.query(prop, start, end, dims, row_limit=site.gsc.row_limit), dims, run_id)
+        property_rows = list(client.query(prop, start, end, ["date"],
+                                          row_limit=site.gsc.row_limit, aggregation_type="byProperty"))
+        property_days = store_property_rows(conn, site, property_rows, prop, start, end, run_id)
         agg = aggregate(conn, site)
         conn.execute("UPDATE sync_runs SET finished_at=?, status='completed', rows_written=?, notes=? WHERE run_id=?",
-                     (utcnow(), n, j({"property": prop, "permission": perm, **agg}), run_id))
+                     (utcnow(), n + property_days, j({"property": prop, "permission": perm, "property_days": property_days, **agg}), run_id))
         conn.commit()
-        return {"run_id": run_id, "property": prop, "permission": perm, "rows": n, **agg}
+        return {"run_id": run_id, "property": prop, "permission": perm, "rows": n,
+                "property_days": property_days, **agg}
     except Exception as e:
         conn.execute("UPDATE sync_runs SET finished_at=?, status='failed', notes=? WHERE run_id=?", (utcnow(), str(e)[:500], run_id))
         conn.commit()

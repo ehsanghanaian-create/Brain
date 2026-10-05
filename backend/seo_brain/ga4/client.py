@@ -60,6 +60,45 @@ class Ga4Client:
     def run_report(self, property_id: str, body: dict) -> dict:
         return self._execute(self.svc.properties().runReport(property=f"properties/{property_id}", body=body), "runReport") or {}
 
+    def site_daily(self, property_id: str, start: date, end: date, by_channel: bool = False,
+                   row_limit: int = MAX_ROWS_PER_REQUEST) -> Iterator[dict[str, Any]]:
+        """Fetch date totals without a page dimension; optional channel rows are a separate grain."""
+        metric = "keyEvents"
+        dimensions = [{"name": "date"}]
+        if by_channel:
+            dimensions.append({"name": "sessionDefaultChannelGroup"})
+        offset = 0
+        page = 0
+        while True:
+            body = {"dateRanges": [{"startDate": start.isoformat(), "endDate": end.isoformat()}],
+                    "dimensions": dimensions,
+                    "metrics": [{"name": m} for m in ("sessions", "totalUsers", metric)],
+                    "limit": min(row_limit, MAX_ROWS_PER_REQUEST), "offset": offset}
+            try:
+                data = self.run_report(property_id, body)
+            except Exception as e:  # older properties may still expose conversions
+                if metric == "keyEvents" and "keyEvents" in str(e):
+                    metric = "conversions"
+                    continue
+                raise
+            if self.save_raw:
+                grain = "channel" if by_channel else "site"
+                (self.raw_dir / f"rr_{start.isoformat()}_{end.isoformat()}_{grain}_p{page}.json").write_text(
+                    json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            rows = data.get("rows", [])
+            for row in rows:
+                dims = [v.get("value", "") for v in row.get("dimensionValues", [])]
+                vals = [v.get("value", "0") for v in row.get("metricValues", [])]
+                day = dims[0]
+                yield {"date": f"{day[:4]}-{day[4:6]}-{day[6:8]}" if len(day) == 8 else day,
+                       "channel": dims[1] if by_channel else "", "sessions": int(float(vals[0] or 0)),
+                       "total_users": int(float(vals[1] or 0)), "conversions": float(vals[2] or 0)}
+            offset += len(rows)
+            page += 1
+            if not rows or offset >= int(data.get("rowCount") or 0):
+                break
+            time.sleep(0.5)
+
     # ------------------------------------------------------------------ daily rows (date x path), paginated
     def daily(self, property_id: str, start: date, end: date, dimension: str = "pagePath", row_limit: int = MAX_ROWS_PER_REQUEST) -> Iterator[dict[str, Any]]:
         """Yield {date, path, sessions, total_users, screen_page_views, engagement_rate, average_session_duration, conversions}."""

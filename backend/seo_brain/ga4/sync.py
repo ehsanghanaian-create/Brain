@@ -18,6 +18,33 @@ from ..database.db import ensure_site, j, upsert, utcnow
 log = logging.getLogger("ga4.sync")
 
 
+def store_site_rows(conn: sqlite3.Connection, site: SiteConfig, rows: list[dict], property_id: str,
+                    start: date, end: date, run_id: str, by_channel: bool = False) -> int:
+    """Replace one fully fetched site/channel window, keeping the grains separate."""
+    for row in rows:
+        if not (start.isoformat() <= row["date"] <= end.isoformat()):
+            raise ValueError("GA4 site response has an unexpected date")
+        if by_channel and not row["channel"]:
+            raise ValueError("GA4 channel response is missing its channel")
+    conn.execute("SAVEPOINT ga4_site_window")
+    try:
+        conn.execute(f"DELETE FROM ga4_site_daily WHERE site_id=? AND date BETWEEN ? AND ? AND channel {'!=' if by_channel else '='} ''",
+                     (site.site_id, start.isoformat(), end.isoformat()))
+        for row in rows:
+            upsert(conn, "ga4_site_daily", {
+                "site_id": site.site_id, "date": row["date"], "channel": row["channel"],
+                "property_id": property_id, "sessions": row["sessions"], "total_users": row["total_users"],
+                "conversions": row["conversions"], "sync_run_id": run_id, "observed_at": utcnow(),
+            }, ["site_id", "date", "channel"])
+        conn.execute("RELEASE SAVEPOINT ga4_site_window")
+    except Exception:
+        conn.execute("ROLLBACK TO SAVEPOINT ga4_site_window")
+        conn.execute("RELEASE SAVEPOINT ga4_site_window")
+        raise
+    conn.commit()
+    return len(rows)
+
+
 def store_rows(conn: sqlite3.Connection, site: SiteConfig, rows, source: str, run_id: str) -> int:
     grouped: dict[tuple[str, str], dict] = {}
     for r in rows:
@@ -81,11 +108,18 @@ def sync_ga4(conn: sqlite3.Connection, site: SiteConfig, start: date, end: date,
         client = Ga4Client(site.site_id, interactive=interactive)
         n_page = store_rows(conn, site, client.daily(pid, start, end, dimension="pagePath"), "page", run_id)
         n_land = store_rows(conn, site, client.daily(pid, start, end, dimension="landingPage"), "landing", run_id)
+        n_site = store_site_rows(conn, site, list(client.site_daily(pid, start, end)), pid, start, end, run_id)
+        n_channel = store_site_rows(conn, site, list(client.site_daily(pid, start, end, by_channel=True)),
+                                    pid, start, end, run_id, by_channel=True)
         stats = _stats(conn, site.site_id)
         conn.execute("UPDATE sync_runs SET finished_at=?, status='completed', rows_written=?, notes=? WHERE run_id=?",
-                     (utcnow(), n_page + n_land, j({"property": pid, "page_rows": n_page, "landing_rows": n_land, **stats}), run_id))
+                     (utcnow(), n_page + n_land + n_site + n_channel,
+                      j({"property": pid, "page_rows": n_page, "landing_rows": n_land,
+                         "site_days": n_site, "channel_rows": n_channel, **stats}), run_id))
         conn.commit()
-        return {"run_id": run_id, "property": pid, "rows": n_page + n_land, "page_rows": n_page, "landing_rows": n_land, **stats}
+        return {"run_id": run_id, "property": pid, "rows": n_page + n_land + n_site + n_channel,
+                "page_rows": n_page, "landing_rows": n_land, "site_days": n_site,
+                "channel_rows": n_channel, **stats}
     except Exception as e:
         conn.execute("UPDATE sync_runs SET finished_at=?, status='failed', notes=? WHERE run_id=?", (utcnow(), str(e)[:500], run_id))
         conn.commit()
@@ -95,5 +129,12 @@ def sync_ga4(conn: sqlite3.Connection, site: SiteConfig, start: date, end: date,
 def _stats(conn: sqlite3.Connection, sid: str) -> dict:
     r = conn.execute("SELECT MIN(date), MAX(date), COUNT(DISTINCT page_path), SUM(sessions), SUM(total_users), SUM(conversions) "
                      "FROM ga4_daily WHERE site_id=? AND source='page'", (sid,)).fetchone()
+    site = conn.execute("SELECT MIN(date), MAX(date), COUNT(*), SUM(sessions), SUM(conversions) "
+                        "FROM ga4_site_daily WHERE site_id=? AND channel=''", (sid,)).fetchone()
+    if site[2]:
+        return {"date_from": site[0], "date_to": site[1], "pages": int(r[2] or 0),
+                "sessions": int(site[3] or 0), "users": None,
+                "conversions": round(float(site[4] or 0), 1), "metric_source": "ga4_site_daily"}
     return {"date_from": r[0], "date_to": r[1], "pages": int(r[2] or 0), "sessions": int(r[3] or 0),
-            "users": int(r[4] or 0), "conversions": round(float(r[5] or 0), 1)}
+            "users": int(r[4] or 0), "conversions": round(float(r[5] or 0), 1),
+            "metric_source": "ga4_daily_page_rows"}

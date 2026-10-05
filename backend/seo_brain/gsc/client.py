@@ -211,17 +211,20 @@ class GscClient:
 
     # -- search analytics -----------------------------------------------------------
     def query(self, site_url: str, start: date, end: date, dimensions: list[str], row_limit: int = MAX_ROWS_PER_REQUEST,
-              search_type: str = "web", data_state: str = "final") -> Iterator[dict]:
+              search_type: str = "web", data_state: str = "final", aggregation_type: str | None = None) -> Iterator[dict]:
         start_row = 0
         page = 0
         while True:
             body = {"startDate": start.isoformat(), "endDate": end.isoformat(), "dimensions": dimensions,
                     "rowLimit": min(row_limit, MAX_ROWS_PER_REQUEST), "startRow": start_row, "type": search_type,
                     "dataState": data_state}
+            if aggregation_type:
+                body["aggregationType"] = aggregation_type
             data = self._execute(self.svc.searchanalytics().query(siteUrl=site_url, body=body), "searchanalytics.query") or {}
             rows = data.get("rows", [])
             if self.save_raw:
-                fn = self.raw_dir / f"sa_{start.isoformat()}_{end.isoformat()}_{'-'.join(dimensions)}_p{page}.json"
+                grain = aggregation_type or "auto"
+                fn = self.raw_dir / f"sa_{start.isoformat()}_{end.isoformat()}_{'-'.join(dimensions)}_{grain}_p{page}.json"
                 fn.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
             for r in rows:
                 yield r

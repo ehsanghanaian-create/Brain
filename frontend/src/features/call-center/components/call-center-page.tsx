@@ -34,12 +34,18 @@ import {
   callCenterApi,
   sourceLabel,
   statusLabel,
+  outcomeLabel,
+  confidenceLabel,
   type CallAnalytics,
+  type CallImportResult,
+  type CallWorkbookResult,
+  type CallOutcome,
   type CallRecord,
   type CallSource,
   type CallStatus,
   type PanelUser,
-  type SourceBasis
+  type SourceBasis,
+  type SourceConfidence
 } from '../api';
 
 const number = new Intl.NumberFormat('fa-IR');
@@ -68,6 +74,8 @@ const empty: CallAnalytics = {
   by_model: [],
   by_region: [],
   by_status: { new: 0, follow_up: 0, resolved: 0, cancelled: 0, unreviewed: 0 },
+  by_outcome: { pending: 0, qualified: 0, unqualified: 0, order: 0, lost: 0 },
+  by_source_outcome: Object.fromEntries(channels.map((key) => [key, { total: 0, qualified: 0, orders: 0, order_value: 0, unknown_confidence: 0 }])) as CallAnalytics['by_source_outcome'],
   warranty: 0,
   daily: [],
   days: 30,
@@ -89,6 +97,10 @@ type Draft = {
   source_note: string;
   campaign: string;
   status: CallStatus;
+  outcome: CallOutcome;
+  order_value: string;
+  follow_up_at: string;
+  source_confidence: SourceConfidence;
   operator_id: string;
   site_id: string;
 };
@@ -106,6 +118,10 @@ const blank: Draft = {
   source_note: '',
   campaign: '',
   status: 'new',
+  outcome: 'pending',
+  order_value: '',
+  follow_up_at: '',
+  source_confidence: 'unknown',
   operator_id: '',
   site_id: ''
 };
@@ -184,6 +200,14 @@ export function CallCenterPage() {
   const [draft, setDraft] = useState<Draft>(blank);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importMapping, setImportMapping] = useState<Record<string, string>>({});
+  const [importPreview, setImportPreview] = useState<CallImportResult | null>(null);
+  const [workbookPreview, setWorkbookPreview] = useState<CallWorkbookResult | null>(null);
+  const [importPreviewReady, setImportPreviewReady] = useState(false);
+  const [importing, setImporting] = useState(false);
+  useEffect(() => { setImportPreviewReady(false); }, [siteId]);
   const reduced = useReducedMotion();
 
   const load = useCallback(
@@ -293,6 +317,8 @@ export function CallCenterPage() {
       const values = {
         ...draft,
         occurred_at: draft.occurred_at ? new Date(draft.occurred_at).toISOString() : null,
+        follow_up_at: draft.follow_up_at ? new Date(draft.follow_up_at).toISOString() : null,
+        order_value: draft.outcome === 'order' && draft.order_value ? Number(draft.order_value) : null,
         operator_id: draft.operator_id ? Number(draft.operator_id) : null,
         site_id: draft.site_id || null
       };
@@ -350,6 +376,10 @@ export function CallCenterPage() {
         'توضیح منبع',
         'کمپین',
         'وضعیت',
+        'نتیجه',
+        'ارزش سفارش',
+        'زمان پیگیری',
+        'اطمینان منبع',
         'اپراتور',
         'سایت'
       ];
@@ -367,6 +397,10 @@ export function CallCenterPage() {
         row.source_note,
         row.campaign,
         statusLabel[row.status],
+        outcomeLabel[row.outcome],
+        row.order_value,
+        row.follow_up_at,
+        confidenceLabel[row.source_confidence],
         row.operator_name,
         row.site_id
       ]);
@@ -383,6 +417,39 @@ export function CallCenterPage() {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setExporting(false);
+    }
+  }
+
+  async function runImport(dryRun: boolean) {
+    if (!importFile || importing) return;
+    setImporting(true);
+    try {
+      if (importFile.name.toLowerCase().endsWith('.xlsx')) {
+        const result = await callCenterApi.importWorkbook(importFile, dryRun, siteId || undefined);
+        setWorkbookPreview(result);
+        if (dryRun) {
+          setImportPreviewReady(true);
+          toast.info(`پیش‌نمایش ${number.format(result.rows_valid)} تماس آماده شد`);
+        } else {
+          toast.success(`${number.format(result.rows_imported)} تماس وارد شد؛ ${number.format(result.rows_skipped)} تکراری بود`);
+          await load();
+        }
+        return;
+      }
+      const result = await callCenterApi.importCalls(importFile, importMapping, dryRun, siteId || undefined);
+      setImportPreview(result);
+      if (dryRun) {
+        setImportPreviewReady(true);
+        setImportMapping(Object.fromEntries(Object.entries(result.mapping).filter(([, value]) => value)) as Record<string, string>);
+        toast.info(`پیش‌نمایش ${number.format(result.rows_valid)} ردیف معتبر آماده شد`);
+      } else {
+        toast.success(`${number.format(result.rows_imported)} تماس وارد شد؛ ${number.format(result.rows_skipped)} تکراری بود`);
+        await load();
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
     }
   }
   function beginEdit(row: CallRecord) {
@@ -405,6 +472,10 @@ export function CallCenterPage() {
       source_note: row.source_note,
       campaign: row.campaign,
       status: row.status,
+      outcome: row.outcome,
+      order_value: row.order_value?.toString() || '',
+      follow_up_at: row.follow_up_at ? new Date(row.follow_up_at).toLocaleString('sv-SE', { timeZone: 'Asia/Tehran' }).replace(' ', 'T').slice(0, 16) : '',
+      source_confidence: row.source_confidence,
       operator_id: row.operator_id ? String(row.operator_id) : '',
       site_id: row.site_id || ''
     });
@@ -540,7 +611,27 @@ export function CallCenterPage() {
         <Button variant='outline' onClick={exportCsv} disabled={exporting}>
           {exporting ? 'در حال خروجی…' : 'خروجی CSV'}
         </Button>
+        <Button variant='outline' onClick={() => setImportOpen((value) => !value)} aria-expanded={importOpen}>ورود فایل تماس‌ها</Button>
       </div>
+
+      {importOpen && <Card className='border-border/70'><CardHeader><CardTitle className='text-base'>ورود دادهٔ تماس‌ها</CardTitle><CardDescription>فایل XLSX شیت کال‌سنتر یا CSV را انتخاب کنید و پیش از ثبت، ردیف‌ها را بررسی کنید. منبع نامشخص خودکار به سئو یا ادز نسبت داده نمی‌شود.</CardDescription></CardHeader><CardContent className='space-y-4'>
+        <div className='flex flex-wrap items-center gap-2'><Input type='file' accept='.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' aria-label='فایل CSV یا XLSX تماس‌ها' className='max-w-sm' onChange={(event) => { setImportFile(event.target.files?.[0] ?? null); setImportMapping({}); setImportPreview(null); setWorkbookPreview(null); setImportPreviewReady(false); }} /><Button onClick={() => runImport(true)} disabled={!importFile || importing}>{importing ? 'در حال بررسی…' : 'پیش‌نمایش و اعتبارسنجی'}</Button></div>
+        {workbookPreview && <div className='space-y-3'>
+          <p className='text-sm'>این فایل {number.format(workbookPreview.rows_valid)} تماس دارد. منبع همهٔ تماس‌ها «نامشخص» ثبت می‌شود؛ فایل ستونی برای تشخیص سئو یا ادز ندارد.</p>
+          <div className='overflow-x-auto'><table className='w-full min-w-[690px] text-right text-xs'><thead><tr className='border-b text-muted-foreground'><th className='py-2'>تب</th><th>تماس معتبر</th><th>تکراری</th><th>ردیف تغییرکرده</th><th>بدون تاریخ</th><th>شماره کوتاه</th><th>کنسل‌شده</th></tr></thead><tbody>{Object.entries(workbookPreview.sheets).map(([name, count]) => <tr key={name} className='border-b last:border-0'><td className='py-2 font-medium'>{name}</td><td>{number.format(count.valid)}</td><td>{number.format(count.skipped_existing)}</td><td>{number.format(count.changed_rows)}</td><td>{number.format(count.missing_date)}</td><td>{number.format(count.short_phone)}</td><td>{number.format(count.cancelled)}</td></tr>)}</tbody></table></div>
+          {workbookPreview.rows_changed > 0 && <p role='alert' className='rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs'>محتوای {number.format(workbookPreview.rows_changed)} ردیف نسبت به ورود قبلی تغییر کرده است. برای جلوگیری از بازنویسی اصلاحات اپراتور، این ردیف‌ها خودکار به‌روزرسانی نمی‌شوند.</p>}
+          <Button onClick={() => runImport(false)} disabled={!importPreviewReady || !workbookPreview.dry_run || workbookPreview.rows_valid <= workbookPreview.rows_skipped + workbookPreview.rows_changed || importing}>ثبت {number.format(Math.max(0, workbookPreview.rows_valid - workbookPreview.rows_skipped - workbookPreview.rows_changed))} تماس جدید</Button>
+        </div>}
+        {importPreview && <>
+          <div className='flex flex-wrap gap-2 text-xs'><Badge variant='secondary'>{number.format(importPreview.rows_total)} ردیف</Badge><Badge variant='outline'>{number.format(importPreview.rows_valid)} معتبر</Badge><Badge variant='outline'>{number.format(importPreview.rows_skipped)} تکراری</Badge><Badge variant={importPreview.errors_count ? 'destructive' : 'outline'}>{number.format(importPreview.errors_count)} خطا</Badge></div>
+          <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-4'>{([['phone', 'شماره تماس'], ['customer_name', 'نام مشتری'], ['occurred_at', 'زمان تماس'], ['source', 'منبع تماس'], ['site_id', 'سایت'], ['region', 'منطقه'], ['brand', 'برند'], ['model', 'مدل'], ['issue', 'مشکل'], ['outcome', 'نتیجه'], ['order_value', 'ارزش سفارش'], ['status', 'وضعیت']] as const).map(([field, label]) => <label key={field} className='text-xs'><span className='mb-1 block text-muted-foreground'>{label}</span><NativeSelect value={importMapping[field] ?? ''} onChange={(event) => { setImportMapping((current) => { const next = { ...current }; if (event.target.value) next[field] = event.target.value; else delete next[field]; return next; }); setImportPreviewReady(false); }} aria-label={`ستون ${label}`}><NativeSelectOption value=''>نگاشت نشده</NativeSelectOption>{importPreview.columns.map((column) => <NativeSelectOption key={column} value={column}>{column}</NativeSelectOption>)}</NativeSelect></label>)}</div>
+          <div className='overflow-x-auto'><table className='w-full min-w-[520px] text-right text-xs'><thead><tr className='border-b text-muted-foreground'><th className='py-2'>نام</th><th>تلفن</th><th>منبع</th><th>منطقه</th><th>نتیجه</th></tr></thead><tbody>{importPreview.preview.map((row, index) => <tr key={index} className='border-b last:border-0'><td className='py-2'>{row.customer_name || '—'}</td><td dir='ltr'>{row.phone || '—'}</td><td>{sourceLabel[row.source]}</td><td>{row.region || '—'}</td><td>{outcomeLabel[row.outcome]}</td></tr>)}</tbody></table></div>
+          {importPreview.errors.length > 0 && <div role='alert' className='rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-xs'><strong>خطاهای نمونه:</strong>{importPreview.errors.slice(0, 5).map((item) => <p key={item.row}>ردیف {number.format(item.row)}: {item.error}</p>)}</div>}
+          {!importPreviewReady && <p className='text-amber-700 text-xs'>نگاشت تغییر کرده است؛ پیش‌نمایش را دوباره اجرا کنید.</p>}
+          <Button onClick={() => runImport(false)} disabled={!importPreviewReady || !importPreview.dry_run || importPreview.rows_valid <= importPreview.rows_skipped || importing}>ثبت {number.format(Math.max(0, importPreview.rows_valid - importPreview.rows_skipped))} ردیف معتبر</Button>
+        </>}
+        <p className='text-muted-foreground text-xs'>CSV: حداکثر ۱۰۰۰ ردیف و ۲ مگابایت، تاریخ میلادی ISO. XLSX شیت معرفی‌شده: حداکثر ۵ مگابایت، تب‌های گارانتی و غیر گارانتی. ردیف‌های تکراری دوباره ثبت نمی‌شوند.</p>
+      </CardContent></Card>}
 
       {error && (
         <div
@@ -597,6 +688,26 @@ export function CallCenterPage() {
             setPage(0);
           }}
         />
+      </div>
+
+      <div className='grid gap-3 lg:grid-cols-2'>
+        {(['seo', 'ads'] as const).map((channel) => {
+          const flow = analytics.by_source_outcome[channel];
+          return <Card key={channel}><CardHeader><CardTitle className='text-base'>قیف تماس {sourceLabel[channel]}</CardTitle>
+            <CardDescription>تماس واقعی ← سرنخ واجدکیفیت ← سفارش؛ بر اساس نتیجهٔ ثبت‌شده توسط اپراتور.</CardDescription></CardHeader>
+            <CardContent className='space-y-3'>
+              {([['تماس', flow.total], ['واجدکیفیت', flow.qualified], ['سفارش', flow.orders]] as const).map(([label, value]) =>
+                <div key={label} className='space-y-1'><div className='flex justify-between text-xs'><span>{label}</span><strong>{number.format(value)}</strong></div>
+                  <div className='h-2 overflow-hidden rounded-full bg-muted'><motion.div initial={false}
+                    animate={{ width: `${flow.total ? Math.max(2, value / flow.total * 100) : 0}%` }}
+                    transition={reduced ? { duration: 0 } : { duration: 0.7 }}
+                    className='h-full rounded-full' style={{ backgroundColor: colors[channel] }} /></div></div>)}
+              <div className='text-muted-foreground flex justify-between border-t pt-2 text-xs'>
+                <span>ارزش سفارش‌های ثبت‌شده: {number.format(flow.order_value)}</span>
+                <span>اطمینان نامشخص: {number.format(flow.unknown_confidence)}</span>
+              </div>
+            </CardContent></Card>;
+        })}
       </div>
 
       {siteId && (
@@ -1021,6 +1132,28 @@ export function CallCenterPage() {
                     </NativeSelectOption>
                   ))}
                 </NativeSelect>
+              </label>
+              <label htmlFor='call-outcome' className='space-y-1 text-xs'>
+                نتیجهٔ کسب‌وکار
+                <NativeSelect id='call-outcome' value={draft.outcome} onChange={(e) => field('outcome', e.target.value)}>
+                  {Object.entries(outcomeLabel).map(([key, label]) => <NativeSelectOption key={key} value={key}>{label}</NativeSelectOption>)}
+                </NativeSelect>
+              </label>
+              <label htmlFor='call-confidence' className='space-y-1 text-xs'>
+                اطمینان به منبع
+                <NativeSelect id='call-confidence' value={draft.source_confidence} onChange={(e) => field('source_confidence', e.target.value)}>
+                  {Object.entries(confidenceLabel).map(([key, label]) => <NativeSelectOption key={key} value={key}>{label}</NativeSelectOption>)}
+                </NativeSelect>
+              </label>
+              <label htmlFor='call-order-value' className='space-y-1 text-xs'>
+                ارزش سفارش
+                <Input id='call-order-value' type='number' min='0' value={draft.order_value}
+                  onChange={(e) => field('order_value', e.target.value)} disabled={draft.outcome !== 'order'} />
+              </label>
+              <label htmlFor='call-follow-up' className='space-y-1 text-xs'>
+                زمان پیگیری بعدی
+                <Input id='call-follow-up' type='datetime-local' value={draft.follow_up_at}
+                  onChange={(e) => field('follow_up_at', e.target.value)} dir='ltr' />
               </label>
               <label className='flex items-center gap-2 self-end pb-2 text-sm'>
                 <input

@@ -152,9 +152,10 @@ def create_app() -> FastAPI:
     deps = [Depends(require_token)]
     app.include_router(health.router, prefix=API_PREFIX)
     from .routers import google as google_router_mod
+    from .routers import work as work_router_mod
     app.include_router(google_router_mod.callback_router, prefix=API_PREFIX)     # Google's browser redirect cannot send X-API-Token; guarded by the state nonce
     app.include_router(tracker.router, prefix=API_PREFIX)   # عمومی — امنیتش با write-key سایت است، نه X-API-Token
-    for r in (portfolio.router, ads_data.router, call_center.router, sites.router, sites.gsc_router, google_router_mod.router, graph.router, memory.router, knowledge.router, site_security.router, site_media.router, network.router, ip_graph.router, ops.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router, reports.router, traffic.router):
+    for r in (portfolio.router, ads_data.router, call_center.router, sites.router, sites.gsc_router, google_router_mod.router, graph.router, memory.router, knowledge.router, site_security.router, site_media.router, network.router, ip_graph.router, ops.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router, reports.router, work_router_mod.router, traffic.router):
         app.include_router(r, prefix=API_PREFIX, dependencies=deps)
 
     # legacy dashboard (v0.1) mounted read-only until UI parity

@@ -85,8 +85,8 @@ export const commandApi = {
     api<{ items: CommandWorkItem[]; next_after_id: number | null }>(`/work/board/${encodeURIComponent(siteId)}?after_id=${afterId}&limit=500`),
   personalBoardPage: (afterId = 0) =>
     api<{ items: CommandWorkItem[]; next_after_id: number | null }>(`/work/board/all?after_id=${afterId}&limit=500`),
-  createdBoardPage: (afterId = 0) =>
-    api<{ items: CommandWorkItem[]; next_after_id: number | null }>(`/work/board/created?after_id=${afterId}&limit=500`),
+  delegatedBoardPage: (afterId = 0) =>
+    api<{ items: CommandWorkItem[]; next_after_id: number | null }>(`/work/board/delegated?after_id=${afterId}&limit=500`),
   archive: (kind: 'completed' | 'deleted', siteId?: string) =>
     api<CommandWorkItem[]>(`/work/archive?kind=${kind}${siteId ? `&site_id=${encodeURIComponent(siteId)}` : ''}`),
   teams: () => api<WorkTeam[]>('/work/teams'),

@@ -69,9 +69,16 @@ const statusTone = (status: WorkStatus) => status === 'blocked' ? 'border-rose-5
 export function WorkCommandCenter() {
   const [data, setData] = useState<CommandOverview | null>(null);
   const [personalItems, setPersonalItems] = useState<CommandWorkItem[]>([]);
-  const [createdItems, setCreatedItems] = useState<CommandWorkItem[]>([]);
+  const [delegatedItems, setDelegatedItems] = useState<CommandWorkItem[]>([]);
+  const [personalLoading, setPersonalLoading] = useState(true);
+  const [delegatedLoading, setDelegatedLoading] = useState(true);
+  const [personalError, setPersonalError] = useState('');
+  const [delegatedError, setDelegatedError] = useState('');
   const [archiveKind, setArchiveKind] = useState<'completed' | 'deleted'>('completed');
   const [archiveItems, setArchiveItems] = useState<CommandWorkItem[]>([]);
+  const [archiveLoadedKind, setArchiveLoadedKind] = useState<'completed' | 'deleted' | null>(null);
+  const [archiveLoading, setArchiveLoading] = useState(false);
+  const [archiveError, setArchiveError] = useState('');
   const [assignedSite, setAssignedSite] = useState('');
   const [assignedOwner, setAssignedOwner] = useState('');
   const [people, setPeople] = useState<WorkPerson[]>([]);
@@ -118,11 +125,18 @@ export function WorkCommandCenter() {
       ]);
       if (currentRequest === requestId.current) {
         setData(overview); setTeams(teamRows); setPeople(personRows); setRole(me.role); setMeId(me.id); setProjects(projectRows); setPortfolio(portfolioRows); setError('');
-        void Promise.all([allBoardPages(commandApi.personalBoardPage), allBoardPages(commandApi.createdBoardPage)])
-          .then(([personal, created]) => { if (currentRequest === requestId.current) { setPersonalItems(personal); setCreatedItems(created); } })
-          .catch(() => { if (currentRequest === requestId.current) { setPersonalItems([]); setCreatedItems([]); } });
+        setPersonalLoading(true); setDelegatedLoading(true);
+        void Promise.allSettled([allBoardPages(commandApi.personalBoardPage), allBoardPages(commandApi.delegatedBoardPage)])
+          .then(([personal, delegated]) => {
+            if (currentRequest !== requestId.current) return;
+            if (personal.status === 'fulfilled') { setPersonalItems(personal.value); setPersonalError(''); }
+            else setPersonalError('بارگیری کارهای در مسئولیت شما انجام نشد. دوباره تلاش کنید.');
+            if (delegated.status === 'fulfilled') { setDelegatedItems(delegated.value); setDelegatedError(''); }
+            else setDelegatedError('بارگیری واگذاری‌های شما انجام نشد. دوباره تلاش کنید.');
+            setPersonalLoading(false); setDelegatedLoading(false);
+          });
       }
-    } catch (cause) { if (currentRequest === requestId.current) setError(cause instanceof Error ? cause.message : 'دریافت داده انجام نشد'); }
+    } catch (cause) { if (currentRequest === requestId.current) { setError(cause instanceof Error ? cause.message : 'دریافت داده انجام نشد'); setPersonalLoading(false); setDelegatedLoading(false); } }
     finally { if (currentRequest === requestId.current) setLoading(false); }
   }, [filters]);
   useEffect(() => { void refresh(); const timer = setInterval(() => void refresh(true), 30000); return () => clearInterval(timer); }, [refresh]);
@@ -131,7 +145,13 @@ export function WorkCommandCenter() {
     return previous.q === q ? previous : { ...previous, q };
   }), 300); return () => clearTimeout(timer); }, [search]);
   useEffect(() => { if (view !== 'archive') return;
-    void commandApi.archive(archiveKind).then(setArchiveItems).catch(() => setArchiveItems([]));
+    let active = true;
+    setArchiveLoading(true); setArchiveError('');
+    void commandApi.archive(archiveKind)
+      .then((rows) => { if (active) { setArchiveItems(rows); setArchiveLoadedKind(archiveKind); setArchiveError(''); } })
+      .catch(() => { if (active) setArchiveError('بارگیری آرشیو انجام نشد. دوباره تلاش کنید.'); })
+      .finally(() => { if (active) setArchiveLoading(false); });
+    return () => { active = false; };
   }, [view, archiveKind, data]);
   useEffect(() => { if (!editing || !form.site_id) return; let active = true;
     void commandApi.milestones(form.site_id)
@@ -161,6 +181,13 @@ export function WorkCommandCenter() {
     (item.owner_id !== null ? item.owner_id === meId : item.created_by_id !== null ? item.created_by_id === meId : canLead(item.site_id));
   const canDelete = (item: CommandWorkItem) => meId !== null && item.created_by_id === meId &&
     (canEdit || Boolean(projectRole(item.site_id)));
+  const selectView = (nextView: View) => {
+    setView(nextView);
+    setFocus('all');
+    if (nextView !== 'command' && nextView !== 'sheet') {
+      setFilters((current) => Object.keys(current).some((key) => key !== 'limit') ? { limit: 500 } : current);
+    }
+  };
   const canManageEditing = editing === 'new' ? canLead(form.site_id) : editing ? canUpdate(editing) : false;
   const canAssignEditing = editing === 'new' ? canLead(form.site_id) : Boolean(editing && editing.owner_id === null && canUpdate(editing));
   const canUpdateEditing = editing !== null && (editing === 'new' ? canManageEditing : canUpdate(editing));
@@ -168,9 +195,12 @@ export function WorkCommandCenter() {
     .toSorted((a, b) => (a.status === 'blocked' ? -1 : b.status === 'blocked' ? 1 : 0) ||
       (isOverdue(a) ? -1 : isOverdue(b) ? 1 : 0) ||
       (a.due_at || '9999').localeCompare(b.due_at || '9999')), [personalItems, meId]);
-  const assignedItems = useMemo(() => createdItems.filter((item) =>
+  const visibleDelegations = useMemo(() => delegatedItems.filter((item) =>
+    item.created_by_id === meId && item.owner_id !== null && item.owner_id !== meId &&
+    !item.deleted_at && !closedStatuses.has(item.status) &&
     (!assignedSite || item.site_id === assignedSite) && (!assignedOwner || item.owner_id?.toString() === assignedOwner)),
-    [createdItems, assignedSite, assignedOwner]);
+    [delegatedItems, meId, assignedSite, assignedOwner]);
+  const visibleArchiveItems = archiveLoadedKind === archiveKind ? archiveItems : [];
 
   function openTask(item: CommandWorkItem | 'new') {
     setShowExecutionDetails(false); setEditing(item); setDraftSubtasks([]); setDraftSubtask('');
@@ -307,7 +337,7 @@ export function WorkCommandCenter() {
       </div>}
 
       <div className='flex flex-nowrap gap-1.5 overflow-x-auto border-b pb-2' role='tablist' aria-label='نماهای میز عملیات'>
-        {views.map((entry) => <Button key={entry.key} size='sm' className='shrink-0' variant={view === entry.key ? 'default' : 'ghost'} role='tab' aria-selected={view === entry.key} onClick={() => setView(entry.key)}>{entry.label}</Button>)}
+        {views.map((entry) => <Button key={entry.key} size='sm' className='shrink-0' variant={view === entry.key ? 'default' : 'ghost'} role='tab' aria-selected={view === entry.key} onClick={() => selectView(entry.key)}>{entry.label}</Button>)}
         {focus !== 'all' && <Button size='sm' variant='outline' onClick={() => setFocus('all')}>حذف تمرکز</Button>}
       </div>
       {view === 'command' && displayCount > data.items.length && <p className='rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs'>از {num.format(displayCount)} کار مطابق فیلتر، {num.format(data.items.length)} کار نخست نمایش داده می‌شود. برای دیدن بقیه، فیلترها را محدودتر کنید.</p>}
@@ -343,24 +373,30 @@ export function WorkCommandCenter() {
 
       {view === 'mine' && <div className='grid gap-4 xl:grid-cols-[1.5fr_1fr]'>
         <Card><CardHeader><CardTitle>تسک‌هایی که به من سپرده شده</CardTitle><CardDescription>فقط تسک‌هایی که مسئولشان شما هستید؛ برنامه‌ریزی و تغییرشان در اختیار شماست.</CardDescription></CardHeader><CardContent className='space-y-2'>
+          {personalLoading && <p className='text-muted-foreground text-xs'>در حال به‌روزرسانی کارهای شما…</p>}
+          {personalError && <p className='text-rose-600 text-xs'>{personalError} <Button size='sm' variant='outline' onClick={() => void refresh(true)}>تلاش دوباره</Button></p>}
           {myItems.map((item) => <div key={item.id} className='rounded-xl border p-3 transition-colors hover:bg-muted/50'><div className='flex items-start justify-between gap-3'><button onClick={() => openTask(item)} className='min-w-0 flex-1 text-right'><strong className='block truncate text-sm'>{item.title}</strong><span className='text-muted-foreground mt-1 block text-xs'>{item.site_name} · واگذارکننده: {item.created_by_name || 'سیستم'} · {dateText(item.due_at)}</span><Badge variant='outline' className='mt-1'>{priorityLabel[item.priority]}</Badge></button><div className='flex flex-col items-end gap-2'><Badge variant='outline' className={statusTone(item.status)}>{isOverdue(item) ? 'عقب‌افتاده' : statusLabel[item.status]}</Badge><Button size='sm' variant='outline' onClick={() => void completeTask(item)}>✓ انجام شد</Button>{canDelete(item) && <Button size='sm' variant='ghost' className='text-rose-600' onClick={() => void deleteTask(item)}>حذف</Button>}</div></div><TaskChecklistPreview item={item} canToggle={canUpdate(item)} onChanged={() => refresh(true)} /></div>)}
-          {!myItems.length && <p className='text-muted-foreground py-10 text-center text-sm'>کار بازی به شما واگذار نشده است. راهبر پروژه می‌تواند از بخش پروژه‌ها شما را عضو و مسئول کار کند.</p>}
+          {!myItems.length && !personalLoading && !personalError && <p className='text-muted-foreground py-10 text-center text-sm'>کار بازی به شما واگذار نشده است. راهبر پروژه می‌تواند از بخش پروژه‌ها شما را عضو و مسئول کار کند.</p>}
         </CardContent></Card>
         <div className='space-y-4'><Card><CardHeader><CardTitle>وضعیت شخصی</CardTitle></CardHeader><CardContent className='grid grid-cols-2 gap-3 text-center text-sm'><div className='rounded-lg bg-muted p-4'><strong className='block text-2xl'>{num.format(myItems.length)}</strong>کار باز</div><div className='rounded-lg bg-rose-500/10 p-4'><strong className='block text-2xl text-rose-600'>{num.format(myItems.filter(isOverdue).length)}</strong>عقب‌افتاده</div><div className='rounded-lg bg-amber-500/10 p-4'><strong className='block text-2xl text-amber-600'>{num.format(myItems.filter((item) => item.status === 'blocked').length)}</strong>مانع‌دار</div><div className='rounded-lg bg-sky-500/10 p-4'><strong className='block text-2xl text-sky-600'>{num.format(myItems.reduce((sum, item) => sum + (item.estimated_hours || 0), 0))}</strong>ساعت برآوردی باز</div></CardContent></Card>
           <Card><CardHeader><CardTitle>پروژه‌های من</CardTitle></CardHeader><CardContent className='space-y-2'>{projects.filter((project) => project.my_responsibility || canEdit).map((project) => <button key={project.site_id} onClick={() => { setFilters((current) => ({ ...current, site_id: project.site_id })); setView('projects'); }} className='flex w-full justify-between rounded-lg border p-3 text-sm hover:bg-muted/50'><span>{project.name}</span><span className='text-muted-foreground'>{canEdit || project.my_responsibility === 'admin' ? 'مدیر' : project.my_responsibility === 'lead' ? 'راهبر' : project.my_responsibility === 'contributor' ? 'مجری' : 'ناظر'}</span></button>)}{!projects.some((project) => project.my_responsibility || canEdit) && <p className='text-muted-foreground text-xs'>عضویت پروژه‌ای ثبت نشده است.</p>}</CardContent></Card>
         </div>
       </div>}
 
-      {view === 'assigned' && <Card><CardHeader><CardTitle>تسک‌هایی که من ساخته‌ام</CardTitle><CardDescription>تا پیش از واگذاری می‌توانید ویرایش کنید. حذف و انتقال به آرشیو فقط در اختیار سازنده است، حتی پس از واگذاری.</CardDescription></CardHeader><CardContent className='space-y-3'>
-        <div className='flex flex-wrap gap-2'><NativeSelect aria-label='فیلتر پروژهٔ واگذاری' value={assignedSite} onChange={(e) => setAssignedSite(e.target.value)} className='min-w-44'><NativeSelectOption value=''>همهٔ پروژه‌ها</NativeSelectOption>{projects.map((project) => <NativeSelectOption key={project.site_id} value={project.site_id}>{project.name}</NativeSelectOption>)}</NativeSelect><NativeSelect aria-label='فیلتر مسئول واگذاری' value={assignedOwner} onChange={(e) => setAssignedOwner(e.target.value)} className='min-w-44'><NativeSelectOption value=''>همهٔ مسئولان</NativeSelectOption>{people.filter((person) => person.active).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect></div>
-        {assignedItems.map((item) => <div key={item.id} className='flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 hover:bg-muted/50'><button onClick={() => openTask(item)} className='min-w-0 flex-1 text-right'><strong className='block text-sm'>{item.title}</strong><span className='text-muted-foreground text-xs'>{item.site_name} · {item.owner_name || 'بی‌مسئول'} · {dateText(item.due_at)}</span></button><span className='flex items-center gap-1'><Badge variant='outline'>{priorityLabel[item.priority]}</Badge><Badge variant='outline'>{statusLabel[item.status]}</Badge>{canDelete(item) && <Button size='sm' variant='ghost' className='text-rose-600' onClick={() => void deleteTask(item)}>حذف</Button>}</span></div>)}
-        {!assignedItems.length && <p className='text-muted-foreground py-8 text-center text-sm'>واگذاری مطابق فیلتر فعلی پیدا نشد.</p>}
+      {view === 'assigned' && <Card><CardHeader><CardTitle>تسک‌هایی که من به دیگران واگذار کرده‌ام</CardTitle><CardDescription>فقط کارهایی که شما ساخته‌اید و اکنون مسئولشان شخص دیگری است؛ کارهای بی‌مسئول و کارهای خودتان اینجا نمایش داده نمی‌شوند.</CardDescription></CardHeader><CardContent className='space-y-3'>
+        <div className='flex flex-wrap gap-2'><NativeSelect aria-label='فیلتر پروژهٔ واگذاری' value={assignedSite} onChange={(e) => setAssignedSite(e.target.value)} className='min-w-44'><NativeSelectOption value=''>همهٔ پروژه‌ها</NativeSelectOption>{projects.map((project) => <NativeSelectOption key={project.site_id} value={project.site_id}>{project.name}</NativeSelectOption>)}</NativeSelect><NativeSelect aria-label='فیلتر مسئول واگذاری' value={assignedOwner} onChange={(e) => setAssignedOwner(e.target.value)} className='min-w-44'><NativeSelectOption value=''>همهٔ مسئولان</NativeSelectOption>{people.filter((person) => person.active && person.id !== meId).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect></div>
+        {delegatedLoading && <p className='text-muted-foreground text-xs'>در حال به‌روزرسانی واگذاری‌ها…</p>}
+        {delegatedError && <p className='text-rose-600 text-xs'>{delegatedError} <Button size='sm' variant='outline' onClick={() => void refresh(true)}>تلاش دوباره</Button></p>}
+        {visibleDelegations.map((item) => <div key={item.id} className='flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 hover:bg-muted/50'><button onClick={() => openTask(item)} className='min-w-0 flex-1 text-right'><strong className='block text-sm'>{item.title}</strong><span className='text-muted-foreground text-xs'>{item.site_name} · مسئول: {item.owner_name || 'نامشخص'} · {dateText(item.due_at)}</span></button><span className='flex items-center gap-1'><Badge variant='outline'>{priorityLabel[item.priority]}</Badge><Badge variant='outline'>{statusLabel[item.status]}</Badge>{canDelete(item) && <Button size='sm' variant='ghost' className='text-rose-600' onClick={() => void deleteTask(item)}>حذف</Button>}</span></div>)}
+        {!visibleDelegations.length && !delegatedLoading && !delegatedError && <p className='text-muted-foreground py-8 text-center text-sm'>واگذاری به شخص دیگر مطابق فیلتر فعلی پیدا نشد.</p>}
       </CardContent></Card>}
 
       {view === 'archive' && <Card><CardHeader><CardTitle>آرشیو کارها</CardTitle><CardDescription>کارهای انجام‌شده و حذف‌شده جدا هستند؛ حذف، داده و تاریخچه را پاک نمی‌کند.</CardDescription></CardHeader><CardContent className='space-y-3'>
         <div className='flex gap-2'><Button size='sm' variant={archiveKind === 'completed' ? 'default' : 'outline'} onClick={() => setArchiveKind('completed')}>انجام‌شده‌ها</Button><Button size='sm' variant={archiveKind === 'deleted' ? 'default' : 'outline'} onClick={() => setArchiveKind('deleted')}>حذف‌شده‌ها</Button></div>
-        {archiveItems.map((item) => <div key={item.id} className='flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3'><span><strong className='block text-sm'>{item.title}</strong><span className='text-muted-foreground text-xs'>{item.site_name} · {item.owner_name || 'بی‌مسئول'} · {dateText(item.deleted_at || item.updated_at)}</span></span><div className='flex gap-2'>{archiveKind === 'completed' && <Button size='sm' variant='outline' onClick={() => openTask(item)}>جزئیات</Button>}{archiveKind === 'completed' && canDelete(item) && <Button size='sm' variant='ghost' className='text-rose-600' onClick={() => void deleteTask(item)}>حذف</Button>}{archiveKind === 'deleted' && canDelete(item) && <Button size='sm' variant='outline' onClick={() => void commandApi.restoreWork(item).then(() => refresh(true)).then(() => toast.success('کار بازیابی شد')).catch((cause) => toast.error(cause instanceof Error ? cause.message : 'بازیابی انجام نشد'))}>بازیابی</Button>}</div></div>)}
-        {!archiveItems.length && <p className='text-muted-foreground py-8 text-center text-sm'>در این بخش کاری نیست.</p>}
+        {archiveLoading && <p className='text-muted-foreground text-xs'>در حال به‌روزرسانی آرشیو…</p>}
+        {archiveError && <p className='text-rose-600 text-xs'>{archiveError} <Button size='sm' variant='outline' onClick={() => void refresh(true)}>تلاش دوباره</Button></p>}
+        {visibleArchiveItems.map((item) => <div key={item.id} className='flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3'><span><strong className='block text-sm'>{item.title}</strong><span className='text-muted-foreground text-xs'>{item.site_name} · {item.owner_name || 'بی‌مسئول'} · {dateText(item.deleted_at || item.updated_at)}</span></span><div className='flex gap-2'>{archiveKind === 'completed' && <Button size='sm' variant='outline' onClick={() => openTask(item)}>جزئیات</Button>}{archiveKind === 'completed' && canDelete(item) && <Button size='sm' variant='ghost' className='text-rose-600' onClick={() => void deleteTask(item)}>حذف</Button>}{archiveKind === 'deleted' && canDelete(item) && <Button size='sm' variant='outline' onClick={() => void commandApi.restoreWork(item).then(() => refresh(true)).then(() => toast.success('کار بازیابی شد')).catch((cause) => toast.error(cause instanceof Error ? cause.message : 'بازیابی انجام نشد'))}>بازیابی</Button>}</div></div>)}
+        {!visibleArchiveItems.length && archiveLoadedKind === archiveKind && !archiveLoading && !archiveError && <p className='text-muted-foreground py-8 text-center text-sm'>در این بخش کاری نیست.</p>}
       </CardContent></Card>}
 
       {view === 'projects' && <ProjectExecution items={data.items} people={people} canEdit={canEdit} preferredSiteId={filters.site_id} onTask={openTask} />}

@@ -434,3 +434,56 @@ def test_task_handoff_notification_archive_and_period_report(client):
     assert report.json()["totals"]["completed"] == 3
     assert report.json()["totals"]["handoffs"] == 3
     assert client.get(f"/api/v1/work/reports?period=month&anchor={anchor}&user_id=3", headers=lead).json()["totals"]["completed"] == 3
+
+
+def test_personal_and_delegated_boards_keep_task_ownership_separate(client):
+    with client.eng.begin() as cx:
+        cx.execute(text("UPDATE panel_users SET username='worker',password_hash=:hash WHERE id=1"),
+                   {"hash": hash_password("worker-password")})
+        cx.execute(text("""INSERT INTO panel_users(username,full_name,email,role,active,password_hash,created_at,updated_at)
+            VALUES ('manager','Manager','manager@example.com','admin',1,:hash,'2026-01-01','2026-01-01')"""),
+            {"hash": hash_password("manager-password")})
+
+    def auth(name):
+        response = client.post("/api/v1/auth/login", json={"username": name, "password": name + "-password"})
+        assert response.status_code == 200, response.text
+        return {"Authorization": "Bearer " + response.json()["token"]}
+
+    manager, worker = auth("manager"), auth("worker")
+    assert client.put("/api/v1/work/projects/demo/members/1", headers=manager,
+                      json={"user_id": 1, "responsibility": "lead"}).status_code == 200
+    base = "/api/v1/sites/demo/work"
+    to_worker = client.post(base, headers=manager, json={"title": "Manager delegated to worker", "owner_id": 1}).json()
+    second_to_worker = client.post(base, headers=manager,
+                                   json={"title": "Second delegation", "owner_id": 1}).json()
+    self_assigned = client.post(base, headers=manager,
+                                json={"title": "Manager self-assigned", "owner_id": 2}).json()
+    unassigned = client.post(base, headers=manager, json={"title": "Manager draft"}).json()
+    to_manager = client.post(base, headers=worker, json={"title": "Worker delegated to manager", "owner_id": 2}).json()
+
+    manager_delegated = client.get("/api/v1/work/board/delegated", headers=manager)
+    assert manager_delegated.status_code == 200, manager_delegated.text
+    assert {row["id"] for row in manager_delegated.json()["items"]} == {to_worker["id"], second_to_worker["id"]}
+    assert {row["id"] for row in client.get("/api/v1/work/board/all", headers=manager).json()["items"]} == {
+        self_assigned["id"], to_manager["id"]}
+    assert {row["id"] for row in client.get("/api/v1/work/board/created", headers=manager).json()["items"]} == {
+        to_worker["id"], second_to_worker["id"], self_assigned["id"], unassigned["id"]}
+    assert {row["id"] for row in client.get("/api/v1/work/board/delegated", headers=worker).json()["items"]} == {
+        to_manager["id"]}
+    assert {row["id"] for row in client.get("/api/v1/work/board/all", headers=worker).json()["items"]} == {
+        to_worker["id"], second_to_worker["id"]}
+
+    first_page = client.get("/api/v1/work/board/delegated?limit=1", headers=manager).json()
+    assert [row["id"] for row in first_page["items"]] == [to_worker["id"]]
+    assert first_page["next_after_id"] == to_worker["id"]
+    second_page = client.get(f"/api/v1/work/board/delegated?limit=1&after_id={to_worker['id']}",
+                             headers=manager).json()
+    assert [row["id"] for row in second_page["items"]] == [second_to_worker["id"]]
+    assert second_page["next_after_id"] is None
+
+    assert client.delete(f"{base}/{to_worker['id']}", headers=manager).status_code == 200
+    assert [row["id"] for row in client.get("/api/v1/work/board/delegated", headers=manager).json()["items"]] == [
+        second_to_worker["id"]]
+    assert client.post(f"{base}/{to_worker['id']}/restore", headers=manager).status_code == 200
+    assert {row["id"] for row in client.get("/api/v1/work/board/delegated", headers=manager).json()["items"]} == {
+        to_worker["id"], second_to_worker["id"]}

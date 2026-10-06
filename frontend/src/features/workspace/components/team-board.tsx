@@ -106,7 +106,11 @@ export function TeamBoard({ items, sites, people, preferredSiteId, meId, canLead
   const [dragged, setDragged] = useState<CommandWorkItem | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
-  useEffect(() => { setLocalItems([]); }, [siteId]);
+  useEffect(() => {
+    setLocalItems([]); setSelectedIds([]); setQuery(''); setOwnerFilter('');
+    setPriorityFilter(''); setLabelFilter(null); setMine(false); setGroupBy('status');
+    setActiveViewId('');
+  }, [siteId]);
   useEffect(() => { if (!siteId) return; let active = true; setBoardLoading(true);
     void (async () => { try { const all: CommandWorkItem[] = []; let cursor = 0;
       do { const page = siteId === 'all' ? await commandApi.personalBoardPage(cursor) : await commandApi.boardPage(siteId, cursor); all.push(...page.items);
@@ -278,10 +282,10 @@ export function TeamBoard({ items, sites, people, preferredSiteId, meId, canLead
       <Button size='sm' variant='outline' onClick={() => setFullscreen((value) => !value)}>{fullscreen ? 'خروج از تمام‌صفحه' : 'تمام‌صفحه'}</Button>
     </div>
     {showFilters && <div className='flex flex-wrap items-center gap-2 rounded-xl border bg-card p-2'>
-      <NativeSelect aria-label='فیلتر مسئول برد' value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)} className='w-36'><NativeSelectOption value=''>همهٔ مسئولان</NativeSelectOption>{people.filter((person) => person.active).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect>
+      {siteId !== 'all' && <NativeSelect aria-label='فیلتر مسئول برد' value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)} className='w-36'><NativeSelectOption value=''>همهٔ مسئولان</NativeSelectOption>{people.filter((person) => person.active).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect>}
       <NativeSelect aria-label='فیلتر اولویت برد' value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)} className='w-28'><NativeSelectOption value=''>همهٔ اولویت‌ها</NativeSelectOption>{(Object.keys(priorityText) as WorkPriority[]).map((key) => <NativeSelectOption key={key} value={key}>{priorityText[key]}</NativeSelectOption>)}</NativeSelect>
       <NativeSelect aria-label='فیلتر برچسب برد' value={labelFilter?.toString() || ''} onChange={(event) => setLabelFilter(event.target.value ? Number(event.target.value) : null)} className='w-36'><NativeSelectOption value=''>همهٔ برچسب‌ها</NativeSelectOption>{labels.map((label) => <NativeSelectOption key={label.id} value={String(label.id)}>{label.name}</NativeSelectOption>)}</NativeSelect>
-      <Button size='sm' variant={mine ? 'default' : 'outline'} onClick={() => setMine((value) => !value)}>فقط کارهای من</Button>
+      {siteId !== 'all' && <Button size='sm' variant={mine ? 'default' : 'outline'} onClick={() => setMine((value) => !value)}>فقط کارهای من</Button>}
     </div>}
     {siteId !== 'all' && <details className='rounded-xl border bg-card p-2'><summary className='cursor-pointer px-2 py-1 text-xs font-medium'>نماهای ذخیره‌شده و تنظیمات پیشرفتهٔ برد</summary><div className='mt-2 flex flex-wrap items-center gap-2'>
       <NativeSelect aria-label='نمای ذخیره‌شده' value={activeViewId} onChange={(event) => { const selected = views.find((view) => view.id === Number(event.target.value)); if (selected) applyView(selected); else setActiveViewId(''); }} className='w-44'><NativeSelectOption value=''>نمای دلخواه</NativeSelectOption>{views.map((view) => <NativeSelectOption key={view.id} value={String(view.id)}>{view.name}</NativeSelectOption>)}</NativeSelect>

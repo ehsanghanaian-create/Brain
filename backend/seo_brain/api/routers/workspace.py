@@ -410,14 +410,14 @@ def personal_board(request: Request, after_id: int = Query(0, ge=0),
             "next_after_id": page[-1]["id"] if len(rows) > limit else None}
 
 
-@router.get("/board/created")
-def created_board(request: Request, after_id: int = Query(0, ge=0),
-                  limit: int = Query(200, ge=1, le=500), eng: Engine = Depends(engine)) -> dict:
+def _creator_board(request: Request, after_id: int, limit: int, eng: Engine,
+                   delegated_only: bool) -> dict:
     actor = getattr(request.state, "panel_user", None)
     if not actor:
         raise HTTPException(401, "sign in to view tasks you created")
+    delegation_clause = "AND w.owner_id IS NOT NULL AND w.owner_id<>:creator" if delegated_only else ""
     with eng.connect() as cx:
-        rows = cx.execute(text("""SELECT w.*,s.name AS site_name,u.full_name AS owner_name,
+        rows = cx.execute(text(f"""SELECT w.*,s.name AS site_name,u.full_name AS owner_name,
             creator.full_name AS created_by_name,t.name AS team_name,t.color AS team_color,
             0 AS checklist_total,0 AS checklist_done FROM work_items w
             JOIN sites s ON s.site_id=w.site_id LEFT JOIN panel_users u ON u.id=w.owner_id
@@ -425,7 +425,7 @@ def created_board(request: Request, after_id: int = Query(0, ge=0),
             LEFT JOIN panel_teams t ON t.id=w.team_id
             WHERE w.created_by_id=:creator AND w.deleted_at IS NULL
             AND w.status NOT IN ('verified','rejected','deferred')
-            AND w.id>:after ORDER BY w.id LIMIT :limit"""),
+            {delegation_clause} AND w.id>:after ORDER BY w.id LIMIT :limit"""),
             {"creator": actor["id"], "after": after_id, "limit": limit + 1}).mappings().all()
         page = rows[:limit]
         checklists = _checklists_for(cx, page)
@@ -434,6 +434,19 @@ def created_board(request: Request, after_id: int = Query(0, ge=0),
                        "checklist_total": len(checklists[row["id"]]),
                        "checklist_done": sum(step["done"] for step in checklists[row["id"]])} for row in page],
             "next_after_id": page[-1]["id"] if len(rows) > limit else None}
+
+
+@router.get("/board/created")
+def created_board(request: Request, after_id: int = Query(0, ge=0),
+                  limit: int = Query(200, ge=1, le=500), eng: Engine = Depends(engine)) -> dict:
+    return _creator_board(request, after_id, limit, eng, delegated_only=False)
+
+
+@router.get("/board/delegated")
+def delegated_board(request: Request, after_id: int = Query(0, ge=0),
+                    limit: int = Query(200, ge=1, le=500), eng: Engine = Depends(engine)) -> dict:
+    """Work authored by the signed-in user and currently assigned to someone else."""
+    return _creator_board(request, after_id, limit, eng, delegated_only=True)
 
 
 @router.get("/board/{site_id}")

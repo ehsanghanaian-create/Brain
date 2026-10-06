@@ -1,6 +1,7 @@
 'use client';
 
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { api } from '@/lib/api/client';
 
 export type DateCalendar = 'jalali' | 'gregorian';
 const DateContext = createContext<{ calendar: DateCalendar; setCalendar: (value: DateCalendar) => void }>({
@@ -11,6 +12,19 @@ export function DatePreferenceProvider({ initialCalendar, children }: {
   initialCalendar: DateCalendar; children: ReactNode;
 }) {
   const [calendar, setCalendar] = useState<DateCalendar>(initialCalendar);
+  return <DateContext.Provider value={{ calendar, setCalendar }}>{children}</DateContext.Provider>;
+}
+
+/** For protected pages outside the dashboard layout, such as live Ads data. */
+export function SessionDatePreferenceProvider({ children }: { children: ReactNode }) {
+  const [calendar, setCalendar] = useState<DateCalendar>('jalali');
+  useEffect(() => {
+    let active = true;
+    void api<{ date_calendar: DateCalendar }>('/auth/me')
+      .then((user) => { if (active) setCalendar(user.date_calendar); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
   return <DateContext.Provider value={{ calendar, setCalendar }}>{children}</DateContext.Provider>;
 }
 

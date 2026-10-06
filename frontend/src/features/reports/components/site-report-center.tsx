@@ -24,16 +24,17 @@ import type {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { toast } from 'sonner';
+import { formatUserDate, useDatePreference, type DateCalendar } from '@/lib/date-preference';
 
 const fa = new Intl.NumberFormat('fa-IR');
 const num = (v: number | null | undefined, d = 0) => (typeof v === 'number' && Number.isFinite(v) ? fa.format(Number(v.toFixed(d))) : '—');
 const pos = (v: number | null | undefined) => (typeof v === 'number' && Number.isFinite(v) ? fa.format(Number(v.toFixed(1))) : '—');
 const pct = (v: number | null | undefined) => (typeof v === 'number' && Number.isFinite(v) ? `${fa.format(Number((v * 100).toFixed(2)))}٪` : '—');
-const time = new Intl.DateTimeFormat('fa-IR', { timeZone: 'Asia/Tehran', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-const ago = (iso: string | null | undefined) => {
+const ago = (iso: string | null | undefined, calendar: DateCalendar) => {
   if (!iso) return 'هنوز اجرا نشده';
-  const t = Date.parse(iso);
-  return Number.isNaN(t) ? 'زمان نامشخص' : time.format(new Date(t));
+  return formatUserDate(iso, calendar, {
+    timeZone: 'Asia/Tehran', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
 };
 
 const RANGES: { value: number; label: string }[] = [
@@ -93,6 +94,7 @@ const SOURCE_FA: Record<string, string> = {
 };
 
 export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; initialSiteId: string }) {
+  const { calendar } = useDatePreference();
   const [siteId, setSiteId] = useState(initialSiteId);
   const [days, setDays] = useState(28);
   const [summary, setSummary] = useState<ReportFull | null>(null);
@@ -164,7 +166,7 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
         </Button>
         {summary && (
           <span className='text-muted-foreground ms-auto text-xs'>
-            آخرین بروزرسانی: {ago(lastUpdate)}{nextAt ? ` · بعدی: ${ago(nextAt)}` : ''}
+            آخرین بروزرسانی: {ago(lastUpdate, calendar)}{nextAt ? ` · بعدی: ${ago(nextAt, calendar)}` : ''}
           </span>
         )}
       </div>
@@ -454,6 +456,7 @@ function MainKeywordCard({ siteId, days, summary, onChanged }: { siteId: string;
 /* ---------------------------------------------------------------- تاریخچه همگام‌سازی */
 
 function SyncHistoryPanel({ history }: { history: import('@/features/reports/types').SyncHistoryRow[] }) {
+  const { calendar } = useDatePreference();
   if (history.length === 0) {
     return <EmptyState title='هنوز همگام‌سازی‌ای اجرا نشده است' description='با اولین Sync (خودکار یا «بروزرسانی الان») تاریخچه اینجا ثبت می‌شود.' />;
   }
@@ -471,7 +474,7 @@ function SyncHistoryPanel({ history }: { history: import('@/features/reports/typ
             <TableBody>
               {history.map((h, i) => (
                 <TableRow key={i}>
-                  <TableCell className='text-xs'>{ago(h.started_at)}</TableCell>
+                  <TableCell className='text-xs'>{ago(h.started_at, calendar)}</TableCell>
                   <TableCell className='text-xs'>{SOURCE_FA[h.source] ?? h.source}</TableCell>
                   <TableCell>
                     <Badge variant='outline' className={
@@ -895,6 +898,7 @@ function BacklinksPanel({ siteId, onChanged }: { siteId: string; onChanged: () =
 const emptyReportage = { article_url: '', target_url: '', anchor_text: '', target_keyword: '', publication_date: '', link_type: 'follow', cost: '', status: 'published', notes: '' };
 
 function ReportagesPanel({ siteId, onChanged }: { siteId: string; onChanged: () => void }) {
+  const { calendar } = useDatePreference();
   const [data, setData] = useState<ReportReportages | null>(null);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ReportageRow | null>(null);
@@ -989,7 +993,7 @@ function ReportagesPanel({ siteId, onChanged }: { siteId: string; onChanged: () 
                     <TableCell>
                       <Badge variant='outline' className={st.cls}>{st.label}</Badge>
                       {r.verified_rel && r.verified_rel !== 'follow' && <div className='text-muted-foreground mt-0.5 text-[10px]' dir='ltr'>{r.verified_rel}</div>}
-                      {r.last_verified_at && <div className='text-muted-foreground mt-0.5 text-[10px]'>بررسی: {ago(r.last_verified_at)}</div>}
+                      {r.last_verified_at && <div className='text-muted-foreground mt-0.5 text-[10px]'>بررسی: {ago(r.last_verified_at, calendar)}</div>}
                     </TableCell>
                     <TableCell className='space-x-1 whitespace-nowrap'>
                       <Button size='sm' variant='outline' disabled={verifying === r.id} onClick={() => verify(r)}>

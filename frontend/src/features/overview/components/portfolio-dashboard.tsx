@@ -17,6 +17,7 @@ import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { LivePortfolioSignals } from './live-portfolio-signals';
 import { WorkPulse } from '@/features/workspace/components/work-pulse';
+import { formatUserDate, useDatePreference, type DateCalendar } from '@/lib/date-preference';
 
 const fa = new Intl.NumberFormat('fa-IR');
 const TYPE_FA: Record<string, string> = {
@@ -33,13 +34,10 @@ const STATE: Record<PortfolioSiteState, { label: string; dot: string; badge: str
   not_started: { label: 'شروع نشده', dot: 'bg-muted-foreground/50', badge: 'border-border bg-muted/70 text-muted-foreground' }
 };
 
-function formatDate(value: string | null | undefined) {
-  if (!value) return 'هنوز اجرا نشده';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'زمان نامشخص';
-  return new Intl.DateTimeFormat('fa-IR', {
+function formatDate(value: string | null | undefined, calendar: DateCalendar) {
+  return value ? formatUserDate(value, calendar, {
     timeZone: 'Asia/Tehran', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-  }).format(date);
+  }) : 'هنوز اجرا نشده';
 }
 
 function domain(url: string) {
@@ -89,6 +87,7 @@ function SetupCoverage({ site }: { site: PortfolioSite }) {
 }
 
 function SiteTable({ sites }: { sites: PortfolioSite[] }) {
+  const { calendar } = useDatePreference();
   if (!sites.length) return <div className='flex min-h-48 flex-col items-center justify-center gap-2 text-center'><IconSearch className='text-muted-foreground size-7' aria-hidden='true' /><p className='font-medium'>سایتی با این فیلتر پیدا نشد</p><p className='text-muted-foreground text-sm'>عبارت جست‌وجو یا وضعیت انتخاب‌شده را تغییر دهید.</p></div>;
   return (
     <>
@@ -99,7 +98,7 @@ function SiteTable({ sites }: { sites: PortfolioSite[] }) {
             <p className='text-muted-foreground mt-2 text-xs leading-5'>{siteStateReason(site)}</p>
             <div className='my-3'><SetupCoverage site={site} /></div>
             <div className='grid grid-cols-3 gap-2 text-center text-xs'><span className='rounded-lg bg-muted/60 p-2'><strong className='block text-sm tabular-nums'>{fa.format(site.counts.content)}</strong><span className='text-muted-foreground'>محتوا</span></span><span className='rounded-lg bg-muted/60 p-2'><strong className='block text-sm tabular-nums'>{fa.format(site.counts.graph_nodes)}</strong><span className='text-muted-foreground'>گره</span></span><span className='rounded-lg bg-muted/60 p-2'><strong className='block text-sm tabular-nums'>{fa.format(site.counts.new_link_suggestions)}</strong><span className='text-muted-foreground'>فرصت</span></span></div>
-            <div className='mt-3 border-t pt-2 text-[11px]'><div className='flex items-center justify-between'><span className='text-muted-foreground'>اقدام بعدی</span><span className='font-medium'>{siteNextAction(site)}</span></div><div className='text-muted-foreground mt-1 flex items-center justify-between'><span>آخرین اجرا</span><span>{formatDate(site.latest_sync?.finished_at ?? site.latest_sync?.started_at)}</span></div></div>
+            <div className='mt-3 border-t pt-2 text-[11px]'><div className='flex items-center justify-between'><span className='text-muted-foreground'>اقدام بعدی</span><span className='font-medium'>{siteNextAction(site)}</span></div><div className='text-muted-foreground mt-1 flex items-center justify-between'><span>آخرین اجرا</span><span>{formatDate(site.latest_sync?.finished_at ?? site.latest_sync?.started_at, calendar)}</span></div></div>
           </Link>
         ))}
       </div>
@@ -113,7 +112,7 @@ function SiteTable({ sites }: { sites: PortfolioSite[] }) {
             <td className='px-3 py-3.5'><span className='font-semibold tabular-nums'>{fa.format(site.counts.content)}</span><span className='text-muted-foreground'> / {fa.format(site.counts.crawled)}</span></td>
             <td className='px-3 py-3.5'><span className='font-semibold tabular-nums'>{fa.format(site.counts.graph_nodes)}</span><span className='text-muted-foreground text-xs'> گره</span></td>
             <td className='px-3 py-3.5'><span className={cn('font-semibold tabular-nums', site.counts.high_link_suggestions > 0 && 'text-amber-600 dark:text-amber-400')}>{fa.format(site.counts.new_link_suggestions)}</span>{site.counts.high_link_suggestions > 0 && <span className='text-muted-foreground block text-[11px]'>{fa.format(site.counts.high_link_suggestions)} اولویت بالا</span>}</td>
-            <td className='text-muted-foreground px-3 py-3.5 text-xs'>{formatDate(site.latest_sync?.finished_at ?? site.latest_sync?.started_at)}</td>
+            <td className='text-muted-foreground px-3 py-3.5 text-xs'>{formatDate(site.latest_sync?.finished_at ?? site.latest_sync?.started_at, calendar)}</td>
             <td className='px-1 py-3.5'><Link href={`/dashboard/sites/${site.site_id}`} aria-label={`مشاهده ${site.name}`} className={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}><IconArrowLeft aria-hidden='true' /></Link></td>
           </tr>
         ))}</tbody>
@@ -162,6 +161,7 @@ function DataAndWorkCoverage({ sites, totals }: { sites: PortfolioSite[]; totals
 }
 
 export function PortfolioDashboard({ data, health }: { data: PortfolioOverview; health: Health | null }) {
+  const { calendar } = useDatePreference();
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'all' | PortfolioSiteState>('all');
@@ -197,7 +197,7 @@ export function PortfolioDashboard({ data, health }: { data: PortfolioOverview; 
     <div className='flex flex-col gap-5'>
       <section className='relative overflow-hidden rounded-2xl border border-[#1abb9c]/20 bg-gradient-to-l from-[#1abb9c]/[0.12] via-background to-[#066fd1]/[0.05] p-4 shadow-sm sm:p-5'>
         <div className='absolute -top-16 -left-10 size-44 rounded-full bg-[#1abb9c]/15 blur-3xl' aria-hidden='true' />
-        <div className='relative flex flex-col justify-between gap-4 lg:flex-row lg:items-center'><div className='space-y-2'><div className='flex flex-wrap items-center gap-2'><Badge variant='outline' className='border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'><span className='size-1.5 rounded-full bg-emerald-500' /> بک‌اند متصل</Badge><span className='text-muted-foreground text-xs'>به‌روزرسانی {formatDate(data.generated_at)}</span></div><div><h2 className='text-xl font-bold tracking-tight sm:text-2xl'>نمای فرماندهی سبد سایت‌ها</h2><p className='text-muted-foreground mt-1 max-w-2xl text-sm leading-6'>وضعیت داده، گراف دانش و فرصت‌های عملیاتی همه سایت‌ها در یک نگاه؛ از اینجا مشخص است قدم بعدی روی کدام سایت باید انجام شود.</p></div></div><div className='flex flex-wrap items-center gap-2'>{graphCandidates.length > 0 && <Button onClick={rebuildMissingGraphs} disabled={bulkGraphBusy}><IconNetwork className={cn(bulkGraphBusy && 'animate-pulse')} />{bulkGraphBusy ? 'در حال صف‌گذاری…' : `ساخت گراف ${fa.format(graphCandidates.length)} سایت سالم`}</Button>}<Link href='/dashboard/sites' className={buttonVariants({ variant: 'outline' })}><IconWorld /> مدیریت سایت‌ها</Link><Link href='/dashboard/sites/new' className={buttonVariants({ variant: graphCandidates.length ? 'outline' : 'default' })}><IconPlus /> افزودن سایت</Link></div></div>
+        <div className='relative flex flex-col justify-between gap-4 lg:flex-row lg:items-center'><div className='space-y-2'><div className='flex flex-wrap items-center gap-2'><Badge variant='outline' className='border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'><span className='size-1.5 rounded-full bg-emerald-500' /> بک‌اند متصل</Badge><span className='text-muted-foreground text-xs'>به‌روزرسانی {formatDate(data.generated_at, calendar)}</span></div><div><h2 className='text-xl font-bold tracking-tight sm:text-2xl'>نمای فرماندهی سبد سایت‌ها</h2><p className='text-muted-foreground mt-1 max-w-2xl text-sm leading-6'>وضعیت داده، گراف دانش و فرصت‌های عملیاتی همه سایت‌ها در یک نگاه؛ از اینجا مشخص است قدم بعدی روی کدام سایت باید انجام شود.</p></div></div><div className='flex flex-wrap items-center gap-2'>{graphCandidates.length > 0 && <Button onClick={rebuildMissingGraphs} disabled={bulkGraphBusy}><IconNetwork className={cn(bulkGraphBusy && 'animate-pulse')} />{bulkGraphBusy ? 'در حال صف‌گذاری…' : `ساخت گراف ${fa.format(graphCandidates.length)} سایت سالم`}</Button>}<Link href='/dashboard/sites' className={buttonVariants({ variant: 'outline' })}><IconWorld /> مدیریت سایت‌ها</Link><Link href='/dashboard/sites/new' className={buttonVariants({ variant: graphCandidates.length ? 'outline' : 'default' })}><IconPlus /> افزودن سایت</Link></div></div>
         {graphCandidates.length > 0 && <div className='relative mt-4 flex flex-col gap-2 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-3 text-xs sm:flex-row sm:items-center sm:justify-between'><span><strong>{fa.format(graphCandidates.length)} سایت سالم فقط گراف ندارند.</strong> اجرای گروهی از محتوای موجود استفاده می‌کند و سایت‌های خطادار را وارد صف نمی‌کند.</span><span className='text-muted-foreground'>{graphCandidates.map((site) => site.name).join('، ')}</span></div>}
       </section>
 
@@ -227,7 +227,7 @@ export function PortfolioDashboard({ data, health }: { data: PortfolioOverview; 
           {!typeEntries.length && <p className='text-muted-foreground py-16 text-center text-sm'>بعد از ساخت اولین گراف، ترکیب داده اینجا نمایش داده می‌شود.</p>}<Link href='/dashboard/graph' className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'mt-2')}><IconNetwork /> مشاهده گراف کامل <IconArrowLeft /></Link>
         </CardContent></Card>
         <Card className='border-border/70 shadow-sm'><CardHeader><div className='flex items-center justify-between'><div className='flex items-center gap-3'><span className='flex size-9 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600'><IconClock className='size-5' /></span><div><CardTitle className='text-base'>فعالیت‌های اخیر</CardTitle><CardDescription className='mt-1'>آخرین اجرای زنجیره همگام‌سازی</CardDescription></div></div>{health && <span className='text-muted-foreground hidden text-xs sm:block' dir='ltr'>API v{health.version} · {health.database}</span>}</div></CardHeader><CardContent>
-          {data.recent_activity.length ? <ol className='space-y-1'>{data.recent_activity.slice(0, 6).map((activity) => { const ok = activity.status === 'succeeded'; const running = ['queued', 'running'].includes(activity.status); return <li key={activity.run_id}><Link href={`/dashboard/sites/${activity.site_id}`} className='group flex items-center gap-3 rounded-lg p-2.5 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'><span className={cn('flex size-8 shrink-0 items-center justify-center rounded-full', ok ? 'bg-emerald-500/10 text-emerald-600' : running ? 'bg-sky-500/10 text-sky-600' : 'bg-rose-500/10 text-rose-600')}>{ok ? <IconCircleCheck className='size-4' /> : running ? <IconSparkles className='size-4' /> : <IconAlertTriangle className='size-4' />}</span><span className='min-w-0 flex-1'><span className='block truncate text-sm font-semibold'>{activity.site_name}</span><span className='text-muted-foreground block text-xs'>{ok ? 'همگام‌سازی با موفقیت کامل شد' : running ? activity.step_fa || 'پردازش در حال اجراست' : 'اجرا نیازمند بررسی است'}</span></span><span className='text-muted-foreground shrink-0 text-[11px]'>{formatDate(activity.finished_at ?? activity.started_at)}</span></Link></li>; })}</ol> : <div className='flex min-h-52 flex-col items-center justify-center gap-2 text-center'><IconDatabase className='text-muted-foreground size-7' /><p className='font-medium'>هنوز اجرایی ثبت نشده</p><p className='text-muted-foreground text-xs'>با راه‌اندازی یا همگام‌سازی یک سایت، تاریخچه اینجا شکل می‌گیرد.</p></div>}
+          {data.recent_activity.length ? <ol className='space-y-1'>{data.recent_activity.slice(0, 6).map((activity) => { const ok = activity.status === 'succeeded'; const running = ['queued', 'running'].includes(activity.status); return <li key={activity.run_id}><Link href={`/dashboard/sites/${activity.site_id}`} className='group flex items-center gap-3 rounded-lg p-2.5 hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'><span className={cn('flex size-8 shrink-0 items-center justify-center rounded-full', ok ? 'bg-emerald-500/10 text-emerald-600' : running ? 'bg-sky-500/10 text-sky-600' : 'bg-rose-500/10 text-rose-600')}>{ok ? <IconCircleCheck className='size-4' /> : running ? <IconSparkles className='size-4' /> : <IconAlertTriangle className='size-4' />}</span><span className='min-w-0 flex-1'><span className='block truncate text-sm font-semibold'>{activity.site_name}</span><span className='text-muted-foreground block text-xs'>{ok ? 'همگام‌سازی با موفقیت کامل شد' : running ? activity.step_fa || 'پردازش در حال اجراست' : 'اجرا نیازمند بررسی است'}</span></span><span className='text-muted-foreground shrink-0 text-[11px]'>{formatDate(activity.finished_at ?? activity.started_at, calendar)}</span></Link></li>; })}</ol> : <div className='flex min-h-52 flex-col items-center justify-center gap-2 text-center'><IconDatabase className='text-muted-foreground size-7' /><p className='font-medium'>هنوز اجرایی ثبت نشده</p><p className='text-muted-foreground text-xs'>با راه‌اندازی یا همگام‌سازی یک سایت، تاریخچه اینجا شکل می‌گیرد.</p></div>}
         </CardContent></Card>
       </section>
     </div>

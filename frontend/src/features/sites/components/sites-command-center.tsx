@@ -25,6 +25,7 @@ import {
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { DeleteSiteButton } from './delete-site-button';
+import { formatUserDate, useDatePreference, type DateCalendar } from '@/lib/date-preference';
 
 type SiteView = PortfolioSite & { details?: Site };
 type StatusFilter = 'all' | PortfolioSiteState;
@@ -84,17 +85,10 @@ function getDomain(url: string) {
   }
 }
 
-function formatDate(value: string | null | undefined) {
-  if (!value) return 'هنوز اجرایی ثبت نشده';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'زمان نامشخص';
-  return new Intl.DateTimeFormat('fa-IR', {
-    timeZone: 'Asia/Tehran',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(date);
+function formatDate(value: string | null | undefined, calendar: DateCalendar) {
+  return value ? formatUserDate(value, calendar, {
+    timeZone: 'Asia/Tehran', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  }) : 'هنوز اجرایی ثبت نشده';
 }
 
 function readableError(error: string | undefined) {
@@ -192,6 +186,7 @@ function Metric({ label, value, icon: Icon, highlight = false }: {
 }
 
 function SiteCard({ site }: { site: SiteView }) {
+  const { calendar } = useDatePreference();
   const wpState = site.connections.wordpress;
   const latestAt = site.latest_sync?.finished_at ?? site.latest_sync?.started_at;
   const highPriority = site.counts.high_link_suggestions;
@@ -270,7 +265,7 @@ function SiteCard({ site }: { site: SiteView }) {
       <CardFooter className='flex flex-col items-stretch justify-between gap-3 px-5 py-3 sm:flex-row sm:items-center'>
         <span className='text-muted-foreground flex items-center gap-1.5 text-xs'>
           <IconClock className='size-3.5' aria-hidden='true' />
-          آخرین اجرا: {formatDate(latestAt)}
+          آخرین اجرا: {formatDate(latestAt, calendar)}
         </span>
         <div className='flex gap-2'>
           <DeleteSiteButton siteId={site.site_id} siteName={site.name} />

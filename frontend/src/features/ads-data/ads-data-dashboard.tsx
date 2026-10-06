@@ -32,6 +32,7 @@ import { toast } from 'sonner';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createIpBlockController } from './ip-blocking';
 import { AccessBadge, AccessOverview, matchAccess, useAccessStatus } from './access-status';
+import { useDatePreference } from '@/lib/date-preference';
 
 type Summary = {
   generated_at: string;
@@ -256,14 +257,6 @@ type DashboardTab = 'sessions' | 'pages' | 'keywords' | 'logs' | 'ips' | 'overvi
 const EVENT_PAGE_SIZE = 100;
 
 const fa = new Intl.NumberFormat('fa-IR');
-const time = new Intl.DateTimeFormat('fa-IR', {
-  timeZone: 'Asia/Tehran',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit'
-});
 const EVENT_FA: Record<string, string> = {
   landing: 'ورود به سایت',
   page_view: 'مشاهده صفحه',
@@ -507,6 +500,11 @@ function IpBlockToggle({ ip, blocked, busy, ready, onToggle }: { ip: string; blo
 }
 
 export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLabel: string }) {
+  const { calendar } = useDatePreference();
+  const time = useMemo(() => new Intl.DateTimeFormat(calendar === 'jalali' ? 'fa-IR-u-ca-persian' : 'fa-IR-u-ca-gregory', {
+    timeZone: 'Asia/Tehran', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  }), [calendar]);
   const siteQuery = encodeURIComponent(siteId);
   const ipBlockController = useMemo(() => createIpBlockController(siteId, endpoints), [siteId]);
   const ipBlockState = useSyncExternalStore(ipBlockController.subscribe, ipBlockController.getSnapshot, ipBlockController.getSnapshot);
@@ -787,7 +785,7 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
     [ips],
   );
   const verifiedIps = useMemo(() => ips.filter((row) => row.ip_confidence === 'trusted_proxy' || row.ip_confidence === 'direct_peer'), [ips]);
-  const chart = useMemo(() => (summary?.hourly ?? []).map((row) => ({ ...row, label: time.format(new Date(row.hour)) })), [summary]);
+  const chart = useMemo(() => (summary?.hourly ?? []).map((row) => ({ ...row, label: time.format(new Date(row.hour)) })), [summary, time]);
   const serviceEventTypes = (summary?.event_types ?? []).filter((row) => isServiceRelevantEvent(row.event_type));
   const maxEventCount = Math.max(1, ...serviceEventTypes.map((row) => row.count));
 

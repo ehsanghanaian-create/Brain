@@ -4,15 +4,12 @@ import { useEffect, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { Line, LineChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { endpoints, type PortfolioOverview } from '@/lib/api/client';
+import { formatUserDate, useDatePreference } from '@/lib/date-preference';
 
 type Snapshot = { at: string; nodes: number; content: number; keywords: number };
 const nf = new Intl.NumberFormat('fa-IR');
 const getSnapshot = (data: PortfolioOverview): Snapshot => ({
-  at: new Intl.DateTimeFormat('fa-IR', {
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'Asia/Tehran'
-  }).format(new Date()),
+  at: new Date().toISOString(),
   nodes: data.totals.graph_nodes,
   content: data.totals.content,
   keywords: data.totals.keywords
@@ -24,6 +21,7 @@ const metrics = [
 ];
 
 export function LivePortfolioSignals({ initial }: { initial: PortfolioOverview }) {
+  const { calendar } = useDatePreference();
   const [samples, setSamples] = useState<Snapshot[]>(() => [getSnapshot(initial)]);
   const [connected, setConnected] = useState(true);
   const reduced = useReducedMotion();
@@ -82,7 +80,8 @@ export function LivePortfolioSignals({ initial }: { initial: PortfolioOverview }
                   <LineChart data={samples}>
                     <Tooltip
                       formatter={(value) => nf.format(Number(value))}
-                      labelFormatter={(_, items) => items[0]?.payload?.at ?? ''}
+                      labelFormatter={(_, items) => items[0]?.payload?.at
+                        ? formatUserDate(items[0].payload.at, calendar, { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tehran' }) : ''}
                     />
                     <Line
                       type='monotone'

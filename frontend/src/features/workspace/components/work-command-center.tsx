@@ -77,6 +77,7 @@ export function WorkCommandCenter() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<CommandWorkItem | 'new' | null>(null);
+  const [showExecutionDetails, setShowExecutionDetails] = useState(false);
   const [form, setForm] = useState<TaskForm>(blankForm);
   const [saving, setSaving] = useState(false);
   const [events, setEvents] = useState<Awaited<ReturnType<typeof commandApi.events>> | null>(null);
@@ -150,7 +151,7 @@ export function WorkCommandCenter() {
     [assignedData, assignedSite, assignedOwner]);
 
   function openTask(item: CommandWorkItem | 'new') {
-    setEvents(null); setEditing(item);
+    setEvents(null); setShowExecutionDetails(false); setEditing(item);
     setForm(item === 'new' ? { ...blankForm, site_id: (filters.site_id && canLead(filters.site_id) ? filters.site_id : projects.find((project) => canLead(project.site_id))?.site_id) || '' } : {
       site_id: item.site_id, title: item.title, description: item.description, url: item.url || '',
       status: item.status, priority: item.priority, owner_id: item.owner_id?.toString() || '',
@@ -238,14 +239,11 @@ export function WorkCommandCenter() {
     catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ثبت کار انجام نشد'); }
   }
 
-  return <div className='space-y-5'>
-    <section className='relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-l from-emerald-500/15 via-background to-sky-500/10 p-4 shadow-sm'>
-      <div className='pointer-events-none absolute -top-16 -left-12 size-56 rounded-full bg-emerald-500/15 blur-3xl' />
-      <div className='relative flex flex-wrap items-center justify-between gap-4'><div><div className='mb-2 flex items-center gap-2'><Badge variant='outline'>میز عملیات SEO</Badge><span className='text-muted-foreground text-xs'>به‌روزرسانی خودکار هر ۳۰ ثانیه</span></div>
-        <h2 className='text-xl font-bold sm:text-2xl'>هر مسئله، یک مسئول، یک موعد، یک نتیجه</h2>
-        <p className='text-muted-foreground mt-1 max-w-2xl text-sm leading-5'>اولویت‌ها، مسئولان، موعدها و پیشرفت واقعی پروژه‌های سئو در یک جا.</p></div>
-        <div className='flex gap-2'>{(canEdit || projects.some((project) => project.my_responsibility === 'lead')) && <Button onClick={() => openTask('new')}>＋ کار جدید</Button>}
-          <Button variant='outline' onClick={() => void refresh()} disabled={loading}>به‌روزرسانی</Button></div></div>
+  return <div className='space-y-3'>
+    <section className='flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/20 bg-gradient-to-l from-emerald-500/10 via-background to-sky-500/5 p-3'>
+      <div className='flex items-center gap-2'><Badge variant='outline'>میز عملیات SEO</Badge><span className='text-muted-foreground text-xs'>به‌روزرسانی خودکار هر ۳۰ ثانیه</span></div>
+      <div className='flex gap-2'>{(canEdit || projects.some((project) => project.my_responsibility === 'lead')) && <Button size='sm' onClick={() => openTask('new')}>＋ کار جدید</Button>}
+        <Button size='sm' variant='outline' onClick={() => void refresh()} disabled={loading}>به‌روزرسانی</Button></div>
     </section>
 
     {error && <Card className='border-rose-500/40'><CardContent className='pt-5 text-sm text-rose-600'>{error} <Button variant='outline' size='sm' onClick={() => void refresh()}>تلاش دوباره</Button></CardContent></Card>}
@@ -274,8 +272,8 @@ export function WorkCommandCenter() {
         <NativeSelect aria-label='فیلتر اولویت' value={filters.priority || ''} onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value || undefined }))} className='w-32'><NativeSelectOption value=''>همهٔ اولویت‌ها</NativeSelectOption>{(Object.keys(priorityLabel) as WorkPriority[]).map((priority) => <NativeSelectOption key={priority} value={priority}>{priorityLabel[priority]}</NativeSelectOption>)}</NativeSelect>
       </div>}
 
-      <div className='flex flex-wrap gap-1.5 border-b pb-2' role='tablist' aria-label='نماهای میز عملیات'>
-        {views.map((entry) => <Button key={entry.key} size='sm' variant={view === entry.key ? 'default' : 'ghost'} role='tab' aria-selected={view === entry.key} onClick={() => setView(entry.key)}>{entry.label}</Button>)}
+      <div className='flex flex-nowrap gap-1.5 overflow-x-auto border-b pb-2' role='tablist' aria-label='نماهای میز عملیات'>
+        {views.map((entry) => <Button key={entry.key} size='sm' className='shrink-0' variant={view === entry.key ? 'default' : 'ghost'} role='tab' aria-selected={view === entry.key} onClick={() => setView(entry.key)}>{entry.label}</Button>)}
         {focus !== 'all' && <Button size='sm' variant='outline' onClick={() => setFocus('all')}>حذف تمرکز</Button>}
       </div>
       {view === 'command' && displayCount > data.items.length && <p className='rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs'>از {num.format(displayCount)} کار مطابق فیلتر، {num.format(data.items.length)} کار نخست نمایش داده می‌شود. برای دیدن بقیه، فیلترها را محدودتر کنید.</p>}
@@ -401,7 +399,7 @@ export function WorkCommandCenter() {
         {canUpdateEditing && <label className='space-y-1 text-xs sm:col-span-2'>یادداشت این تغییر<Input value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder='پیشرفت، مانع یا تصمیم انجام‌شده را ثبت کنید' /></label>}
         <div className='flex flex-wrap gap-2 sm:col-span-2'>{canUpdateEditing && <Button onClick={saveTask} disabled={saving}>{saving ? 'در حال ذخیره…' : 'ذخیرهٔ کار'}</Button>}{editing !== 'new' && canUpdate(editing) && editing.status !== 'verified' && <Button variant='outline' onClick={() => void completeTask(editing)}>✓ انجام شد</Button>}{editing !== 'new' && canLead(editing.site_id) && <Button variant='outline' onClick={() => void deleteTask(editing)}>حذف کار</Button>}{editing !== 'new' && <Button variant='outline' onClick={() => void loadEvents(editing)}>نمایش تاریخچه</Button>}</div>
         {events && <div className='space-y-2 border-t pt-3 sm:col-span-2'><strong className='text-sm'>تاریخچهٔ کار</strong>{events.map((event) => <div key={event.id} className='rounded-lg border p-2 text-xs'><span className='text-muted-foreground'>{new Date(event.created_at).toLocaleString('fa-IR')}</span> · {event.event_type === 'created' ? 'ایجاد' : event.event_type === 'comment' ? 'یادداشت' : event.event_type === 'checklist_added' ? 'افزودن گام' : event.event_type === 'checklist_updated' ? 'تغییر گام' : event.event_type === 'checklist_removed' ? 'برداشتن گام' : 'ویرایش'} · {event.actor_username || 'سیستم'} {event.note && <span>· {event.note}</span>}</div>)}</div>}
-        {editing !== 'new' && <TaskExecutionDetails item={editing} items={data?.items || []} people={people} canEdit={canManageEditing} canLogTime={canUpdate(editing)} canLogOthers={canEdit} meId={meId} onChanged={() => void refresh(true)} />}
+        {editing !== 'new' && <details key={editing.id} onToggle={(event) => setShowExecutionDetails(event.currentTarget.open)} className='sm:col-span-2 rounded-lg border p-3'><summary className='cursor-pointer text-sm font-medium'>جزئیات اجرایی · چک‌لیست، وابستگی، زمان و گفت‌وگو</summary>{showExecutionDetails && <div className='mt-3'><TaskExecutionDetails item={editing} items={data?.items || []} people={people} canEdit={canManageEditing} canLogTime={canUpdate(editing)} canLogOthers={canEdit} meId={meId} onChanged={() => void refresh(true)} /></div>}</details>}
       </div>}
     </DialogContent></Dialog>
   </div>;

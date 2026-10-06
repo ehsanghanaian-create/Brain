@@ -64,6 +64,7 @@ class WorkIn(BaseModel):
     blocked_reason: str | None = Field(default=None, max_length=1000)
     verification_note: str | None = Field(default=None, max_length=3000)
     note: str | None = Field(default=None, max_length=1000)
+    subtasks: list[str] = Field(default_factory=list, max_length=30)
 
 
 class WorkPatch(BaseModel):
@@ -101,6 +102,11 @@ class CommentIn(BaseModel):
 
 class SubtaskIn(BaseModel):
     title: str = Field(min_length=3, max_length=200)
+
+
+class HandoffIn(BaseModel):
+    owner_id: int = Field(ge=1)
+    reason: str = Field(min_length=3, max_length=1000)
 
 
 @router.get("/{item_id}/subtasks")
@@ -162,6 +168,10 @@ def add_comment(site_id: str, item_id: int, body: CommentIn, request: Request,
             raise HTTPException(404, "work item not found")
         actor = getattr(request.state, "panel_user", None)
         _record(cx, site_id, item_id, "comment", dict(item), dict(item), message, actor)
+        if actor:
+            for recipient in {item["owner_id"], item["created_by_id"]} - {None, actor["id"]}:
+                _notify(cx, recipient, item_id, "comment", "discussion", item["title"],
+                        f"{actor['full_name']} در این کار پیام گذاشت")
         row = cx.execute(text("""SELECT id,event_type,note,actor_id,actor_username,created_at
             FROM work_item_events WHERE work_item_id=:id ORDER BY id DESC LIMIT 1"""),
             {"id": item_id}).mappings().one()
@@ -291,7 +301,10 @@ def list_work(site_id: str, status: Status | None = None, owner_id: int | None =
 def create_work(site_id: str, body: WorkIn, request: Request, eng: Engine = Depends(engine)) -> dict:
     if body.status in ("rejected", "deferred") and not body.note:
         raise HTTPException(422, "rejected or deferred work requires a reason")
-    values = body.model_dump(exclude={"note"})
+    subtask_titles = [title.strip() for title in body.subtasks]
+    if any(len(title) < 3 or len(title) > 200 for title in subtask_titles):
+        raise HTTPException(422, "subtask titles must be between 3 and 200 characters")
+    values = body.model_dump(exclude={"note", "subtasks"})
     values["due_at"] = _due_utc(body.due_at)
     values["start_at"] = _date_utc(body.start_at, "start date")
     if values["status"] == "verified":
@@ -312,6 +325,21 @@ def create_work(site_id: str, body: WorkIn, request: Request, eng: Engine = Depe
             row = dict(cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id"),
                                   {"s": site_id, "id": item_id}).mappings().one())
             _record(cx, site_id, item_id, "created", None, row, body.note, getattr(request.state, "panel_user", None))
+            for index, title in enumerate(subtask_titles):
+                child_result = cx.execute(text("""INSERT INTO work_items
+                    (site_id,title,description,kind,status,owner_id,team_id,priority,parent_id,
+                     created_by_id,created_at,updated_at,board_order)
+                    VALUES (:site,:title,'','manual','new',:owner,:team,:priority,:parent,
+                            :creator,:at,:at,:order_value)"""),
+                    {"site": site_id, "title": title, "owner": row["owner_id"],
+                     "team": row["team_id"], "priority": row["priority"], "parent": item_id,
+                     "creator": actor["id"] if actor else None, "at": row["created_at"],
+                     "order_value": values["board_order"] + index + 1})
+                child = dict(cx.execute(text("SELECT * FROM work_items WHERE id=:id"),
+                                        {"id": child_result.lastrowid}).mappings().one())
+                _record(cx, site_id, child["id"], "created", None, child, None, actor)
+                _record(cx, site_id, item_id, "subtask_added", row,
+                        {"child_id": child["id"], "title": title}, None, actor)
             if body.owner_id and actor and body.owner_id != actor["id"]:
                 _notify_assignment(cx, body.owner_id, item_id, row["title"], actor)
     except IntegrityError as exc:
@@ -410,16 +438,68 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
         actor = getattr(request.state, "panel_user", None)
         if after["owner_id"] and after["owner_id"] != before["owner_id"] and actor and after["owner_id"] != actor["id"]:
             _notify_assignment(cx, after["owner_id"], item_id, after["title"], actor)
+        if actor and after["status"] == "verified" and before["status"] != "verified" and after["created_by_id"] not in (None, actor["id"]):
+            _notify(cx, after["created_by_id"], item_id, "completed", "delegated", after["title"],
+                    f"{actor['full_name']} این کار را انجام داد")
     request.state.audit_fields = list(body.model_fields_set)
     return after
 
 
-def _notify_assignment(cx, user_id: int, item_id: int, title: str, actor: dict) -> None:
+def _notify(cx, user_id: int, item_id: int, kind: str, audience: str, title: str, body: str) -> None:
     cx.execute(text("""INSERT INTO panel_notifications
-        (user_id,work_item_id,kind,title,body,created_at)
-        VALUES (:user,:item,'assignment',:title,:body,:at)"""),
-        {"user": user_id, "item": item_id, "title": title,
-         "body": f"{actor['full_name']} این کار را به شما واگذار کرد", "at": now()})
+        (user_id,work_item_id,kind,audience,title,body,created_at)
+        VALUES (:user,:item,:kind,:audience,:title,:body,:at)"""),
+        {"user": user_id, "item": item_id, "kind": kind, "audience": audience,
+         "title": title, "body": body, "at": now()})
+
+
+def _notify_assignment(cx, user_id: int, item_id: int, title: str, actor: dict) -> None:
+    _notify(cx, user_id, item_id, "assignment", "assigned", title,
+            f"{actor['full_name']} این کار را به شما واگذار کرد")
+
+
+@router.post("/{item_id}/handoff")
+def handoff_work(site_id: str, item_id: int, body: HandoffIn, request: Request,
+                 eng: Engine = Depends(engine)) -> dict:
+    reason = body.reason.strip()
+    if len(reason) < 3:
+        raise HTTPException(422, "a reason is required for handoff")
+    actor = getattr(request.state, "panel_user", None)
+    if not actor:
+        raise HTTPException(401, "sign in to hand off work")
+    with eng.begin() as cx:
+        current = cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id AND deleted_at IS NULL"),
+                             {"s": site_id, "id": item_id}).mappings().first()
+        if not current:
+            raise HTTPException(404, "work item not found")
+        require_task_editor(cx, request, site_id, current)
+        if current["owner_id"] != actor["id"] or current["status"] in ("verified", "rejected", "deferred"):
+            raise HTTPException(403, "only the active assignee can hand off this task")
+        if body.owner_id == actor["id"]:
+            raise HTTPException(422, "choose a different assignee")
+        _validate(cx, site_id, {**dict(current), "owner_id": body.owner_id}, item_id, strict_owner=True)
+        descendants = cx.execute(text("""WITH RECURSIVE tree(id) AS (
+            SELECT id FROM work_items WHERE id=:id AND site_id=:site
+            UNION ALL SELECT child.id FROM work_items child JOIN tree ON child.parent_id=tree.id
+            WHERE child.site_id=:site AND child.deleted_at IS NULL
+        ) SELECT w.* FROM work_items w JOIN tree ON tree.id=w.id
+          WHERE w.owner_id=:owner AND w.status NOT IN ('verified','rejected','deferred')
+          ORDER BY w.id"""), {"id": item_id, "site": site_id, "owner": actor["id"]}).mappings().all()
+        stamp = now()
+        for item in descendants:
+            cx.execute(text("""UPDATE work_items SET owner_id=:owner,status='assigned',updated_at=:at
+                WHERE id=:id"""), {"owner": body.owner_id, "at": stamp, "id": item["id"]})
+            updated = dict(cx.execute(text("SELECT * FROM work_items WHERE id=:id"),
+                                      {"id": item["id"]}).mappings().one())
+            _record(cx, site_id, item["id"], "handoff", dict(item), updated, reason, actor)
+        after = dict(cx.execute(text("SELECT * FROM work_items WHERE id=:id"), {"id": item_id}).mappings().one())
+        _notify(cx, body.owner_id, item_id, "handoff", "assigned", after["title"],
+                f"{actor['full_name']} این کار را به شما ارجاع داد: {reason}")
+        if current["created_by_id"] not in (None, actor["id"], body.owner_id):
+            _notify(cx, current["created_by_id"], item_id, "handoff", "delegated", after["title"],
+                    f"{actor['full_name']} این کار را به مسئول دیگری ارجاع داد")
+    request.state.audit_fields = ["owner_id", "status", "handoff_reason"]
+    return {"item": after, "moved_tasks": len(descendants)}
 
 
 @router.delete("/{item_id}")

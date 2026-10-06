@@ -54,6 +54,15 @@ export type CommandOverview = {
   recent: { id: number; site_id: string; work_item_id: number; event_type: string; note: string | null; actor_username: string | null;
     created_at: string; title: string; site_name: string }[];
 };
+export type WorkReportMetrics = { created: number; completed: number; handoffs: number;
+  comments: number; updates: number; minutes: number; open_now: number };
+export type WorkReport = { period: 'week' | 'month'; start_day: string; end_day: string;
+  totals: WorkReportMetrics; by_person: (WorkReportMetrics & { user_id: number | null; name: string })[];
+  by_project: (WorkReportMetrics & { site_id: string; name: string })[];
+  daily: { day: string; created: number; completed: number; minutes: number }[];
+  completed_tasks: { id: number; site_id: string; site_name: string; title: string;
+    actor_name: string; completed_at: string }[];
+  people: { id: number; full_name: string }[] };
 export type CommandFilters = { site_id?: string; owner_id?: number; team_id?: number;
   status?: string; priority?: string; q?: string; created_by_id?: number; limit?: number; offset?: number };
 export const commandApi = {
@@ -62,6 +71,14 @@ export const commandApi = {
     const query = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== '') query.set(key, String(value)); });
     return api<CommandOverview>(`/work/overview?${query.toString()}`);
+  },
+  report: (period: 'week' | 'month', anchor: string, siteId?: string, userId?: number,
+    boundaries?: { start: string; end: string }) => {
+    const params = new URLSearchParams({ period, anchor });
+    if (siteId) params.set('site_id', siteId);
+    if (userId) params.set('user_id', String(userId));
+    if (boundaries) { params.set('start_day', boundaries.start); params.set('end_day', boundaries.end); }
+    return api<WorkReport>(`/work/reports?${params.toString()}`);
   },
   boardPage: (siteId: string, afterId = 0) =>
     api<{ items: CommandWorkItem[]; next_after_id: number | null }>(`/work/board/${encodeURIComponent(siteId)}?after_id=${afterId}&limit=500`),
@@ -105,6 +122,9 @@ export const commandApi = {
     api<CommandWorkItem>(`/sites/${encodeURIComponent(siteId)}/work`, { method: 'POST', json: body }),
   updateWork: (item: CommandWorkItem, body: Record<string, unknown>) =>
     api<CommandWorkItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}`, { method: 'PATCH', json: body }),
+  handoffWork: (item: CommandWorkItem, ownerId: number, reason: string) =>
+    api<{ item: CommandWorkItem; moved_tasks: number }>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/handoff`,
+      { method: 'POST', json: { owner_id: ownerId, reason } }),
   deleteWork: (item: CommandWorkItem) => api<CommandWorkItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}`, { method: 'DELETE' }),
   restoreWork: (item: CommandWorkItem) => api<CommandWorkItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/restore`, { method: 'POST' }),
   events: (item: CommandWorkItem) =>

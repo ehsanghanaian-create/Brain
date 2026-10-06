@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import Engine, text
 
@@ -131,14 +131,23 @@ def update_preferences(body: DatePreferencePatch, request: Request,
 
 
 @router.get("/notifications")
-def notifications(user: dict = Depends(current_user), eng: Engine = Depends(engine)) -> dict:
+def notifications(view: Literal["active", "archived"] = "active",
+                  audience: Literal["all", "assigned", "delegated", "discussion", "updates"] = "all",
+                  limit: int = Query(100, ge=1, le=200),
+                  user: dict = Depends(current_user), eng: Engine = Depends(engine)) -> dict:
     with eng.connect() as cx:
-        rows = cx.execute(text("""SELECT n.id,n.work_item_id,n.kind,n.title,n.body,n.created_at,n.read_at,
+        rows = cx.execute(text("""SELECT n.id,n.work_item_id,n.kind,n.audience,n.title,n.body,n.created_at,n.read_at,n.archived_at,
             w.site_id FROM panel_notifications n LEFT JOIN work_items w ON w.id=n.work_item_id
-            WHERE n.user_id=:user ORDER BY n.id DESC LIMIT 50"""), {"user": user["id"]}).mappings().all()
-        unread = cx.execute(text("SELECT COUNT(*) FROM panel_notifications WHERE user_id=:user AND read_at IS NULL"),
+            WHERE n.user_id=:user AND ((:view='active' AND n.archived_at IS NULL) OR
+                (:view='archived' AND n.archived_at IS NOT NULL))
+                AND (:audience='all' OR n.audience=:audience)
+            ORDER BY n.id DESC LIMIT :limit"""),
+            {"user": user["id"], "view": view, "audience": audience, "limit": limit}).mappings().all()
+        unread = cx.execute(text("SELECT COUNT(*) FROM panel_notifications WHERE user_id=:user AND read_at IS NULL AND archived_at IS NULL"),
                             {"user": user["id"]}).scalar_one()
-    return {"items": [dict(row) for row in rows], "unread": unread}
+        archived = cx.execute(text("SELECT COUNT(*) FROM panel_notifications WHERE user_id=:user AND archived_at IS NOT NULL"),
+                              {"user": user["id"]}).scalar_one()
+    return {"items": [dict(row) for row in rows], "unread": unread, "archived": archived}
 
 
 @router.post("/notifications/{notification_id}/read")
@@ -150,6 +159,31 @@ def read_notification(notification_id: int, request: Request, user: dict = Depen
         if not result.rowcount:
             raise HTTPException(404, "notification not found")
     request.state.audit_fields = ["read_at"]
+    return {"ok": True}
+
+
+@router.post("/notifications/{notification_id}/archive")
+def archive_notification(notification_id: int, request: Request, user: dict = Depends(current_user),
+                         eng: Engine = Depends(engine)) -> dict:
+    with eng.begin() as cx:
+        result = cx.execute(text("""UPDATE panel_notifications SET archived_at=COALESCE(archived_at,:at),
+            read_at=COALESCE(read_at,:at) WHERE id=:id AND user_id=:user"""),
+            {"at": utcnow(), "id": notification_id, "user": user["id"]})
+        if not result.rowcount:
+            raise HTTPException(404, "notification not found")
+    request.state.audit_fields = ["archived_at", "read_at"]
+    return {"ok": True}
+
+
+@router.post("/notifications/{notification_id}/restore")
+def restore_notification(notification_id: int, request: Request, user: dict = Depends(current_user),
+                         eng: Engine = Depends(engine)) -> dict:
+    with eng.begin() as cx:
+        result = cx.execute(text("""UPDATE panel_notifications SET archived_at=NULL
+            WHERE id=:id AND user_id=:user"""), {"id": notification_id, "user": user["id"]})
+        if not result.rowcount:
+            raise HTTPException(404, "notification not found")
+    request.state.audit_fields = ["archived_at"]
     return {"ok": True}
 
 

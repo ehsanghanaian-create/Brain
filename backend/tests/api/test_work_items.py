@@ -344,3 +344,69 @@ def test_task_owner_isolation_subtasks_comments_and_calendar(client):
                         json={"date_calendar": "gregorian"}).status_code == 200
     assert client.get("/api/v1/auth/me", headers=worker).json()["date_calendar"] == "gregorian"
     assert client.get("/api/v1/auth/me", headers=lead).json()["date_calendar"] == "jalali"
+
+
+def test_task_handoff_notification_archive_and_period_report(client):
+    from datetime import datetime, timedelta, timezone
+
+    with client.eng.begin() as cx:
+        cx.execute(text("UPDATE panel_users SET username='worker',password_hash=:hash WHERE id=1"),
+                   {"hash": hash_password("worker-password")})
+        for username, role in (("lead", "admin"), ("next", "analyst")):
+            cx.execute(text("""INSERT INTO panel_users(username,full_name,email,role,active,password_hash,created_at,updated_at)
+                VALUES (:name,:name,:email,:role,1,:hash,'2026-01-01','2026-01-01')"""),
+                {"name": username, "email": username + "@example.com", "role": role,
+                 "hash": hash_password(username + "-password")})
+
+    def auth(name):
+        response = client.post("/api/v1/auth/login", json={"username": name, "password": name + "-password"})
+        assert response.status_code == 200, response.text
+        return {"Authorization": "Bearer " + response.json()["token"]}
+
+    lead, worker, next_user = auth("lead"), auth("worker"), auth("next")
+    base = "/api/v1/sites/demo/work"
+    bad = client.post(base, headers=lead, json={"title": "Invalid task", "subtasks": ["x"]})
+    assert bad.status_code == 422
+    assert not any(row["title"] == "Invalid task" for row in client.get(base, headers=lead).json()["items"])
+    created = client.post(base, headers=lead, json={"title": "Parent work", "owner_id": 1,
+        "priority": "critical", "subtasks": ["First step", "Second step"]})
+    assert created.status_code == 201, created.text
+    parent = created.json()
+    children = client.get(f"{base}/{parent['id']}/subtasks", headers=worker).json()
+    assert len(children) == 2 and all(row["owner_id"] == 1 for row in children)
+    notification = client.get("/api/v1/auth/notifications?audience=assigned", headers=worker).json()
+    assert notification["unread"] == 1 and notification["items"][0]["title"] == "Parent work"
+    notification_id = notification["items"][0]["id"]
+    assert client.post(f"/api/v1/auth/notifications/{notification_id}/archive", headers=lead).status_code == 404
+    assert client.post(f"/api/v1/auth/notifications/{notification_id}/archive", headers=worker).status_code == 200
+    assert client.get("/api/v1/auth/notifications", headers=worker).json()["unread"] == 0
+    assert client.get("/api/v1/auth/notifications?view=archived&audience=assigned", headers=worker).json()["items"][0]["id"] == notification_id
+    assert client.post(f"/api/v1/auth/notifications/{notification_id}/restore", headers=worker).status_code == 200
+
+    handoff_url = f"{base}/{parent['id']}/handoff"
+    assert client.post(handoff_url, headers=lead, json={"owner_id": 3, "reason": "capacity"}).status_code == 403
+    assert client.post(handoff_url, headers=worker, json={"owner_id": 3, "reason": " "}).status_code == 422
+    moved = client.post(handoff_url, headers=worker, json={"owner_id": 3, "reason": "Unable to finish"})
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["moved_tasks"] == 3
+    assert all(row["owner_id"] == 3 for row in client.get(f"{base}/{parent['id']}/subtasks", headers=next_user).json())
+    assert client.patch(f"{base}/{parent['id']}", headers=worker, json={"title": "Old owner edit"}).status_code == 403
+    assert client.patch(f"{base}/{parent['id']}", headers=next_user, json={"title": "New owner edit"}).status_code == 200
+    assert any(row["event_type"] == "handoff" and row["note"] == "Unable to finish"
+               for row in client.get(f"{base}/{parent['id']}/events", headers=lead).json())
+    assert any(row["kind"] == "handoff" for row in client.get("/api/v1/auth/notifications?audience=assigned", headers=next_user).json()["items"])
+    assert any(row["kind"] == "handoff" for row in client.get("/api/v1/auth/notifications?audience=delegated", headers=lead).json()["items"])
+    assert client.post(f"{base}/{parent['id']}/comments", headers=next_user,
+                       json={"text": "I will continue this"}).status_code == 201
+    assert any(row["kind"] == "comment" for row in client.get("/api/v1/auth/notifications?audience=discussion", headers=lead).json()["items"])
+
+    for child in children:
+        assert client.patch(f"{base}/{child['id']}", headers=next_user, json={"status": "verified"}).status_code == 200
+    assert client.patch(f"{base}/{parent['id']}", headers=next_user, json={"status": "verified"}).status_code == 200
+    anchor = datetime.now(timezone(timedelta(hours=3, minutes=30))).date().isoformat()
+    report = client.get(f"/api/v1/work/reports?period=week&anchor={anchor}&site_id=demo", headers=lead)
+    assert report.status_code == 200, report.text
+    assert report.json()["totals"]["created"] >= 3
+    assert report.json()["totals"]["completed"] == 3
+    assert report.json()["totals"]["handoffs"] == 3
+    assert client.get(f"/api/v1/work/reports?period=month&anchor={anchor}&user_id=3", headers=lead).json()["totals"]["completed"] == 3

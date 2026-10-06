@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -19,6 +20,113 @@ CLOSED = ("verified", "rejected", "deferred")
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+@router.get("/reports")
+def work_report(period: Literal["week", "month"] = "week", anchor: date | None = None,
+                site_id: str | None = None, user_id: int | None = None,
+                start_day: date | None = None, end_day: date | None = None,
+                eng: Engine = Depends(engine)) -> dict:
+    """Period activity is derived from immutable task events, not mutable updated_at."""
+    try:
+        zone = ZoneInfo("Asia/Tehran")
+    except ZoneInfoNotFoundError:
+        # Windows test hosts may lack the optional tzdata package. Current Iranian time has no DST.
+        zone = timezone(timedelta(hours=3, minutes=30))
+    chosen = anchor or datetime.now(zone).date()
+    if (start_day is None) != (end_day is None):
+        raise HTTPException(422, "both report boundaries are required")
+    if start_day is not None and end_day is not None:
+        if not start_day <= chosen < end_day or not 1 <= (end_day - start_day).days <= 32:
+            raise HTTPException(422, "invalid report boundaries")
+    elif period == "week":
+        start_day = chosen - timedelta(days=(chosen.weekday() + 2) % 7)  # Saturday
+        end_day = start_day + timedelta(days=7)
+    else:
+        start_day = chosen.replace(day=1)
+        end_day = date(start_day.year + (start_day.month == 12), start_day.month % 12 + 1, 1)
+    start = datetime.combine(start_day, time.min, zone).astimezone(timezone.utc).isoformat(timespec="seconds")
+    end = datetime.combine(end_day, time.min, zone).astimezone(timezone.utc).isoformat(timespec="seconds")
+    args = {"start": start, "end": end, "site": site_id, "user": user_id,
+            "start_day": start_day.isoformat(), "end_day": end_day.isoformat()}
+    with eng.connect() as cx:
+        if site_id and not cx.execute(text("SELECT 1 FROM sites WHERE site_id=:site"), args).first():
+            raise HTTPException(404, "project not found")
+        if user_id and not cx.execute(text("SELECT 1 FROM panel_users WHERE id=:user"), args).first():
+            raise HTTPException(404, "user not found")
+        events = cx.execute(text("""SELECT e.id,e.site_id,e.work_item_id,e.event_type,e.before_json,
+            e.after_json,e.note,e.actor_id,e.actor_username,e.created_at,s.name AS site_name,
+            u.full_name AS actor_name FROM work_item_events e
+            JOIN sites s ON s.site_id=e.site_id
+            LEFT JOIN panel_users u ON u.id=e.actor_id
+            WHERE e.created_at>=:start AND e.created_at<:end
+              AND (:site IS NULL OR e.site_id=:site) AND (:user IS NULL OR e.actor_id=:user)
+            ORDER BY e.id"""), args).mappings().all()
+        time_rows = cx.execute(text("""SELECT t.user_id,t.minutes,t.work_date,t.site_id,t.work_item_id,
+            u.full_name AS user_name,s.name AS site_name FROM work_time_entries t
+            JOIN sites s ON s.site_id=t.site_id LEFT JOIN panel_users u ON u.id=t.user_id
+            WHERE t.work_date>=:start_day AND t.work_date<:end_day
+              AND (:site IS NULL OR t.site_id=:site) AND (:user IS NULL OR t.user_id=:user)"""), args).mappings().all()
+        open_rows = cx.execute(text("""SELECT w.owner_id,w.site_id,s.name AS site_name,
+            u.full_name AS owner_name,COUNT(*) AS count FROM work_items w
+            JOIN sites s ON s.site_id=w.site_id LEFT JOIN panel_users u ON u.id=w.owner_id
+            WHERE w.deleted_at IS NULL AND w.status NOT IN ('verified','rejected','deferred')
+              AND (:site IS NULL OR w.site_id=:site) AND (:user IS NULL OR w.owner_id=:user)
+            GROUP BY w.owner_id,w.site_id"""), args).mappings().all()
+        people = cx.execute(text("SELECT id,full_name FROM panel_users WHERE active=1 ORDER BY full_name")).mappings().all()
+    by_person: dict[int, dict] = {}
+    by_project: dict[str, dict] = {}
+    daily: dict[str, dict] = {}
+    completed_tasks: list[dict] = []
+    totals = {key: 0 for key in ("created", "completed", "handoffs", "comments", "updates", "minutes", "open_now")}
+    for event in events:
+        before = json.loads(event["before_json"]) if event["before_json"] else {}
+        after = json.loads(event["after_json"]) if event["after_json"] else {}
+        metric = ("created" if event["event_type"] == "created" else
+                  "completed" if before.get("status") != "verified" and after.get("status") == "verified" else
+                  "handoffs" if event["event_type"] == "handoff" else
+                  "comments" if event["event_type"] == "comment" else
+                  "updates" if event["event_type"] in {"updated", "bulk_updated"} else None)
+        if not metric:
+            continue
+        day = datetime.fromisoformat(event["created_at"]).astimezone(zone).date().isoformat()
+        person_id = event["actor_id"] or 0
+        person = by_person.setdefault(person_id, {"user_id": event["actor_id"],
+            "name": event["actor_name"] or event["actor_username"] or "سیستم",
+            **{key: 0 for key in totals}})
+        project = by_project.setdefault(event["site_id"], {"site_id": event["site_id"],
+            "name": event["site_name"], **{key: 0 for key in totals}})
+        bucket = daily.setdefault(day, {"day": day, "created": 0, "completed": 0, "minutes": 0})
+        for target in (totals, person, project):
+            target[metric] += 1
+        if metric in bucket:
+            bucket[metric] += 1
+        if metric == "completed":
+            completed_tasks.append({"id": event["work_item_id"], "site_id": event["site_id"],
+                "site_name": event["site_name"], "title": after.get("title", ""),
+                "actor_name": person["name"], "completed_at": event["created_at"]})
+    for row in time_rows:
+        person = by_person.setdefault(row["user_id"], {"user_id": row["user_id"],
+            "name": row["user_name"] or "کاربر حذف‌شده", **{key: 0 for key in totals}})
+        project = by_project.setdefault(row["site_id"], {"site_id": row["site_id"],
+            "name": row["site_name"], **{key: 0 for key in totals}})
+        bucket = daily.setdefault(row["work_date"], {"day": row["work_date"],
+            "created": 0, "completed": 0, "minutes": 0})
+        for target in (totals, person, project, bucket):
+            target["minutes"] += row["minutes"]
+    for row in open_rows:
+        totals["open_now"] += row["count"]
+        person = by_person.setdefault(row["owner_id"] or 0, {"user_id": row["owner_id"],
+            "name": row["owner_name"] or "بی‌مسئول", **{key: 0 for key in totals}})
+        project = by_project.setdefault(row["site_id"], {"site_id": row["site_id"],
+            "name": row["site_name"], **{key: 0 for key in totals}})
+        person["open_now"] += row["count"]
+        project["open_now"] += row["count"]
+    return {"period": period, "start_day": start_day.isoformat(), "end_day": end_day.isoformat(),
+            "totals": totals, "by_person": sorted(by_person.values(), key=lambda entry: (-entry["completed"], -entry["minutes"], entry["name"])),
+            "by_project": sorted(by_project.values(), key=lambda entry: (-entry["completed"], entry["name"])),
+            "daily": [daily[key] for key in sorted(daily)], "completed_tasks": completed_tasks[-100:][::-1],
+            "people": [dict(row) for row in people]}
 
 
 class TeamIn(BaseModel):

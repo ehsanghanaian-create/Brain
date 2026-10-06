@@ -22,6 +22,7 @@ import { TeamPlanner } from './team-planner';
 import { TeamBoard } from './team-board';
 import { TaskExecutionDetails } from './task-execution-details';
 import { TaskDiscussion } from './task-discussion';
+import { WorkReportPanel } from './work-report-panel';
 import { UserDateInput } from '@/components/user-date-input';
 import { formatUserDate, formatUserDateTime, useDatePreference } from '@/lib/date-preference';
 
@@ -34,7 +35,7 @@ const statusLabel: Record<WorkStatus, string> = {
 };
 const priorityLabel: Record<WorkPriority, string> = { critical: 'فوری', high: 'بالا', normal: 'معمولی', low: 'پایین' };
 const closedStatuses = new Set<WorkStatus>(['verified', 'rejected', 'deferred']);
-type View = 'command' | 'mine' | 'assigned' | 'archive' | 'projects' | 'planner' | 'sheet' | 'kanban' | 'timeline' | 'graph' | 'teams';
+type View = 'command' | 'mine' | 'assigned' | 'archive' | 'projects' | 'planner' | 'sheet' | 'kanban' | 'timeline' | 'graph' | 'teams' | 'report';
 type Focus = 'all' | 'overdue' | 'unassigned' | 'blocked' | 'due_week' | 'hours';
 type TaskForm = { site_id: string; title: string; description: string; url: string; status: WorkStatus;
   priority: WorkPriority; owner_id: string; team_id: string; due_at: string; estimated_hours: string;
@@ -45,7 +46,7 @@ const blankForm: TaskForm = { site_id: '', title: '', description: '', url: '', 
   estimated_hours: '', blocked_reason: '', verification_note: '', note: '' };
 const views: { key: View; label: string }[] = [
   { key: 'kanban', label: 'برد من و پروژه‌ها' }, { key: 'mine', label: 'به من واگذار شده' }, { key: 'assigned', label: 'من واگذار کرده‌ام' }, { key: 'archive', label: 'آرشیو' }, { key: 'projects', label: 'پروژه‌ها' }, { key: 'planner', label: 'برنامهٔ تیم' }, { key: 'sheet', label: 'شیت کارها' },
-  { key: 'command', label: 'فرماندهی' }, { key: 'timeline', label: 'تایم‌لاین' },
+  { key: 'command', label: 'فرماندهی' }, { key: 'report', label: 'گزارش کار' }, { key: 'timeline', label: 'تایم‌لاین' },
   { key: 'graph', label: 'گراف مسیر' }, { key: 'teams', label: 'تیم‌ها' }
 ];
 async function allBoardPages(page: (afterId: number) => Promise<{ items: CommandWorkItem[]; next_after_id: number | null }>) {
@@ -89,6 +90,11 @@ export function WorkCommandCenter() {
   const [showExecutionDetails, setShowExecutionDetails] = useState(false);
   const [form, setForm] = useState<TaskForm>(blankForm);
   const [saving, setSaving] = useState(false);
+  const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
+  const [draftSubtask, setDraftSubtask] = useState('');
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const [handoffOwner, setHandoffOwner] = useState('');
+  const [handoffReason, setHandoffReason] = useState('');
   const [milestones, setMilestones] = useState<Awaited<ReturnType<typeof commandApi.milestones>>>([]);
   const [teamName, setTeamName] = useState('');
   const [teamColor, setTeamColor] = useState('#1abb9c');
@@ -164,7 +170,8 @@ export function WorkCommandCenter() {
     [createdItems, assignedSite, assignedOwner]);
 
   function openTask(item: CommandWorkItem | 'new') {
-    setShowExecutionDetails(false); setEditing(item);
+    setShowExecutionDetails(false); setEditing(item); setDraftSubtasks([]); setDraftSubtask('');
+    setHandoffOpen(false); setHandoffOwner(''); setHandoffReason('');
     setForm(item === 'new' ? { ...blankForm, site_id: (filters.site_id && canLead(filters.site_id) ? filters.site_id : projects.find((project) => canLead(project.site_id))?.site_id) || '' } : {
       site_id: item.site_id, title: item.title, description: item.description, url: item.url || '',
       status: item.status, priority: item.priority, owner_id: item.owner_id?.toString() || '',
@@ -189,7 +196,7 @@ export function WorkCommandCenter() {
       blocked_reason: form.blocked_reason.trim() || null, verification_note: form.verification_note.trim() || null,
       note: form.note.trim() || null };
     try {
-      if (editing === 'new') await commandApi.createWork(form.site_id, body);
+      if (editing === 'new') await commandApi.createWork(form.site_id, { ...body, subtasks: draftSubtasks });
       else {
         const permitted = editing.owner_id === null ? body : Object.fromEntries(Object.entries(body).filter(([key]) => key !== 'owner_id'));
         const changed = Object.fromEntries(Object.entries(permitted).filter(([key, value]) => {
@@ -209,6 +216,22 @@ export function WorkCommandCenter() {
   async function completeTask(item: CommandWorkItem) {
     try { await commandApi.updateWork(item, { status: 'verified' }); setEditing(null); await refresh(true); toast.success('کار انجام شد'); }
     catch (cause) { toast.error(cause instanceof Error ? cause.message : 'تکمیل کار انجام نشد'); }
+  }
+  function addDraftSubtask() {
+    const title = draftSubtask.trim();
+    if (title.length < 3) { toast.error('عنوان زیرکار باید دست‌کم سه حرف داشته باشد'); return; }
+    if (draftSubtasks.length >= 30) { toast.error('حداکثر ۳۰ زیرکار برای هر کار مجاز است'); return; }
+    setDraftSubtasks((current) => [...current, title]); setDraftSubtask('');
+  }
+  async function handoffTask(item: CommandWorkItem) {
+    if (!handoffOwner || handoffReason.trim().length < 3) { toast.error('مسئول جدید و دلیل ارجاع را مشخص کنید'); return; }
+    setSaving(true);
+    try {
+      const result = await commandApi.handoffWork(item, Number(handoffOwner), handoffReason.trim());
+      setEditing(null); await refresh(true);
+      toast.success(`کار و ${num.format(result.moved_tasks - 1)} زیرکار باز ارجاع شد`);
+    } catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ارجاع انجام نشد'); }
+    finally { setSaving(false); }
   }
   async function quickTaskPatch(item: CommandWorkItem, patch: Record<string, unknown>) {
     try { await commandApi.updateWork(item, patch); await refresh(true); toast.success('کار به‌روز شد'); }
@@ -338,6 +361,7 @@ export function WorkCommandCenter() {
       </CardContent></Card>}
 
       {view === 'projects' && <ProjectExecution items={data.items} people={people} canEdit={canEdit} preferredSiteId={filters.site_id} onTask={openTask} />}
+      {view === 'report' && <WorkReportPanel projects={projects} />}
 
       {view === 'planner' && <TeamPlanner items={items} people={people} onTask={openTask} />}
 
@@ -384,7 +408,7 @@ export function WorkCommandCenter() {
       </CardContent></Card></div>}
     </>}
 
-    <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) setEditing(null); }}><DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-4xl' dir='rtl'><DialogHeader><DialogTitle>{editing === 'new' ? 'کار جدید' : editing?.title}</DialogTitle><DialogDescription>{editing && editing !== 'new' ? `ثبت‌شده در ${formatUserDateTime(editing.created_at, calendar)} · سازنده: ${editing.created_by_name || 'سیستم'} · مسئول: ${editing.owner_name || 'هنوز واگذار نشده'}` : 'عنوان، پروژه و مسئول کافی است؛ جزئیات دیگر اختیاری‌اند.'}</DialogDescription></DialogHeader>
+    <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) setEditing(null); }}><DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-4xl' dir='rtl'><DialogHeader><DialogTitle>{editing === 'new' ? 'کار جدید' : editing && canUpdate(editing) ? `ویرایش تسک · ${editing.title}` : editing?.title}</DialogTitle><DialogDescription>{editing && editing !== 'new' ? `ثبت‌شده در ${formatUserDateTime(editing.created_at, calendar)} · سازنده: ${editing.created_by_name || 'سیستم'} · مسئول: ${editing.owner_name || 'هنوز واگذار نشده'}` : 'عنوان، پروژه و مسئول کافی است؛ جزئیات دیگر اختیاری‌اند.'}</DialogDescription></DialogHeader>
       {editing && editing !== 'new' && !canUpdate(editing) ? <div className='space-y-4'>
         <div className='flex flex-wrap gap-2'><Badge variant='outline'>{statusLabel[editing.status]}</Badge><Badge variant='outline'>{priorityLabel[editing.priority]}</Badge><Badge variant='secondary'>{editing.site_name}</Badge></div>
         <div className='grid gap-2 text-sm sm:grid-cols-2'><p><span className='text-muted-foreground'>مسئول: </span>{editing.owner_name || 'بی‌مسئول'}</p><p><span className='text-muted-foreground'>موعد: </span>{dateText(editing.due_at)}</p></div>
@@ -398,6 +422,7 @@ export function WorkCommandCenter() {
         <label className='space-y-1 text-xs'>وضعیت<NativeSelect disabled={!canUpdateEditing} value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as WorkStatus }))}>{(Object.keys(statusLabel) as WorkStatus[]).filter((status) => canManageEditing || !['verified', 'rejected', 'deferred', 'approved', 'assigned'].includes(status)).map((status) => <NativeSelectOption key={status} value={status}>{statusLabel[status]}</NativeSelectOption>)}</NativeSelect></label>
         <label className='space-y-1 text-xs'>اولویت<NativeSelect disabled={!canManageEditing} value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as WorkPriority }))}>{(Object.keys(priorityLabel) as WorkPriority[]).map((priority) => <NativeSelectOption key={priority} value={priority}>{priorityLabel[priority]}</NativeSelectOption>)}</NativeSelect></label>
         <label className='space-y-1 text-xs'>موعد اختیاری<UserDateInput label='موعد کار' mode='datetime-local' disabled={!canManageEditing} value={form.due_at} onChange={(value) => setForm((f) => ({ ...f, due_at: value }))} /></label>
+        {editing === 'new' && <div className='space-y-2 rounded-lg border p-3 sm:col-span-2'><strong className='text-sm'>زیرکارها</strong><p className='text-muted-foreground text-xs'>زیرکارها همراه همین تسک ساخته می‌شوند و مسئول و اولویت آن را می‌گیرند.</p><div className='flex gap-2'><Input aria-label='عنوان زیرکار جدید' value={draftSubtask} onChange={(event) => setDraftSubtask(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addDraftSubtask(); } }} placeholder='مثلاً بررسی صفحات اصلی' /><Button type='button' variant='outline' onClick={addDraftSubtask}>افزودن</Button></div>{draftSubtasks.map((title, index) => <div key={`${title}-${index}`} className='flex items-center justify-between rounded-md bg-muted/50 px-2 py-1 text-xs'><span>{index + 1}. {title}</span><button type='button' className='text-rose-600 hover:underline' onClick={() => setDraftSubtasks((current) => current.filter((_, position) => position !== index))}>حذف</button></div>)}</div>}
         <details className='sm:col-span-2 rounded-lg border p-3'><summary className='cursor-pointer text-sm font-medium'>جزئیات بیشتر · شرح، لینک، زمان‌بندی و زیرکار</summary><div className='mt-3 grid gap-3 sm:grid-cols-2'>
         <label className='space-y-1 text-xs sm:col-span-2'>شرح کار<Textarea disabled={!canManageEditing} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></label>
         <label className='space-y-1 text-xs sm:col-span-2'>URL مرتبط<Input disabled={!canManageEditing} dir='ltr' value={form.url} onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))} /></label>
@@ -412,6 +437,7 @@ export function WorkCommandCenter() {
         {form.status === 'verified' && <label className='space-y-1 text-xs sm:col-span-2'>نتیجهٔ سنجش<Textarea disabled={!canManageEditing} value={form.verification_note} onChange={(e) => setForm((f) => ({ ...f, verification_note: e.target.value }))} /></label>}
         {canUpdateEditing && <label className='space-y-1 text-xs sm:col-span-2'>یادداشت این تغییر<Input value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder='پیشرفت، مانع یا تصمیم انجام‌شده را ثبت کنید' /></label>}
         <div className='flex flex-wrap gap-2 sm:col-span-2'>{canUpdateEditing && <Button onClick={saveTask} disabled={saving}>{saving ? 'در حال ذخیره…' : 'ذخیرهٔ کار'}</Button>}{editing !== 'new' && canUpdate(editing) && editing.status !== 'verified' && <Button variant='outline' onClick={() => void completeTask(editing)}>✓ انجام شد</Button>}{editing !== 'new' && canUpdate(editing) && <Button variant='outline' onClick={() => void deleteTask(editing)}>حذف کار</Button>}</div>
+        {editing !== 'new' && editing.owner_id === meId && !closedStatuses.has(editing.status) && <div className='sm:col-span-2'><Button type='button' variant='outline' onClick={() => setHandoffOpen((current) => !current)}>{handoffOpen ? 'بستن ارجاع' : 'نمی‌توانم انجام دهم · ارجاع به همکار'}</Button>{handoffOpen && <div className='mt-2 grid gap-2 rounded-lg border border-amber-500/30 p-3 sm:grid-cols-2'><label className='space-y-1 text-xs'>مسئول جدید<NativeSelect value={handoffOwner} onChange={(event) => setHandoffOwner(event.target.value)}><NativeSelectOption value=''>انتخاب همکار</NativeSelectOption>{people.filter((person) => person.active && person.role !== 'call_center' && person.id !== meId).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect></label><label className='space-y-1 text-xs sm:col-span-2'>دلیل ارجاع<Textarea value={handoffReason} onChange={(event) => setHandoffReason(event.target.value)} placeholder='چرا این کار را نمی‌توانید ادامه دهید و همکار بعدی باید چه بداند؟' /></label><Button type='button' disabled={saving} onClick={() => void handoffTask(editing)}>ثبت ارجاع و اطلاع به مسئول جدید</Button></div>}</div>}
         {editing !== 'new' && <TaskDiscussion key={editing.id} item={editing} canEdit={canUpdate(editing)} onOpenTask={openTask} onChanged={() => void refresh(true)} />}
         {editing !== 'new' && <details key={editing.id} onToggle={(event) => setShowExecutionDetails(event.currentTarget.open)} className='sm:col-span-2 rounded-lg border p-3'><summary className='cursor-pointer text-sm font-medium'>جزئیات اجرایی · چک‌لیست، وابستگی و زمان</summary>{showExecutionDetails && <div className='mt-3'><TaskExecutionDetails item={editing} items={data?.items || []} people={people} canEdit={canManageEditing} canLogTime={canUpdate(editing)} canLogOthers={false} meId={meId} onChanged={() => void refresh(true)} /></div>}</details>}
       </div>}

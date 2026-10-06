@@ -36,6 +36,9 @@ PROVIDER_KINDS: dict[str, dict[str, Any]] = {
             "setup": {"console_url": "https://console.x.ai", "key_prefix": "xai-", "docs": "https://docs.x.ai/docs",
                       "fa": "کلید API را از کنسول xAI (console.x.ai → API Keys) بسازید و همین‌جا وارد کنید. Grok نویسندهٔ جایگزین است: اگر Claude در دسترس نباشد یا خطا بدهد، مقاله با Grok نوشته می‌شود. کلید فقط رمزنگاری‌شده ذخیره می‌شود و هرگز در پاسخ API، لاگ یا دیتابیس ظاهر نمی‌شود."}},
     "openrouter": {"label": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "models": [], "needs_key": True},
+    "atria": {"label": "Atria Dawn Preview", "base_url": "https://api.atria-asi.ai/v1", "models": ["Atria-Dawn-Preview"], "needs_key": True,
+              "setup": {"console_url": "https://api.atria-asi.ai/", "key_prefix": "", "docs": "https://api.atria-asi.ai/docs",
+                        "fa": "کلید Atria فقط روی سرور نگهداری می‌شود. برای رفع مشکلات، مسیر seo_remediation را به این ارائه‌دهنده متصل کنید."}},
     "groq": {"label": "Groq Cloud (سهمیه رایگان)", "base_url": "https://api.groq.com/openai/v1",
              "models": ["qwen/qwen3.6-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"], "needs_key": True,
              "setup": {"console_url": "https://console.groq.com/keys", "key_prefix": "gsk_", "docs": "https://console.groq.com/docs/quickstart",
@@ -61,7 +64,7 @@ def env_api_key(kind: str) -> str | None:
     var = PROVIDER_KINDS.get(kind, {}).get("env_key")
     return (os.environ.get(var) or "").strip() or None if var else None
 GATEWAY_KINDS = ("omniroute",)                          # external routers (provider/model ids resolved upstream)
-TASK_KINDS = ("content_writing", "seo_analysis", "research", "brief", "keyword_analysis", "internal_linking", "schema", "generic",
+TASK_KINDS = ("content_writing", "seo_analysis", "seo_remediation", "research", "brief", "keyword_analysis", "internal_linking", "schema", "generic",
               # phase 9 task kinds
               "outline", "article_section", "article_long", "rewrite", "seo_review", "fact_check", "title_meta", "faq", "translation")
 
@@ -350,15 +353,17 @@ class ProviderConfigRepository(Repository):
 
 
 # task_kind → (primary model, fallback model) — Sonnet balanced, Opus quality, Haiku fast
+GENERAL_TASK_KINDS = tuple(kind for kind in TASK_KINDS if kind != "seo_remediation")
 RECOMMENDED_ROUTES: dict[str, dict[str, tuple[str, str | None]]] = {
+    "atria": {"seo_remediation": ("Atria-Dawn-Preview", None)},
     # Cloud-only free-tier routes. A second model handles model-specific throttling.
-    "groq": {k: (("openai/gpt-oss-20b", "qwen/qwen3.6-27b") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic") else ("qwen/qwen3.6-27b", "openai/gpt-oss-120b")) for k in TASK_KINDS},
-    "cloudflare": {k: (("@cf/openai/gpt-oss-20b", "@cf/qwen/qwen3-30b-a3b-fp8") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic") else ("@cf/qwen/qwen3-30b-a3b-fp8", "@cf/openai/gpt-oss-20b")) for k in TASK_KINDS},
+    "groq": {k: (("openai/gpt-oss-20b", "qwen/qwen3.6-27b") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic") else ("qwen/qwen3.6-27b", "openai/gpt-oss-120b")) for k in GENERAL_TASK_KINDS},
+    "cloudflare": {k: (("@cf/openai/gpt-oss-20b", "@cf/qwen/qwen3-30b-a3b-fp8") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic") else ("@cf/qwen/qwen3-30b-a3b-fp8", "@cf/openai/gpt-oss-20b")) for k in GENERAL_TASK_KINDS},
     # OmniRoute: let its own router pick upstreams; fast tasks → auto/fast; everything falls back to plain auto
-    "omniroute": {k: (("auto/fast", "auto") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic") else ("auto", "auto/fast")) for k in TASK_KINDS},
+    "omniroute": {k: (("auto/fast", "auto") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic") else ("auto", "auto/fast")) for k in GENERAL_TASK_KINDS},
     # Grok: grok-4 writes, grok-4-fast-reasoning backs it; light tasks go to the cheap non-reasoning model
     "xai": {k: (("grok-4-fast-non-reasoning", "grok-4-fast-reasoning") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic")
-                else ("grok-4", "grok-4-fast-reasoning")) for k in TASK_KINDS},
+                else ("grok-4", "grok-4-fast-reasoning")) for k in GENERAL_TASK_KINDS},
     "anthropic": {
         "article_long": ("claude-opus-5", "claude-sonnet-5"), "article_section": ("claude-opus-5", "claude-sonnet-5"), "content_writing": ("claude-opus-5", "claude-sonnet-5"),
         "seo_review": ("claude-sonnet-5", "claude-haiku-4-5"), "seo_analysis": ("claude-sonnet-5", "claude-haiku-4-5"), "fact_check": ("claude-sonnet-5", "claude-opus-5"),
@@ -370,7 +375,7 @@ RECOMMENDED_ROUTES: dict[str, dict[str, tuple[str, str | None]]] = {
     # gemini-2.5-* are "no longer available to new users" (404); 3.6/3.7/3.8-flash and the pro models answer 503/429 on the
     # free tier most of the day — 3.5-flash + 3.5-flash-lite are the ones that reliably answer (measured 2026-09-17)
     "google": {k: (("gemini-3.5-flash-lite", "gemini-3.5-flash") if k in ("outline", "rewrite", "title_meta", "faq", "internal_linking", "schema", "keyword_analysis", "generic")
-                   else ("gemini-3.5-flash", "gemini-3.5-flash-lite")) for k in TASK_KINDS},
+                   else ("gemini-3.5-flash", "gemini-3.5-flash-lite")) for k in GENERAL_TASK_KINDS},
 }
 
 

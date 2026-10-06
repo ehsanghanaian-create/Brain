@@ -61,7 +61,7 @@ class Ga4Client:
         return self._execute(self.svc.properties().runReport(property=f"properties/{property_id}", body=body), "runReport") or {}
 
     def site_daily(self, property_id: str, start: date, end: date, by_channel: bool = False,
-                   row_limit: int = MAX_ROWS_PER_REQUEST) -> Iterator[dict[str, Any]]:
+                   row_limit: int = MAX_ROWS_PER_REQUEST, host_name: str | None = None) -> Iterator[dict[str, Any]]:
         """Fetch date totals without a page dimension; optional channel rows are a separate grain."""
         metric = "keyEvents"
         dimensions = [{"name": "date"}]
@@ -74,6 +74,10 @@ class Ga4Client:
                     "dimensions": dimensions,
                     "metrics": [{"name": m} for m in ("sessions", "totalUsers", metric)],
                     "limit": min(row_limit, MAX_ROWS_PER_REQUEST), "offset": offset}
+            if host_name:
+                host = host_name.lower().strip().rstrip(".")
+                hosts = [host] if host.startswith("www.") else [host, f"www.{host}"]
+                body["dimensionFilter"] = {"filter": {"fieldName": "hostName", "inListFilter": {"values": hosts}}}
             try:
                 data = self.run_report(property_id, body)
             except Exception as e:  # older properties may still expose conversions
@@ -83,7 +87,7 @@ class Ga4Client:
                 raise
             if self.save_raw:
                 grain = "channel" if by_channel else "site"
-                (self.raw_dir / f"rr_{start.isoformat()}_{end.isoformat()}_{grain}_p{page}.json").write_text(
+                (self.raw_dir / f"rr_{start.isoformat()}_{end.isoformat()}_{grain}_{host_name or 'all'}_p{page}.json").write_text(
                     json.dumps(data, ensure_ascii=False), encoding="utf-8")
             rows = data.get("rows", [])
             for row in rows:
@@ -100,7 +104,8 @@ class Ga4Client:
             time.sleep(0.5)
 
     # ------------------------------------------------------------------ daily rows (date x path), paginated
-    def daily(self, property_id: str, start: date, end: date, dimension: str = "pagePath", row_limit: int = MAX_ROWS_PER_REQUEST) -> Iterator[dict[str, Any]]:
+    def daily(self, property_id: str, start: date, end: date, dimension: str = "pagePath", row_limit: int = MAX_ROWS_PER_REQUEST,
+              host_name: str | None = None) -> Iterator[dict[str, Any]]:
         """Yield {date, path, sessions, total_users, screen_page_views, engagement_rate, average_session_duration, conversions}."""
         metrics = METRICS
         offset = 0
@@ -111,6 +116,10 @@ class Ga4Client:
                     "metrics": [{"name": m} for m in metrics],
                     "limit": min(row_limit, MAX_ROWS_PER_REQUEST), "offset": offset,
                     "orderBys": [{"dimension": {"dimensionName": "date"}}]}
+            if host_name:
+                host = host_name.lower().strip().rstrip(".")
+                hosts = [host] if host.startswith("www.") else [host, f"www.{host}"]
+                body["dimensionFilter"] = {"filter": {"fieldName": "hostName", "inListFilter": {"values": hosts}}}
             try:
                 data = self.run_report(property_id, body)
             except Exception as e:  # noqa: BLE001 — older properties reject keyEvents; retry once with 'conversions'
@@ -120,7 +129,7 @@ class Ga4Client:
                 raise
             rows = data.get("rows", [])
             if self.save_raw:
-                fn = self.raw_dir / f"rr_{start.isoformat()}_{end.isoformat()}_{dimension}_p{page}.json"
+                fn = self.raw_dir / f"rr_{start.isoformat()}_{end.isoformat()}_{dimension}_{host_name or 'all'}_p{page}.json"
                 fn.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
             for r in rows:
                 dv = [d.get("value", "") for d in r.get("dimensionValues", [])]

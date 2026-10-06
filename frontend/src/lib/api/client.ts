@@ -145,7 +145,7 @@ export type GscSyncStatus = {
   steps: WpSyncStep[]; run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null;
   coverage: GscSyncCoverage; steps_fa: Record<string, string>;
 };
-export type GoogleAccountStatus = { connected: boolean; email: string | null; scopes: string[]; expiry: string | null; gsc_scope: boolean; ga4_scope: boolean; client_configured: boolean; client_id_hint?: string | null; connected_at?: string | null };
+export type GoogleAccountStatus = { connected: boolean; authorization_state?: 'valid' | 'needs_reconnect' | 'temporary_error' | 'disconnected'; refresh_token_stored?: boolean; email: string | null; scopes: string[]; expiry: string | null; gsc_scope: boolean; ga4_scope: boolean; client_configured: boolean; client_id_hint?: string | null; connected_at?: string | null; redirect_uri?: string | null };
 export type Ga4Property = { property_id: string; display_name: string | null; account: string | null; website_url?: string | null };
 export type Ga4Properties = { status: 'ok' | 'not_configured' | 'not_authorized' | 'error' | string; properties: Ga4Property[]; message?: string };
 export type Ga4SyncCoverage = { date_from: string | null; date_to: string | null; rows: number; pages: number; sessions: number; users: number | null; conversions: number; metric_source?: string; content_snapshots: number; last_ga4_sync?: string | null; top_pages: { path: string; sessions: number; conversions: number }[] };

@@ -1,6 +1,6 @@
 # Panel accounts and activity log
 
-The dashboard now uses named accounts. Provision the first administrator **locally** after running the current migrations (0026 and 0027):
+The dashboard now uses named accounts. Provision the first administrator **locally** after running the current migrations (0027 and 0028):
 
 ```powershell
 & .\.venv\Scripts\python.exe backend/cli/bootstrap_panel_admin.py

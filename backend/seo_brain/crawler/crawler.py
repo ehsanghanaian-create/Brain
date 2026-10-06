@@ -61,6 +61,9 @@ class Crawler:
                                    follow_redirects=False)
         self.robots: Protego | None = None
         self.sitemap_urls: list[str] = []
+        # Keep the URL written in the sitemap separate from our database identity.
+        # Normalization may add a slash that the live site redirects away from.
+        self.sitemap_sources: dict[str, str] = {}
         self.raw_dir: Path = raw_data_dir() / "crawler" / site.site_id
         self.raw_dir.mkdir(parents=True, exist_ok=True)
 
@@ -103,6 +106,7 @@ class Crawler:
         return txt
 
     def read_sitemaps(self, limit_docs: int = 50) -> list[str]:
+        self.sitemap_sources = {}
         seen_docs, urls, queue = set(), [], deque(self.sitemap_urls)
         while queue and len(seen_docs) < limit_docs:
             sm = queue.popleft()
@@ -142,14 +146,15 @@ class Crawler:
             if n not in seen:
                 seen.add(n)
                 uniq.append(n)
+                self.sitemap_sources[n] = u
         log.info(f"sitemap inventory: {len(uniq)} URLs from {len(seen_docs)} sitemap docs")
         return uniq
 
     # -- fetch ----------------------------------------------------------------------
-    def fetch(self, url: str, depth: int) -> CrawlResult:
+    def fetch(self, url: str, depth: int, request_url: str | None = None) -> CrawlResult:
         res = CrawlResult(url=url)
         chain = []
-        cur = url
+        cur = request_url or url
         t0 = time.monotonic()
         try:
             for _ in range(6):
@@ -199,6 +204,9 @@ class Crawler:
                     indexable, reason = 1, "indexable"
         internal, external = 0, 0
         if p is not None:
+            # A fresh crawl is authoritative for this source. Keeping old rows makes
+            # removed links look present during remediation verification.
+            conn.execute("DELETE FROM links WHERE site_id=? AND source_url=?", (self.site.site_id, res.final_url or res.url))
             html_path = self.raw_dir / (re.sub(r"[^a-z0-9]+", "_", res.url.lower())[:150] + ".html")
             html_path.write_text(res.html or "", encoding="utf-8")
             for lk in p.links:
@@ -234,7 +242,7 @@ class Crawler:
             "indexable": indexable, "indexability_reason": reason,
             "word_count": p.word_count if p else None, "language": p.language if p else None,
             "images": j(p.images) if p else None,
-            "images_missing_alt": sum(1 for im in p.images if not im.get("alt")) if p else None,
+            "images_missing_alt": sum(1 for im in p.images if not im.get("alt") and not im.get("decorative")) if p else None,
             "internal_links_out": internal if p else None, "external_links_out": external if p else None,
             "schema_types": j(p.schema_types) if p else None, "structured_data": j(p.ld_json) if p else None,
             "content_hash": p.content_hash if p else None, "in_sitemap": 1 if in_sitemap else 0,
@@ -251,7 +259,8 @@ class Crawler:
         conn.execute("INSERT INTO crawl_runs(run_id, site_id, started_at, max_urls, status) VALUES (?,?,?,?,?)",
                      (run_id, self.site.site_id, utcnow(), self.max_urls, "running"))
         conn.commit()
-        stats = {"run_id": run_id, "crawled": 0, "failed": 0, "skipped": {}, "discovered": 0, "sitemap_urls": 0}
+        stats = {"run_id": run_id, "scope": "targeted" if seeds is not None else "site",
+                 "crawled": 0, "failed": 0, "skipped": {}, "discovered": 0, "sitemap_urls": 0}
         try:
             self.load_robots()
             sitemap = set(self.read_sitemaps())
@@ -278,25 +287,31 @@ class Crawler:
                                        update_cols=["crawl_status", "crawl_run_id"])
                             continue
                         batch.append((url, depth, src))
-                    futures = {pool.submit(self.fetch, u, d): (u, d, s) for u, d, s in batch}
+                    futures = {pool.submit(self.fetch, u, d, self.sitemap_sources.get(u)): (u, d, s)
+                               for u, d, s in batch}
                     for fut in as_completed(futures):
                         u, d, s = futures[fut]
                         res = fut.result()
-                        new_urls = self.persist(conn, res, d, s, u in sitemap, run_id)
-                        conn.commit()
                         if res.error:
+                            # A transport failure is not evidence that the page or
+                            # its links disappeared. Keep the last valid snapshot;
+                            # the failed attempt is recorded on the crawl run.
                             stats["failed"] += 1
                             log.error(f"crawl error {u}: {res.error}", extra={"url": u})
-                        else:
-                            stats["crawled"] += 1
-                            log.info(f"{res.status_code} {u} ({res.response_time_ms} ms, {len(new_urls)} internal links)", extra={"url": u, "status": res.status_code})
+                            continue
+                        new_urls = self.persist(conn, res, d, s, u in sitemap, run_id)
+                        conn.commit()
+                        stats["crawled"] += 1
+                        log.info(f"{res.status_code} {u} ({res.response_time_ms} ms, {len(new_urls)} internal links)", extra={"url": u, "status": res.status_code})
                         for nu in new_urls:
                             if nu not in seen:
                                 seen.add(nu)
                                 stats["discovered"] += 1
                                 queue.append((nu, d + 1, res.final_url or u))
             stats["queue_remaining"] = len(queue)
-            status = "completed" if not queue else "completed_capped"
+            status = ("failed" if not stats["crawled"] else
+                      "completed_with_errors" if stats["failed"] else
+                      "completed" if not queue else "completed_capped")
             conn.execute("UPDATE crawl_runs SET finished_at=?, urls_crawled=?, urls_failed=?, status=?, notes=? WHERE run_id=?",
                          (utcnow(), stats["crawled"], stats["failed"], status, j(stats), run_id))
             conn.commit()

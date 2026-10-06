@@ -29,6 +29,7 @@ export function ConnectionTester({
   initialValue,
   initialResult,
   initialAuth,
+  refreshKey = 0,
   mode = 'full',
   onResult
 }: {
@@ -39,6 +40,7 @@ export function ConnectionTester({
   initialValue?: string | null;
   initialResult?: ConnectionResult;
   initialAuth?: WpAuthStatus | null;
+  refreshKey?: number;
   mode?: 'full' | 'simple';        // simple: friendly labels, WP auth behind «اتصال پیشرفته», no manual GA4 id input
   onResult?: (r: ConnectionResult) => void;
 }) {
@@ -69,7 +71,7 @@ export function ConnectionTester({
         .then(setGa4Props)
         .catch((e: ApiError) => setGa4Props({ status: 'error', message: e.message, properties: [] }));
     }
-  }, [kind]);
+  }, [kind, refreshKey]);
 
   async function run() {
     setBusy(true);

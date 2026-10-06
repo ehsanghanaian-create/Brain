@@ -4,7 +4,7 @@
 
 ## راه‌اندازی
 
-از ریشهٔ پروژه، `python backend/cli/api.py` و از پوشهٔ `frontend`، `pnpm dev` را اجرا کنید. API هنگام شروع migration شمارهٔ `0020_call_center.sql` را اعمال می‌کند. داده‌های تماس در SQLite محلی قرار می‌گیرند.
+از ریشهٔ پروژه، `python backend/cli/api.py` و از پوشهٔ `frontend`، `pnpm dev` را اجرا کنید. API هنگام شروع migration شمارهٔ `0021_call_center.sql` را اعمال می‌کند. داده‌های تماس در SQLite محلی قرار می‌گیرند.
 
 ## مرکز تماس
 

@@ -20,4 +20,4 @@ The overview API (`GET /api/v1/work/overview`) provides filtered summary totals,
 
 Teams live in `panel_teams`, and users and work items reference them through `team_id`. Creating and editing teams, assigning members and mutating tasks require an administrator. Analysts can read the workspace, while call-center operators remain restricted to call-center. Work events store the acting panel username when an individual session made the change; trusted service jobs appear as system actions. The panel audit also records the route and changed field names.
 
-The migration sequence is `0028_work_command_center.sql`, `0029_work_event_actor.sql`, then `0030_project_execution.sql`. Back up the database before applying migrations in any environment. A deeper feature and release analysis is in `project-management-research-2026-10-05.md`.
+The migration sequence is `0029_work_command_center.sql`, `0030_work_event_actor.sql`, then `0031_project_execution.sql`. Back up the database before applying migrations in any environment. A deeper feature and release analysis is in `project-management-research-2026-10-05.md`.

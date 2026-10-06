@@ -2,6 +2,7 @@
 token format the GSC/GA4 clients read, callback works without X-API-Token (state nonce is the guard), status/email,
 disconnect, and GA4 property discovery via the Admin API — no duplicate OAuth architecture."""
 import json
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -33,9 +34,36 @@ def test_authorize_builds_google_url_with_existing_scopes_and_state(env):
     assert r.status_code == 200, r.text
     url = r.json()["url"]
     assert url.startswith("https://accounts.google.com/o/oauth2/auth")
-    assert "webmasters.readonly" in url and "analytics.readonly" in url          # data scopes unchanged
-    assert "userinfo.email" in url and "access_type=offline" in url and "state=" in url
+    assert "webmasters.readonly" in url and "analytics.readonly" in url
+    assert "adwords" not in url
+    params = parse_qs(urlparse(url).query)
+    assert "userinfo.email" in url and params["access_type"] == ["offline"] and params["prompt"] == ["select_account consent"] and "state" in params
+    assert "include_granted_scopes" not in params
     assert "127.0.0.1%3A8000%2Fapi%2Fv1%2Fconnections%2Fgoogle%2Fcallback" in url or "callback" in r.json()["redirect_uri"]
+
+
+def test_production_authorize_uses_public_https_web_callback(env, monkeypatch):
+    monkeypatch.setenv("FRONTEND_ORIGIN", "https://seo.example.test")
+    seen = {}
+
+    class FakeFlow:
+        code_verifier = "pkce-verifier"
+
+        def authorization_url(self, **kwargs):
+            return f"https://accounts.google.com/o/oauth2/auth?state={kwargs['state']}", kwargs["state"]
+
+    def capture_flow(config, scopes, redirect_uri):
+        seen.update(config=config, scopes=scopes, redirect_uri=redirect_uri)
+        return FakeFlow()
+
+    monkeypatch.setattr("google_auth_oauthlib.flow.Flow.from_client_config", capture_flow)
+    response = env["client"].get("/api/v1/connections/google/authorize")
+    expected = "https://seo.example.test/api/v1/connections/google/callback"
+    assert response.status_code == 200
+    assert response.json()["redirect_uri"] == expected
+    assert seen["redirect_uri"] == expected
+    assert seen["config"]["web"]["redirect_uris"] == [expected]
+    assert "installed" not in seen["config"]
 
 
 def test_callback_exchanges_code_and_writes_compatible_token(env, monkeypatch):
@@ -59,6 +87,7 @@ def test_callback_exchanges_code_and_writes_compatible_token(env, monkeypatch):
     monkeypatch.setattr(google_oauth, "_flow", lambda ru: _Flow())
     r = c.get("/api/v1/connections/google/callback", params={"code": "auth-code-1", "state": state})
     assert r.status_code == 200 and "اتصال برقرار شد" in r.text and "user@example.com" in r.text
+    assert "seo-brain-google-oauth" in r.text and "result:'success'" in r.text
     assert "at-1" not in r.text and "rt-1" not in r.text                          # never echo tokens
     # token file: same format the existing clients read (connections.service._token_info parses it)
     from seo_brain.connections.service import _token_info
@@ -83,6 +112,7 @@ def test_callback_is_reachable_without_api_token_but_other_routes_are_not(env, m
     assert c.get("/api/v1/connections/google/status").status_code == 401                       # protected
     r = c.get("/api/v1/connections/google/callback", params={"error": "access_denied"})        # public (Google redirect)
     assert r.status_code == 400 and "X-API-Token" not in r.text and "اتصال انجام نشد" in r.text
+    assert "result:'error'" in r.text
     assert c.get("/api/v1/connections/google/status", headers={"X-API-Token": "secret-token"}).status_code == 200
 
 
@@ -173,7 +203,9 @@ def test_token_migrates_from_plaintext_file_to_secret_store(env):
     from seo_brain.gsc.client import TOKEN_REF, read_token_json
     tp = env["tmp"] / "tokens" / "gsc_token.json"
     tp.parent.mkdir(parents=True, exist_ok=True)
-    tp.write_text(json.dumps({"token": "t", "refresh_token": "r-legacy", "scopes": google_oauth.WEB_SCOPES, "expiry": "2027-01-01T00:00:00Z"}), encoding="utf-8")
+    tp.write_text(json.dumps({"token": "t", "refresh_token": "r-legacy", "scopes": google_oauth.WEB_SCOPES,
+                              "client_id": "test-client-id.apps.googleusercontent.com", "client_secret": "test-secret",
+                              "token_uri": "https://oauth2.googleapis.com/token", "expiry": "2027-01-01T00:00:00Z"}), encoding="utf-8")
     # first read: migrated into the encrypted store, plaintext file removed, callers unchanged
     assert json.loads(read_token_json())["refresh_token"] == "r-legacy"
     assert not tp.exists()

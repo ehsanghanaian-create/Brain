@@ -101,16 +101,21 @@ def sync_ga4(conn: sqlite3.Connection, site: SiteConfig, start: date, end: date,
     pid = str(property_id or getattr(site, "ga4_property", "") or "").replace("properties/", "").strip()
     if not pid.isdigit():
         raise RuntimeError("GA4 property id is not configured for this site")
+    if not site.host:
+        raise RuntimeError("Canonical site hostname is required to isolate GA4 data")
     conn.execute("INSERT INTO sync_runs(run_id, site_id, source, started_at, status, params) VALUES (?,?,?,?,?,?)",
                  (run_id, site.site_id, "ga4", utcnow(), "running", j({"start": start.isoformat(), "end": end.isoformat(), "property": pid})))
     conn.commit()
     try:
         client = Ga4Client(site.site_id, interactive=interactive)
-        n_page = store_rows(conn, site, client.daily(pid, start, end, dimension="pagePath"), "page", run_id)
-        n_land = store_rows(conn, site, client.daily(pid, start, end, dimension="landingPage"), "landing", run_id)
-        n_site = store_site_rows(conn, site, list(client.site_daily(pid, start, end)), pid, start, end, run_id)
-        n_channel = store_site_rows(conn, site, list(client.site_daily(pid, start, end, by_channel=True)),
+        n_page = store_rows(conn, site, client.daily(pid, start, end, dimension="pagePath", host_name=site.host), "page", run_id)
+        n_land = store_rows(conn, site, client.daily(pid, start, end, dimension="landingPage", host_name=site.host), "landing", run_id)
+        n_site = store_site_rows(conn, site, list(client.site_daily(pid, start, end, host_name=site.host)), pid, start, end, run_id)
+        n_channel = store_site_rows(conn, site, list(client.site_daily(pid, start, end, by_channel=True, host_name=site.host)),
                                     pid, start, end, run_id, by_channel=True)
+        conn.execute("DELETE FROM ga4_daily WHERE site_id=? AND date BETWEEN ? AND ? AND sync_run_id<>?",
+                     (site.site_id, start.isoformat(), end.isoformat(), run_id))
+        conn.commit()
         stats = _stats(conn, site.site_id)
         conn.execute("UPDATE sync_runs SET finished_at=?, status='completed', rows_written=?, notes=? WHERE run_id=?",
                      (utcnow(), n_page + n_land + n_site + n_channel,

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import type { NodeDetails } from '@/lib/api/client';
 import { safeHref } from '@/lib/utils';
+import { RemediationAction } from '@/features/remediation/remediation-action';
 import { IconClick, IconFocus2, IconSearch } from '@tabler/icons-react';
 import { CONTENT_STATUS_FA, NODE_STYLE, RELATION_FA, SEVERITY_FA } from '../constants';
 
@@ -15,12 +16,14 @@ const num = (v: unknown, d = 0) => (typeof v === 'number' ? fa.format(Number(v.t
 type Neighbor = { id: string; type: string; label: string; url?: string | null; relation: string; direction: 'in' | 'out' };
 
 export function NodeDetailsPanel({
+  siteId,
   details,
   loading,
   error,
   onClose,
   onFocus
 }: {
+  siteId: string;
   details: NodeDetails | null;
   loading: boolean;
   error: string | null;
@@ -69,17 +72,17 @@ export function NodeDetailsPanel({
       </header>
       <div className='flex-1 space-y-4 overflow-y-auto p-3 text-sm'>
         {error && <p className='text-destructive'>{error}</p>}
-        {details && <Body d={details} onFocus={onFocus} />}
+        {details && <Body d={details} siteId={siteId} onFocus={onFocus} />}
       </div>
     </aside>
   );
 }
 
-function Body({ d, onFocus }: { d: NodeDetails; onFocus: (id: string) => void }) {
+function Body({ d, siteId, onFocus }: { d: NodeDetails; siteId: string; onFocus: (id: string) => void }) {
   const t = d.type;
-  if (t === 'PAGE' || t === 'POST' || t === 'CATEGORY') return <PageBody d={d} onFocus={onFocus} />;
+  if (t === 'PAGE' || t === 'POST' || t === 'CATEGORY') return <PageBody d={d} siteId={siteId} onFocus={onFocus} />;
   if (t === 'QUERY' || t === 'KEYWORD') return <KeywordBody d={d} onFocus={onFocus} />;
-  if (t === 'SEO_PROBLEM') return <ProblemBody d={d} />;
+  if (t === 'SEO_PROBLEM') return <ProblemBody d={d} siteId={siteId} />;
   if (t === 'SEO_OPPORTUNITY') return <OpportunityBody d={d} />;
   if (t === 'BRAND' || t === 'MODEL' || t === 'SERVICE' || t === 'LOCATION') return <EntityBody d={d} onFocus={onFocus} />;
   if (t === 'SCHEMA') return <SchemaBody d={d} onFocus={onFocus} />;
@@ -124,7 +127,7 @@ function NeighborList({ items, onFocus, empty = 'موردی نیست' }: { items
   );
 }
 
-function PageBody({ d, onFocus }: { d: NodeDetails; onFocus: (id: string) => void }) {
+function PageBody({ d, siteId, onFocus }: { d: NodeDetails; siteId: string; onFocus: (id: string) => void }) {
   const p = (d.page ?? {}) as Record<string, any>;
   const rel = (d.related ?? {}) as { queries?: Neighbor[]; entities?: Neighbor[] };
   const gsc = p.gsc as Record<string, number> | null;
@@ -181,6 +184,7 @@ function PageBody({ d, onFocus }: { d: NodeDetails; onFocus: (id: string) => voi
               <li key={i} className='rounded border p-2 text-xs'>
                 <div className='flex items-center justify-between'><span className='font-medium'>{pr.title_fa}</span><Badge variant={pr.severity === 'high' ? 'destructive' : 'secondary'}>{SEVERITY_FA[pr.severity] ?? pr.severity}</Badge></div>
                 <div className='text-muted-foreground mt-1'>اقدام: {pr.action_fa}</div>
+                {pr.issue_key && <RemediationAction siteId={siteId} issueKey={pr.issue_key} />}
               </li>
             ))}
           </ul>
@@ -243,7 +247,7 @@ function KeywordBody({ d, onFocus }: { d: NodeDetails; onFocus: (id: string) => 
   );
 }
 
-function ProblemBody({ d }: { d: NodeDetails }) {
+function ProblemBody({ d, siteId }: { d: NodeDetails; siteId: string }) {
   const p = (d.problem ?? {}) as Record<string, any>;
   return (
     <>
@@ -259,7 +263,7 @@ function ProblemBody({ d }: { d: NodeDetails }) {
       <Section title='صفحات درگیر'>
         <ul className='space-y-0.5 text-xs' dir='ltr'>
           {(p.affected_pages ?? []).map((a: any, i: number) => (
-            <li key={i} className='truncate'>{a.url}{a.related_url ? ` ↔ ${a.related_url}` : ''}</li>
+            <li key={i} className='border-b py-2'><div className='break-all'>{a.url}{a.related_url ? ` ↔ ${a.related_url}` : ''}</div>{a.issue_key && <RemediationAction siteId={siteId} issueKey={a.issue_key} />}</li>
           ))}
         </ul>
       </Section>

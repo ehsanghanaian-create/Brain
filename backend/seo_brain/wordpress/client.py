@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -15,6 +16,37 @@ from ..common.config import env, raw_data_dir
 from ..common.http import ReadOnlyClient
 
 log = logging.getLogger("wordpress")
+
+_STYLE_TAG = re.compile(r"\s*<style\b[^>]*>.*?</style>", re.I | re.S)
+
+
+def _wp_json_with_style_prefix(text: str) -> list[dict]:
+    """Recover a WP collection when a theme emits only CSS before its JSON.
+
+    Some Elementor themes incorrectly print inline style tags during REST
+    responses. Reject any other HTML/prefix so a login or error page can never
+    be treated as an authoritative published-content feed.
+    """
+    start = text.find('[{"id"')
+    if start < 0:
+        raise ValueError("WordPress collection JSON not found")
+    prefix = text[:start]
+    position = 0
+    style_count = 0
+    while position < len(prefix):
+        match = _STYLE_TAG.match(prefix, position)
+        if not match:
+            if prefix[position:].strip():
+                raise ValueError("Unexpected HTML before WordPress JSON")
+            break
+        position = match.end()
+        style_count += 1
+    if not style_count:
+        raise ValueError("No allowed style prefix")
+    data = json.loads(text[start:])
+    if not isinstance(data, list) or not all(isinstance(item, dict) and isinstance(item.get("id"), int) for item in data):
+        raise ValueError("Unexpected WordPress collection shape")
+    return data
 
 # Post types that are WordPress/Elementor internals, never public content pages
 INTERNAL_POST_TYPES = {
@@ -53,7 +85,17 @@ class WordPressClient:
         r = self.http.get(url, params=params, api="wordpress")
         if r.status_code >= 400:
             raise WPError(route, r.status_code, r.text[:300])
-        return r.json(), dict(r.headers)
+        try:
+            data = r.json()
+        except ValueError as exc:
+            if not route.startswith("/wp/v2/") or not r.headers.get("content-type", "").lower().startswith("application/json"):
+                raise WPError(route, r.status_code, "invalid JSON response") from exc
+            try:
+                data = _wp_json_with_style_prefix(r.text)
+            except ValueError as malformed:
+                raise WPError(route, r.status_code, "invalid JSON response") from malformed
+            log.warning("Removed theme style prefix from malformed WordPress REST collection %s", route)
+        return data, dict(r.headers)
 
     def _dump(self, name: str, obj: Any) -> str | None:
         if not self.save_raw:

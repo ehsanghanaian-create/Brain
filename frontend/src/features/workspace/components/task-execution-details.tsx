@@ -5,6 +5,8 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { UserDateInput } from '@/components/user-date-input';
+import { formatUserDate, useDatePreference } from '@/lib/date-preference';
 import { commandApi, type CommandWorkItem, type TaskDependency, type TaskTimeEntry, type WorkChecklistItem, type WorkCustomValue, type WorkLabel, type WorkPerson } from '../api';
 
 const number = new Intl.NumberFormat('fa-IR');
@@ -12,6 +14,7 @@ const number = new Intl.NumberFormat('fa-IR');
 export function TaskExecutionDetails({ item, items, people, canEdit, canLogTime, canLogOthers, meId, onChanged }: {
   item: CommandWorkItem; items: CommandWorkItem[]; people: WorkPerson[]; canEdit: boolean; canLogTime: boolean; canLogOthers: boolean; meId: number | null; onChanged: () => void;
 }) {
+  const { calendar } = useDatePreference();
   const [dependencies, setDependencies] = useState<TaskDependency[]>([]);
   const [entries, setEntries] = useState<TaskTimeEntry[]>([]);
   const [checklist, setChecklist] = useState<WorkChecklistItem[]>([]);
@@ -19,8 +22,6 @@ export function TaskExecutionDetails({ item, items, people, canEdit, canLogTime,
   const [itemLabels, setItemLabels] = useState<WorkLabel[]>([]);
   const [fields, setFields] = useState<WorkCustomValue[]>([]);
   const [fieldDrafts, setFieldDrafts] = useState<Record<number, string>>({});
-  const [comments, setComments] = useState<Awaited<ReturnType<typeof commandApi.events>>>([]);
-  const [commentText, setCommentText] = useState('');
   const [checklistTitle, setChecklistTitle] = useState('');
   const [dependencyId, setDependencyId] = useState('');
   const [userId, setUserId] = useState(meId?.toString() || item.owner_id?.toString() || '');
@@ -29,12 +30,12 @@ export function TaskExecutionDetails({ item, items, people, canEdit, canLogTime,
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const refresh = useCallback(async () => {
-    try { const [deps, time, checks, labels, selectedLabels, history, fieldRows] = await Promise.all([
+    try { const [deps, time, checks, labels, selectedLabels, fieldRows] = await Promise.all([
       commandApi.dependencies(item.site_id, item.id), commandApi.timeEntries(item.site_id, item.id), commandApi.checklist(item),
-      commandApi.labels(item.site_id), commandApi.itemLabels(item), commandApi.events(item), commandApi.itemFields(item)
+      commandApi.labels(item.site_id), commandApi.itemLabels(item), commandApi.itemFields(item)
     ]); setDependencies(deps); setEntries(time); setChecklist(checks); setProjectLabels(labels); setItemLabels(selectedLabels);
       setFields(fieldRows); setFieldDrafts(Object.fromEntries(fieldRows.map((field) => [field.id, String(field.value ?? '')])));
-      setComments(history.filter((event) => event.event_type === 'comment' && event.note)); }
+    }
     catch (cause) { toast.error(cause instanceof Error ? cause.message : 'جزئیات اجرا دریافت نشد'); }
   }, [item.id, item.site_id]);
   useEffect(() => { void refresh(); }, [refresh]);
@@ -89,14 +90,6 @@ export function TaskExecutionDetails({ item, items, people, canEdit, canLogTime,
     catch (cause) { toast.error(cause instanceof Error ? cause.message : 'تغییر برچسب انجام نشد'); }
     finally { setBusy(false); }
   }
-  async function postComment() {
-    if (!commentText.trim()) return;
-    setBusy(true);
-    try { await commandApi.updateWork(item, { note: commentText.trim() }); setCommentText(''); await refresh(); onChanged();
-      toast.success('گفت‌وگو ثبت شد'); }
-    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ثبت گفت‌وگو انجام نشد'); }
-    finally { setBusy(false); }
-  }
   async function saveField(field: WorkCustomValue) {
     const draft = (fieldDrafts[field.id] || '').trim();
     if (field.field_type === 'number' && draft && !Number.isFinite(Number(draft))) {
@@ -138,14 +131,9 @@ export function TaskExecutionDetails({ item, items, people, canEdit, canLogTime,
       {canEdit && <div className='flex gap-2'><NativeSelect aria-label='انتخاب پیش‌نیاز' value={dependencyId} onChange={(e) => setDependencyId(e.target.value)} className='flex-1'><NativeSelectOption value=''>انتخاب کار پیش‌نیاز</NativeSelectOption>{items.filter((other) => other.site_id === item.site_id && other.id !== item.id && !dependencies.some((dep) => dep.depends_on_id === other.id)).map((other) => <NativeSelectOption key={other.id} value={String(other.id)}>{other.title}</NativeSelectOption>)}</NativeSelect><Button size='sm' disabled={!dependencyId || busy} onClick={addDependency}>افزودن</Button></div>}
     </div>
     <div className='space-y-2 border-t pt-4'><div className='flex items-center justify-between'><strong className='text-sm'>زمان صرف‌شده</strong><span className='text-muted-foreground text-xs'>{number.format(spent / 60)} از {number.format(item.estimated_hours || 0)} ساعت برآوردی</span></div>
-      {entries.map((entry) => <div key={entry.id} className='flex justify-between gap-2 rounded-lg border p-2 text-xs'><span>{entry.user_name} · {entry.note || 'کار ثبت‌شده'}</span><span className='text-muted-foreground'>{new Date(entry.work_date).toLocaleDateString('fa-IR')} · {number.format(entry.minutes)} دقیقه</span></div>)}
+      {entries.map((entry) => <div key={entry.id} className='flex justify-between gap-2 rounded-lg border p-2 text-xs'><span>{entry.user_name} · {entry.note || 'کار ثبت‌شده'}</span><span className='text-muted-foreground'>{formatUserDate(entry.work_date, calendar)} · {number.format(entry.minutes)} دقیقه</span></div>)}
       {!entries.length && <p className='text-muted-foreground text-xs'>هنوز زمانی ثبت نشده است.</p>}
-      {canLogTime && <div className='grid gap-2 sm:grid-cols-2'><NativeSelect disabled={!canLogOthers} aria-label='انجام‌دهندهٔ زمان' value={userId} onChange={(e) => setUserId(e.target.value)}><NativeSelectOption value=''>انتخاب فرد</NativeSelectOption>{people.filter((person) => person.active && (canLogOthers || person.id === meId)).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect><Input aria-label='زمان به دقیقه' type='number' min={1} max={1440} placeholder='دقیقه' value={minutes} onChange={(e) => setMinutes(e.target.value)} /><Input aria-label='تاریخ کار' type='date' value={workDate} onChange={(e) => setWorkDate(e.target.value)} /><Input aria-label='شرح زمان' placeholder='چه کاری انجام شد؟' value={note} onChange={(e) => setNote(e.target.value)} /><Button size='sm' disabled={busy || !userId || !minutes || !workDate} onClick={logTime}>ثبت زمان</Button></div>}
-    </div>
-    <div className='space-y-2 border-t pt-4'><strong className='text-sm'>گفت‌وگوی کار</strong>
-      {comments.map((comment) => <div key={comment.id} className='rounded-lg border bg-muted/30 p-3 text-xs'><div className='mb-1 flex justify-between gap-2 text-muted-foreground'><span>{comment.actor_username || 'سیستم'}</span><time>{new Date(comment.created_at).toLocaleString('fa-IR')}</time></div><p className='whitespace-pre-wrap leading-5'>{comment.note}</p></div>)}
-      {!comments.length && <p className='text-muted-foreground text-xs'>هنوز گفت‌وگویی برای این کار ثبت نشده است.</p>}
-      {canLogTime && <div className='flex gap-2'><Input aria-label='پیام گفت‌وگوی کار' placeholder='پرسش، نتیجه یا هماهنگی تیم را بنویسید' value={commentText} maxLength={1000} onChange={(event) => setCommentText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void postComment(); }} /><Button size='sm' disabled={busy || !commentText.trim()} onClick={() => void postComment()}>ارسال</Button></div>}
+      {canLogTime && <div className='grid gap-2 sm:grid-cols-2'><NativeSelect disabled={!canLogOthers} aria-label='انجام‌دهندهٔ زمان' value={userId} onChange={(e) => setUserId(e.target.value)}><NativeSelectOption value=''>انتخاب فرد</NativeSelectOption>{people.filter((person) => person.active && (canLogOthers || person.id === meId)).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect><Input aria-label='زمان به دقیقه' type='number' min={1} max={1440} placeholder='دقیقه' value={minutes} onChange={(e) => setMinutes(e.target.value)} /><UserDateInput label='تاریخ کار' value={workDate} onChange={setWorkDate} /><Input aria-label='شرح زمان' placeholder='چه کاری انجام شد؟' value={note} onChange={(e) => setNote(e.target.value)} /><Button size='sm' disabled={busy || !userId || !minutes || !workDate} onClick={logTime}>ثبت زمان</Button></div>}
     </div>
   </div>;
 }

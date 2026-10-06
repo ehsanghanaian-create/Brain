@@ -281,6 +281,28 @@ def personal_board(request: Request, after_id: int = Query(0, ge=0),
             "next_after_id": page[-1]["id"] if len(rows) > limit else None}
 
 
+@router.get("/board/created")
+def created_board(request: Request, after_id: int = Query(0, ge=0),
+                  limit: int = Query(200, ge=1, le=500), eng: Engine = Depends(engine)) -> dict:
+    actor = getattr(request.state, "panel_user", None)
+    if not actor:
+        raise HTTPException(401, "sign in to view tasks you created")
+    with eng.connect() as cx:
+        rows = cx.execute(text("""SELECT w.*,s.name AS site_name,u.full_name AS owner_name,
+            creator.full_name AS created_by_name,t.name AS team_name,t.color AS team_color,
+            0 AS checklist_total,0 AS checklist_done FROM work_items w
+            JOIN sites s ON s.site_id=w.site_id LEFT JOIN panel_users u ON u.id=w.owner_id
+            LEFT JOIN panel_users creator ON creator.id=w.created_by_id
+            LEFT JOIN panel_teams t ON t.id=w.team_id
+            WHERE w.created_by_id=:creator AND w.deleted_at IS NULL
+            AND w.status NOT IN ('verified','rejected','deferred')
+            AND w.id>:after ORDER BY w.id LIMIT :limit"""),
+            {"creator": actor["id"], "after": after_id, "limit": limit + 1}).mappings().all()
+    page = rows[:limit]
+    return {"items": [{**dict(row), "labels": [], "custom_fields": []} for row in page],
+            "next_after_id": page[-1]["id"] if len(rows) > limit else None}
+
+
 @router.get("/board/{site_id}")
 def project_board(site_id: str, request: Request, after_id: int = Query(0, ge=0),
                   limit: int = Query(200, ge=1, le=500), eng: Engine = Depends(engine)) -> dict:

@@ -67,6 +67,8 @@ export const commandApi = {
     api<{ items: CommandWorkItem[]; next_after_id: number | null }>(`/work/board/${encodeURIComponent(siteId)}?after_id=${afterId}&limit=500`),
   personalBoardPage: (afterId = 0) =>
     api<{ items: CommandWorkItem[]; next_after_id: number | null }>(`/work/board/all?after_id=${afterId}&limit=500`),
+  createdBoardPage: (afterId = 0) =>
+    api<{ items: CommandWorkItem[]; next_after_id: number | null }>(`/work/board/created?after_id=${afterId}&limit=500`),
   archive: (kind: 'completed' | 'deleted', siteId?: string) =>
     api<CommandWorkItem[]>(`/work/archive?kind=${kind}${siteId ? `&site_id=${encodeURIComponent(siteId)}` : ''}`),
   teams: () => api<WorkTeam[]>('/work/teams'),
@@ -108,6 +110,12 @@ export const commandApi = {
   events: (item: CommandWorkItem) =>
     api<{ id: number; event_type: string; before_json: string | null; after_json: string; note: string | null; actor_username: string | null; created_at: string }[]>(
       `/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/events`),
+  addComment: (item: CommandWorkItem, text: string) =>
+    api(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/comments`, { method: 'POST', json: { text } }),
+  subtasks: (item: CommandWorkItem) =>
+    api<CommandWorkItem[]>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/subtasks`),
+  createSubtask: (item: CommandWorkItem, title: string) =>
+    api<CommandWorkItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/subtasks`, { method: 'POST', json: { title } }),
   checklist: (item: CommandWorkItem) => api<WorkChecklistItem[]>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist`),
   addChecklist: (item: CommandWorkItem, title: string) => api<WorkChecklistItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist`, { method: 'POST', json: { title } }),
   toggleChecklist: (item: CommandWorkItem, checklistId: number, done: boolean) => api<WorkChecklistItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist/${checklistId}`, { method: 'PATCH', json: { done } }),

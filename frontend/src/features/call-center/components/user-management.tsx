@@ -10,8 +10,10 @@ import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Icons } from '@/components/icons';
 import { callCenterApi, roleLabel, type PanelUser, type UserRole } from '../api';
 import { commandApi, type WorkTeam } from '@/features/workspace/api';
+import { formatUserDateTime, useDatePreference } from '@/lib/date-preference';
 
 export function UserManagement() {
+  const { calendar } = useDatePreference();
   const [users, setUsers] = useState<PanelUser[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -233,7 +235,7 @@ export function UserManagement() {
       </div>
       <Card><CardHeader><CardTitle>گزارش فعالیت کاربران</CardTitle><CardDescription>زمان، کاربر، مسیر و فیلدهای تغییرکرده؛ گذرواژه در لاگ ذخیره نمی‌شود.</CardDescription></CardHeader>
         <CardContent className='space-y-3'><Button variant='outline' onClick={async () => { try { setAudit(await callCenterApi.audit()); } catch (cause) { toast.error(cause instanceof Error ? cause.message : String(cause)); } }}>نمایش آخرین فعالیت‌ها</Button>
-          {audit && <div className='overflow-x-auto'><table className='w-full min-w-[700px] text-right text-xs'><thead><tr className='border-b'><th className='p-2'>زمان</th><th>کاربر</th><th>اقدام</th><th>مسیر</th><th>فیلدها</th></tr></thead><tbody>{audit.items.map((item) => <tr key={item.id} className='border-b'><td className='p-2'>{new Date(item.created_at).toLocaleString('fa-IR')}</td><td className='p-2'>{item.actor_username}</td><td className='p-2'>{item.method}</td><td className='p-2' dir='ltr'>{item.path}</td><td className='p-2'>{(JSON.parse(item.changed_fields) as string[]).join('، ') || '—'}</td></tr>)}</tbody></table></div>}
+          {audit && <div className='overflow-x-auto'><table className='w-full min-w-[700px] text-right text-xs'><thead><tr className='border-b'><th className='p-2'>زمان</th><th>کاربر</th><th>اقدام</th><th>مسیر</th><th>فیلدها</th></tr></thead><tbody>{audit.items.map((item) => <tr key={item.id} className='border-b'><td className='p-2'>{formatUserDateTime(item.created_at, calendar)}</td><td className='p-2'>{item.actor_username}</td><td className='p-2'>{item.method}</td><td className='p-2' dir='ltr'>{item.path}</td><td className='p-2'>{(JSON.parse(item.changed_fields) as string[]).join('، ') || '—'}</td></tr>)}</tbody></table></div>}
         </CardContent></Card>
     </div>
   );

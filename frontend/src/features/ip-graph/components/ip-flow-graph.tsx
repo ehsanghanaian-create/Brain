@@ -11,6 +11,7 @@ import { useManualLayout } from '@/features/graph/use-manual-layout';
 import type { GlowEdgeData } from '@/features/graph/components/glow-edge';
 import { endpoints, type IpGraph, type IpGraphNode } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
+import { formatUserDate, useDatePreference } from '@/lib/date-preference';
 
 /** Entry-flow graph: source → visitor/IP → landing page → goal (تماس / فرم). `seo` = cookieless tracker (anonymous daily
  *  visitors), `ads` = ads collector (real IPs + click-fraud risk). Same glass/flow language as the knowledge graph. */
@@ -29,7 +30,6 @@ const STATUS: Record<string, { color: string; fa: string }> = {
   risk: { color: '#ef4444', fa: 'پرخطر (احتمال کلیک تقلبی)' }
 };
 const fa = new Intl.NumberFormat('fa-IR');
-const when = (v: unknown) => (typeof v === 'string' && v ? new Date(v).toLocaleString('fa-IR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 
 type CardData = { label: string; sub?: string | null; kind: Kind; status: string; weight: number; dimmed?: boolean; hot?: boolean; [k: string]: unknown };
 type CardNode = Node<CardData, 'card'>;
@@ -119,6 +119,9 @@ function Row({ k, v, ltr }: { k: string; v: React.ReactNode; ltr?: boolean }) {
 }
 
 function Details({ node, scope, siteId, onClose }: { node: IpGraphNode; scope: 'seo' | 'ads'; siteId: string; onClose: () => void }) {
+  const { calendar } = useDatePreference();
+  const when = (value: unknown) => typeof value === 'string' && value ?
+    formatUserDate(value, calendar, { dateStyle: 'short', timeStyle: 'short' }) : '—';
   const m = node.meta as Record<string, unknown>;
   const tone = node.kind === 'actor' ? (STATUS[node.status]?.color ?? KIND.actor.color) : KIND[node.kind].color;
   const reasons = Array.isArray(m.risk_reasons) ? (m.risk_reasons as string[]) : [];

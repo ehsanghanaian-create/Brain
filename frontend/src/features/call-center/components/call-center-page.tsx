@@ -21,6 +21,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { UserDateInput } from '@/components/user-date-input';
+import { formatUserDate, useDatePreference } from '@/lib/date-preference';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Icons } from '@/components/icons';
 import {
@@ -49,11 +51,6 @@ import {
 } from '../api';
 
 const number = new Intl.NumberFormat('fa-IR');
-const dateTime = new Intl.DateTimeFormat('fa-IR', {
-  dateStyle: 'medium',
-  timeStyle: 'short',
-  timeZone: 'Asia/Tehran'
-});
 const colors: Record<CallSource, string> = {
   seo: 'var(--chart-1)',
   ads: '#066fd1',
@@ -178,6 +175,10 @@ function LiveChart({
 }
 
 export function CallCenterPage() {
+  const { calendar } = useDatePreference();
+  const dateTime = { format: (value: Date) => formatUserDate(value, calendar, {
+    dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Tehran'
+  }) };
   const [sites, setSites] = useState<Site[]>([]);
   const [users, setUsers] = useState<Pick<PanelUser, 'id' | 'full_name' | 'active'>[]>([]);
   const [records, setRecords] = useState<CallRecord[]>([]);
@@ -1021,13 +1022,8 @@ export function CallCenterPage() {
             <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
               <label htmlFor='call-occurred-at' className='space-y-1 text-xs'>
                 زمان تماس
-                <Input
-                  id='call-occurred-at'
-                  type='datetime-local'
-                  value={draft.occurred_at}
-                  onChange={(e) => field('occurred_at', e.target.value)}
-                  dir='ltr'
-                />
+                <UserDateInput label='زمان تماس' mode='datetime-local' value={draft.occurred_at}
+                  onChange={(value) => field('occurred_at', value)} />
                 <span className='text-muted-foreground block text-[10px]'>
                   خالی = اکنون؛ در ویرایش خالی = زمان نامشخص
                 </span>
@@ -1182,8 +1178,8 @@ export function CallCenterPage() {
               </label>
               <label htmlFor='call-follow-up' className='space-y-1 text-xs'>
                 زمان پیگیری بعدی
-                <Input id='call-follow-up' type='datetime-local' value={draft.follow_up_at}
-                  onChange={(e) => field('follow_up_at', e.target.value)} dir='ltr' />
+                <UserDateInput label='زمان پیگیری بعدی' mode='datetime-local' value={draft.follow_up_at}
+                  onChange={(value) => field('follow_up_at', value)} />
               </label>
               <label className='flex items-center gap-2 self-end pb-2 text-sm'>
                 <input
@@ -1242,7 +1238,7 @@ export function CallCenterPage() {
           <form id='quick-call-entry' onSubmit={saveQuick} className='mb-3 rounded-lg border border-primary/30 bg-primary/5 p-3'>
             <div className='mb-2 flex items-center justify-between gap-2'><strong className='text-sm'>ردیف جدید</strong><span className='text-muted-foreground text-xs'>منبع خودکار بررسی می‌شود؛ در صورت نیاز از ستون منبع اصلاح کنید.</span></div>
             <div className='grid gap-2 md:grid-cols-2 xl:grid-cols-[170px_140px_1fr_150px_120px_120px_120px_1.5fr_auto]'>
-              <Input aria-label='زمان واقعی تماس' title='زمان واقعی تماس' type='datetime-local' dir='ltr' value={quick.occurred_at} onFocus={() => setQuick((v) => ({ ...v, occurred_at: v.occurred_at || localNow() }))} onChange={(e) => setQuick((v) => ({ ...v, occurred_at: e.target.value }))} />
+              <UserDateInput label='زمان واقعی تماس' mode='datetime-local' value={quick.occurred_at} onChange={(value) => setQuick((v) => ({ ...v, occurred_at: value }))} />
               <NativeSelect aria-label='سایت تماس' value={quickSite || siteId} onChange={(e) => setQuickSite(e.target.value)}><NativeSelectOption value=''>سایت نامشخص</NativeSelectOption>{sites.map((s) => <NativeSelectOption key={s.site_id} value={s.site_id}>{s.name}</NativeSelectOption>)}</NativeSelect>
               <Input aria-label='نام تماس‌گیرنده' placeholder='نام تماس‌گیرنده' value={quick.customer_name} onChange={(e) => setQuick((v) => ({ ...v, customer_name: e.target.value }))} />
               <Input aria-label='شماره تماس‌گیرنده، الزامی' placeholder='شماره تماس *' required dir='ltr' inputMode='tel' value={quick.phone} onChange={(e) => setQuick((v) => ({ ...v, phone: e.target.value }))} />

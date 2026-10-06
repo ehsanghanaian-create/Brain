@@ -5,11 +5,13 @@ import Link from 'next/link';
 import { IconBell } from '@tabler/icons-react';
 import { api } from '@/lib/api/client';
 import { Button } from '@/components/ui/button';
+import { formatUserDateTime, useDatePreference } from '@/lib/date-preference';
 
 type Notification = { id: number; work_item_id: number | null; site_id: string | null;
   title: string; body: string; created_at: string; read_at: string | null };
 
 export function TaskNotifications() {
+  const { calendar } = useDatePreference();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
@@ -36,7 +38,7 @@ export function TaskNotifications() {
       {items.map((item) => <Link key={item.id} href='/dashboard/work' onClick={() => void read(item)} className={`block rounded-lg p-2 text-right hover:bg-muted ${!item.read_at ? 'bg-primary/5' : ''}`}>
         <span className='block truncate text-sm font-medium'>{item.title}</span>
         <span className='text-muted-foreground block text-xs'>{item.body}</span>
-        <span className='text-muted-foreground block text-[11px]'>{new Date(item.created_at).toLocaleString('fa-IR')}</span>
+        <span className='text-muted-foreground block text-[11px]'>{formatUserDateTime(item.created_at, calendar)}</span>
       </Link>)}
       {!items.length && <p className='text-muted-foreground p-4 text-center text-xs'>اعلان تازه‌ای نیست.</p>}
     </div>}

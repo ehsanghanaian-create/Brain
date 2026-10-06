@@ -6,15 +6,26 @@ import { api } from '@/lib/api/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { useDatePreference, type DateCalendar } from '@/lib/date-preference';
 
-type Profile = { username: string; full_name: string; email: string | null; role: string };
+type Profile = { username: string; full_name: string; email: string | null; role: string; date_calendar: DateCalendar };
 
 export function ProfileEditor() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { void api<Profile>('/auth/me').then(setProfile).catch(() => toast.error('پروفایل دریافت نشد')); }, []);
+  const { calendar, setCalendar } = useDatePreference();
+  useEffect(() => { void api<Profile>('/auth/me').then((value) => { setProfile(value); setCalendar(value.date_calendar); }).catch(() => toast.error('پروفایل دریافت نشد')); }, [setCalendar]);
+  async function setDateCalendar(value: DateCalendar) {
+    setBusy(true);
+    try { await api('/auth/me/preferences', { method: 'PATCH', json: { date_calendar: value } });
+      setCalendar(value); setProfile((previous) => previous ? { ...previous, date_calendar: value } : previous);
+      toast.success('تقویم نمایش تاریخ ذخیره شد'); }
+    catch (error) { toast.error(error instanceof Error ? error.message : 'تنظیم تاریخ ذخیره نشد'); }
+    finally { setBusy(false); }
+  }
   async function save() {
     if (!profile || !password) { toast.error('رمز فعلی را وارد کنید'); return; }
     setBusy(true);
@@ -29,6 +40,12 @@ export function ProfileEditor() {
   }
   return <Card className='mx-auto max-w-xl' dir='rtl'><CardHeader><CardTitle>پروفایل من</CardTitle></CardHeader><CardContent className='space-y-4'>
     {profile && <>
+      <label className='block space-y-1 text-sm'>تقویم نمایش تاریخ
+        <NativeSelect value={calendar} disabled={busy} onChange={(event) => void setDateCalendar(event.target.value as DateCalendar)}>
+          <NativeSelectOption value='jalali'>شمسی</NativeSelectOption><NativeSelectOption value='gregorian'>میلادی</NativeSelectOption>
+        </NativeSelect>
+        <span className='text-muted-foreground block text-xs'>این تنظیم فقط برای حساب شما ذخیره می‌شود و تاریخ‌های ثبت‌شده را تغییر نمی‌دهد.</span>
+      </label>
       <label className='block space-y-1 text-sm'>نام نمایشی<Input value={profile.full_name} onChange={(e) => setProfile({ ...profile, full_name: e.target.value })} /></label>
       <label className='block space-y-1 text-sm'>نام کاربری<Input dir='ltr' value={profile.username} onChange={(e) => setProfile({ ...profile, username: e.target.value })} /></label>
       <label className='block space-y-1 text-sm'>ایمیل<Input dir='ltr' type='email' value={profile.email || ''} onChange={(e) => setProfile({ ...profile, email: e.target.value || null })} /></label>

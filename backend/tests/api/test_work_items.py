@@ -282,10 +282,11 @@ def test_manual_project_assignment_priority_archive_and_profile(client):
 
     assert client.patch(f"{base}/{task_id}", headers=analyst, json={"status": "verified"}).status_code == 200
     assert any(row["id"] == task_id for row in client.get("/api/v1/work/archive?kind=completed", headers=admin).json())
-    assert client.delete(f"{base}/{ordinary.json()['id']}", headers=admin).status_code == 200
+    assert client.delete(f"{base}/{ordinary.json()['id']}", headers=admin).status_code == 403
+    assert client.delete(f"{base}/{ordinary.json()['id']}", headers=analyst).status_code == 200
     assert any(row["id"] == ordinary.json()["id"] for row in client.get("/api/v1/work/archive?kind=deleted", headers=admin).json())
     assert all(row["id"] != ordinary.json()["id"] for row in client.get(f"/api/v1/work/board/{project}", headers=admin).json()["items"])
-    assert client.post(f"{base}/{ordinary.json()['id']}/restore", headers=admin).status_code == 200
+    assert client.post(f"{base}/{ordinary.json()['id']}/restore", headers=analyst).status_code == 200
 
     assert client.patch("/api/v1/auth/me", headers=analyst,
                         json={"username": "analyst2", "current_password": "wrong"}).status_code == 403
@@ -295,3 +296,51 @@ def test_manual_project_assignment_priority_archive_and_profile(client):
     assert updated.status_code == 200, updated.text
     assert updated.json()["username"] == "analyst2"
     assert client.post("/api/v1/auth/login", json={"username": "analyst2", "password": "new-password-123"}).status_code == 200
+
+
+def test_task_owner_isolation_subtasks_comments_and_calendar(client):
+    with client.eng.begin() as cx:
+        cx.execute(text("UPDATE panel_users SET username='worker',password_hash=:hash WHERE id=1"),
+                   {"hash": hash_password("worker-password")})
+        for username, role in (("lead", "admin"), ("observer", "analyst")):
+            cx.execute(text("""INSERT INTO panel_users(username,full_name,email,role,active,password_hash,created_at,updated_at)
+                VALUES (:name,:name,:email,:role,1,:hash,'2026-01-01','2026-01-01')"""),
+                {"name": username, "email": username + "@example.com", "role": role,
+                 "hash": hash_password(username + "-password")})
+    def auth(name):
+        response = client.post("/api/v1/auth/login", json={"username": name, "password": name + "-password"})
+        assert response.status_code == 200, response.text
+        return {"Authorization": "Bearer " + response.json()["token"]}
+    lead, worker, observer = auth("lead"), auth("worker"), auth("observer")
+    assert client.put("/api/v1/work/projects/demo/members/3", headers=lead,
+                      json={"user_id": 3, "responsibility": "viewer"}).status_code == 200
+    root = "/api/v1/sites/demo/work"
+    draft = client.post(root, headers=lead, json={"title": "Personal draft"}).json()
+    assert client.patch(f"{root}/{draft['id']}", headers=worker, json={"title": "Hijacked draft"}).status_code == 403
+    assert client.patch(f"{root}/{draft['id']}", headers=lead, json={"owner_id": 1}).status_code == 200
+    assert client.patch(f"{root}/{draft['id']}", headers=lead, json={"title": "Changed by lead"}).status_code == 403
+    assert client.patch(f"{root}/{draft['id']}", headers=worker, json={"title": "Planned by worker"}).status_code == 200
+    assert client.patch(f"{root}/{draft['id']}", headers=worker, json={"owner_id": 3}).status_code == 403
+    assert client.patch(f"{root}/{draft['id']}", headers=observer, json={"status": "in_progress"}).status_code == 403
+    assert client.post(f"{root}/{draft['id']}/checklist", headers=observer, json={"title": "Unwanted step"}).status_code == 403
+    assert client.post(f"{root}/{draft['id']}/comments", headers=observer,
+                       json={"text": "Review note"}).status_code == 201
+    assert any(row["note"] == "Review note" for row in client.get(f"{root}/{draft['id']}/events", headers=worker).json())
+    assert client.post(f"{root}/{draft['id']}/subtasks", headers=observer,
+                       json={"title": "Unwanted child"}).status_code == 403
+    child = client.post(f"{root}/{draft['id']}/subtasks", headers=worker,
+                        json={"title": "Worker child"})
+    assert child.status_code == 201, child.text
+    child_id = child.json()["id"]
+    assert client.get(f"{root}/{draft['id']}/subtasks", headers=observer).json()[0]["id"] == child_id
+    assert client.delete(f"{root}/{draft['id']}", headers=lead).status_code == 403
+    assert client.delete(f"{root}/{draft['id']}", headers=worker).status_code == 200
+    assert all(row["id"] not in {draft["id"], child_id}
+               for row in client.get("/api/v1/work/board/demo", headers=lead).json()["items"])
+    assert client.post(f"{root}/{draft['id']}/restore", headers=worker).status_code == 200
+    assert {draft["id"], child_id} <= {row["id"] for row in client.get("/api/v1/work/board/demo", headers=lead).json()["items"]}
+    assert client.get("/api/v1/auth/me", headers=worker).json()["date_calendar"] == "jalali"
+    assert client.patch("/api/v1/auth/me/preferences", headers=worker,
+                        json={"date_calendar": "gregorian"}).status_code == 200
+    assert client.get("/api/v1/auth/me", headers=worker).json()["date_calendar"] == "gregorian"
+    assert client.get("/api/v1/auth/me", headers=lead).json()["date_calendar"] == "jalali"

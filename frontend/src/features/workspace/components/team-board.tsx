@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { UserDateInput } from '@/components/user-date-input';
+import { formatUserDate, useDatePreference } from '@/lib/date-preference';
 import type { WorkStatus } from '@/features/reports/types';
 import { commandApi, type BoardViewConfig, type CommandWorkItem, type SavedBoardView, type WorkCustomField, type WorkLabel, type WorkPerson, type WorkPriority } from '../api';
 
@@ -28,11 +30,12 @@ const laneOf = (status: WorkStatus) => lanes.find((lane) => lane.statuses.includ
 const ordered = (rows: CommandWorkItem[]) => [...rows].sort((a, b) => (a.board_order ?? a.id * 1024) - (b.board_order ?? b.id * 1024) || a.id - b.id);
 const dateInput = (value: string | null) => value ? new Date(value).toISOString().slice(0, 10) : '';
 
-function BoardCard({ item, people, canUpdate, canLead, canSelect, busy, selected, onSelect, onOpen, onQuickSave }: {
-  item: CommandWorkItem; people: WorkPerson[]; canUpdate: boolean; canLead: boolean; busy: boolean;
+function BoardCard({ item, people, canUpdate, canSelect, busy, selected, onSelect, onOpen, onQuickSave }: {
+  item: CommandWorkItem; people: WorkPerson[]; canUpdate: boolean; busy: boolean;
   canSelect: boolean; selected: boolean; onSelect: () => void;
   onOpen: () => void; onQuickSave: (patch: Record<string, unknown>) => Promise<boolean>;
 }) {
+  const { calendar } = useDatePreference();
   const [quick, setQuick] = useState(false);
   const [owner, setOwner] = useState(item.owner_id?.toString() || '');
   const [due, setDue] = useState(dateInput(item.due_at));
@@ -44,11 +47,11 @@ function BoardCard({ item, people, canUpdate, canLead, canSelect, busy, selected
     {!!item.labels?.length && <div className='mt-2 flex flex-wrap gap-1'>{item.labels.map((label) => <span key={label.id} className='rounded-md px-1.5 py-0.5 text-[10px] text-white' style={{ backgroundColor: label.color }}>{label.name}</span>)}</div>}
     {!!item.custom_fields?.length && <div className='mt-2 space-y-1 text-[10px] text-muted-foreground'>{item.custom_fields.slice(0, 2).map((field) => <p key={field.id} className='truncate'>{field.name}: <span className='text-foreground'>{String(field.value)}</span></p>)}</div>}
     <div className='mt-3 flex flex-wrap gap-1.5'><Badge variant='outline' className={item.priority === 'critical' ? 'border-rose-500/40 text-rose-600' : ''}>{priorityText[item.priority]}</Badge>{overdue && <Badge variant='destructive'>عقب‌افتاده</Badge>}{item.checklist_total > 0 && <Badge variant='secondary'>☑ {number.format(item.checklist_done)}/{number.format(item.checklist_total)}</Badge>}</div>
-    <div className='text-muted-foreground mt-3 flex items-center justify-between gap-2 text-[11px]'><span className='truncate'>{item.owner_name || 'بی‌مسئول'}</span><span>{item.due_at ? new Date(item.due_at).toLocaleDateString('fa-IR', { month: 'short', day: 'numeric' }) : 'بی‌موعد'}</span></div>
+    <div className='text-muted-foreground mt-3 flex items-center justify-between gap-2 text-[11px]'><span className='truncate'>{item.owner_name || 'بی‌مسئول'}</span><span>{item.due_at ? formatUserDate(item.due_at, calendar, { month: 'short', day: 'numeric' }) : 'بی‌موعد'}</span></div>
     <span className='text-muted-foreground mt-1 block text-[11px]'>واگذارکننده: {item.created_by_name || 'سیستم'}</span>
     {canUpdate && item.status !== 'verified' && <button type='button' disabled={busy} onClick={() => void onQuickSave({ status: 'verified' })} className='mt-2 rounded-md border border-emerald-500/30 px-2 py-1 text-[11px] text-emerald-700 hover:bg-emerald-500/10'>✓ انجام شد</button>}
     {(item.progress_percent || 0) > 0 && <div className='mt-2 h-1 overflow-hidden rounded-full bg-muted'><div className='h-full rounded-full bg-emerald-500' style={{ width: `${item.progress_percent || 0}%` }} /></div>}
-    {canLead && <div className='mt-2 border-t pt-2'><button type='button' onClick={() => { setOwner(item.owner_id?.toString() || ''); setDue(dateInput(item.due_at)); setPriority(item.priority); setQuick((value) => !value); }} className='text-primary text-[11px] hover:underline'>{quick ? 'بستن ویرایش سریع' : 'واگذاری و موعد'}</button>{quick && <div className='mt-2 space-y-2'><NativeSelect aria-label={`مسئول ${item.title}`} value={owner} onChange={(event) => setOwner(event.target.value)}><NativeSelectOption value=''>بی‌مسئول</NativeSelectOption>{people.map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect><Input aria-label={`موعد ${item.title}`} type='date' value={due} onChange={(event) => setDue(event.target.value)} /><NativeSelect aria-label={`اولویت ${item.title}`} value={priority} onChange={(event) => setPriority(event.target.value as WorkPriority)}>{(Object.keys(priorityText) as WorkPriority[]).map((key) => <NativeSelectOption key={key} value={key}>{priorityText[key]}</NativeSelectOption>)}</NativeSelect><Button size='sm' disabled={busy} onClick={() => void onQuickSave({ owner_id: owner ? Number(owner) : null, due_at: due ? new Date(`${due}T12:00:00`).toISOString() : null, priority }).then((saved) => { if (saved) setQuick(false); })}>ذخیره</Button></div>}</div>}
+    {canUpdate && <div className='mt-2 border-t pt-2'><button type='button' onClick={() => { setOwner(item.owner_id?.toString() || ''); setDue(dateInput(item.due_at)); setPriority(item.priority); setQuick((value) => !value); }} className='text-primary text-[11px] hover:underline'>{quick ? 'بستن ویرایش سریع' : 'برنامه‌ریزی کارت'}</button>{quick && <div className='mt-2 space-y-2'>{item.owner_id === null && <NativeSelect aria-label={`مسئول ${item.title}`} value={owner} onChange={(event) => setOwner(event.target.value)}><NativeSelectOption value=''>بی‌مسئول</NativeSelectOption>{people.map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect>}<UserDateInput label={`موعد ${item.title}`} value={due} onChange={setDue} /><NativeSelect aria-label={`اولویت ${item.title}`} value={priority} onChange={(event) => setPriority(event.target.value as WorkPriority)}>{(Object.keys(priorityText) as WorkPriority[]).map((key) => <NativeSelectOption key={key} value={key}>{priorityText[key]}</NativeSelectOption>)}</NativeSelect><Button size='sm' disabled={busy} onClick={() => void onQuickSave({ ...(item.owner_id === null ? { owner_id: owner ? Number(owner) : null } : {}), due_at: due ? new Date(`${due}T12:00:00`).toISOString() : null, priority }).then((saved) => { if (saved) setQuick(false); })}>ذخیره</Button></div>}</div>}
   </article>;
 }
 
@@ -63,8 +66,8 @@ export function TeamBoard({ items, sites, people, preferredSiteId, meId, canLead
   onOpen: (item: CommandWorkItem) => void;
   onSiteChange: (siteId: string) => void; onChanged: () => Promise<void>;
 }) {
-  const [siteId, setSiteId] = useState(preferredSiteId || sites[0]?.site_id || '');
-  const [localItems, setLocalItems] = useState(items);
+  const [siteId, setSiteId] = useState(preferredSiteId || 'all');
+  const [localItems, setLocalItems] = useState<CommandWorkItem[]>([]);
   const [query, setQuery] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
@@ -98,11 +101,12 @@ export function TeamBoard({ items, sites, people, preferredSiteId, meId, canLead
   const [dragged, setDragged] = useState<CommandWorkItem | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  useEffect(() => { setLocalItems([]); }, [siteId]);
   useEffect(() => { if (!siteId) return; let active = true; setBoardLoading(true);
     void (async () => { try { const all: CommandWorkItem[] = []; let cursor = 0;
       do { const page = siteId === 'all' ? await commandApi.personalBoardPage(cursor) : await commandApi.boardPage(siteId, cursor); all.push(...page.items);
         cursor = page.next_after_id || 0; } while (cursor && active);
-      if (active) setLocalItems((current) => siteId === 'all' ? all : [...current.filter((item) => item.site_id !== siteId), ...all]);
+      if (active) setLocalItems([...new Map(all.filter((item) => !item.deleted_at).map((item) => [item.id, item])).values()]);
     } catch (cause) { if (active) toast.error(cause instanceof Error ? cause.message : 'بارگیری کامل برد انجام نشد'); }
     finally { if (active) setBoardLoading(false); } })();
     return () => { active = false; };
@@ -110,7 +114,7 @@ export function TeamBoard({ items, sites, people, preferredSiteId, meId, canLead
   useEffect(() => { if (!fullscreen) return; const previous = document.body.style.overflow; document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = previous; };
   }, [fullscreen]);
-  useEffect(() => { if (preferredSiteId) setSiteId(preferredSiteId); else if (!siteId && sites[0]) setSiteId(sites[0].site_id); }, [preferredSiteId, siteId, sites]);
+  useEffect(() => { if (preferredSiteId) setSiteId(preferredSiteId); }, [preferredSiteId]);
   useEffect(() => { if (!siteId) return; if (siteId === 'all') { setLabels([]); setViews([]); setFields([]); setLabelFilter(null); return; }
     let active = true; setSelectedIds([]); setActiveViewId('');
     void Promise.all([commandApi.labels(siteId), commandApi.savedViews(siteId), commandApi.customFields(siteId)])
@@ -213,7 +217,8 @@ export function TeamBoard({ items, sites, people, preferredSiteId, meId, canLead
   }
   async function applyBulk() {
     const patch: { owner_id?: number | null; due_at?: string | null; priority?: WorkPriority } = {};
-    if (bulkOwner) patch.owner_id = bulkOwner === 'unassigned' ? null : Number(bulkOwner);
+    if (bulkOwner && selectedIds.every((id) => localItems.find((item) => item.id === id)?.owner_id === null))
+      patch.owner_id = bulkOwner === 'unassigned' ? null : Number(bulkOwner);
     if (bulkDue) patch.due_at = new Date(`${bulkDue}T12:00:00`).toISOString();
     if (bulkPriority) patch.priority = bulkPriority as WorkPriority;
     if (!Object.keys(patch).length) { toast.error('تغییری برای کارت‌های انتخابی مشخص کنید'); return; }
@@ -235,6 +240,9 @@ export function TeamBoard({ items, sites, people, preferredSiteId, meId, canLead
     if (!targetLane || (overCard && overCard.id === item.id)) return;
     const nextStatus = groupBy === 'status' && laneOf(item.status).key !== targetLane.key ? targetLane.status : item.status;
     const nextOwner = groupBy === 'owner' ? (targetLane.key === 'unassigned' ? null : Number(targetLane.key.slice(6))) : item.owner_id;
+    if (item.owner_id !== null && nextOwner !== item.owner_id) {
+      toast.error('مسئول تسک واگذارشده از روی برد تغییر نمی‌کند'); return;
+    }
     const nextPriority = groupBy === 'priority' ? targetLane.key as WorkPriority : item.priority;
     const siblings = ordered(localItems.filter((row) => (siteId === 'all' || row.site_id === siteId) && belongsToLane(row, targetLane) && row.id !== item.id));
     const index = overCard ? siblings.findIndex((row) => row.id === overCard.id) : siblings.length;
@@ -258,7 +266,7 @@ export function TeamBoard({ items, sites, people, preferredSiteId, meId, canLead
   return <div className={fullscreen ? 'fixed inset-0 z-[60] space-y-3 overflow-y-auto bg-background p-4' : 'space-y-3'} dir='rtl'>
     <div className='flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3'>
       <strong className='ml-2 text-sm'>برد پروژه</strong>
-      <NativeSelect aria-label='پروژهٔ برد' value={siteId} onChange={(event) => { setSiteId(event.target.value); setSelectedIds([]); onSiteChange(event.target.value === 'all' ? '' : event.target.value); }} className='min-w-44'><NativeSelectOption value='all'>همهٔ کارهای من</NativeSelectOption>{sites.map((site) => <NativeSelectOption key={site.site_id} value={site.site_id}>{site.name}</NativeSelectOption>)}</NativeSelect>
+      <NativeSelect aria-label='پروژهٔ برد' value={siteId} onChange={(event) => { setSiteId(event.target.value); setSelectedIds([]); onSiteChange(event.target.value === 'all' ? '' : event.target.value); }} className='min-w-44'><NativeSelectOption value='all'>به من واگذار شده</NativeSelectOption>{sites.map((site) => <NativeSelectOption key={site.site_id} value={site.site_id}>{site.name}</NativeSelectOption>)}</NativeSelect>
       <NativeSelect aria-label='گروه‌بندی برد' value={groupBy} onChange={(event) => { setGroupBy(event.target.value as BoardViewConfig['group_by']); setSelectedIds([]); }} className='w-36'><NativeSelectOption value='status'>بر اساس مرحله</NativeSelectOption><NativeSelectOption value='owner'>بر اساس مسئول</NativeSelectOption><NativeSelectOption value='priority'>بر اساس اولویت</NativeSelectOption></NativeSelect>
       <Input aria-label='جست‌وجوی کارت در برد' placeholder='جست‌وجوی کارت…' value={query} onChange={(event) => setQuery(event.target.value)} className='min-w-40 flex-1' />
       <Button size='sm' variant={showFilters || ownerFilter || priorityFilter || labelFilter || mine ? 'default' : 'outline'} onClick={() => setShowFilters((value) => !value)}>فیلترها</Button>
@@ -280,16 +288,16 @@ export function TeamBoard({ items, sites, people, preferredSiteId, meId, canLead
     {showLabelManager && canLead(siteId) && <div className='flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3'><Input aria-label='نام برچسب پروژه' placeholder='برچسب جدید' value={labelName} onChange={(event) => setLabelName(event.target.value)} className='w-40' /><input aria-label='رنگ برچسب' type='color' value={labelColor} onChange={(event) => setLabelColor(event.target.value)} className='h-8 w-10 cursor-pointer' /><Button size='sm' disabled={busy || labelName.trim().length < 2} onClick={() => void createLabel()}>ساخت برچسب</Button><span className='mx-1 h-6 border-r' />{labels.map((label) => <span key={label.id} className='inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-white' style={{ backgroundColor: label.color }}>{label.name}<button type='button' aria-label={`حذف برچسب ${label.name}`} disabled={busy} onClick={() => void removeLabel(label)}>×</button></span>)}</div>}
     {showFieldManager && canLead(siteId) && <div className='flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3'><Input aria-label='نام فیلد پروژه' placeholder='نام فیلد جدید' value={fieldName} onChange={(event) => setFieldName(event.target.value)} className='w-40' /><NativeSelect aria-label='نوع فیلد پروژه' value={fieldType} onChange={(event) => setFieldType(event.target.value as WorkCustomField['field_type'])} className='w-36'><NativeSelectOption value='text'>متن</NativeSelectOption><NativeSelectOption value='number'>عدد</NativeSelectOption><NativeSelectOption value='date'>تاریخ</NativeSelectOption><NativeSelectOption value='select'>انتخابی</NativeSelectOption></NativeSelect>{fieldType === 'select' && <Input aria-label='گزینه‌های فیلد پروژه' placeholder='گزینه‌ها، جدا با ویرگول' value={fieldOptions} onChange={(event) => setFieldOptions(event.target.value)} className='w-56' />}<Button size='sm' disabled={busy || fieldName.trim().length < 2} onClick={() => void createField()}>ساخت فیلد</Button><span className='mx-1 h-6 border-r' />{fields.map((field) => <Badge key={field.id} variant='secondary' className='gap-1'>{field.name}<button type='button' aria-label={`حذف فیلد ${field.name}`} disabled={busy} onClick={() => void removeField(field)}>×</button></Badge>)}</div>}
     {!!selectedIds.length && <div className='flex flex-wrap items-center gap-2 rounded-xl border border-primary/40 bg-primary/5 p-3 text-xs'><strong>{number.format(selectedIds.length)} کارت انتخاب شد</strong>
-      <NativeSelect aria-label='مسئول گروهی' value={bulkOwner} onChange={(event) => setBulkOwner(event.target.value)} className='w-40'><NativeSelectOption value=''>مسئول: بدون تغییر</NativeSelectOption><NativeSelectOption value='unassigned'>حذف مسئول</NativeSelectOption>{eligiblePeople.map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect>
-      <Input aria-label='موعد گروهی' type='date' value={bulkDue} onChange={(event) => setBulkDue(event.target.value)} className='w-40' />
+      {selectedIds.every((id) => localItems.find((item) => item.id === id)?.owner_id === null) && <NativeSelect aria-label='مسئول گروهی' value={bulkOwner} onChange={(event) => setBulkOwner(event.target.value)} className='w-40'><NativeSelectOption value=''>مسئول: بدون تغییر</NativeSelectOption><NativeSelectOption value='unassigned'>حذف مسئول</NativeSelectOption>{eligiblePeople.map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect>}
+      <div className='w-44'><UserDateInput label='موعد گروهی' value={bulkDue} onChange={setBulkDue} /></div>
       <NativeSelect aria-label='اولویت گروهی' value={bulkPriority} onChange={(event) => setBulkPriority(event.target.value)} className='w-36'><NativeSelectOption value=''>اولویت: بدون تغییر</NativeSelectOption>{(Object.keys(priorityText) as WorkPriority[]).map((key) => <NativeSelectOption key={key} value={key}>{priorityText[key]}</NativeSelectOption>)}</NativeSelect>
       <Button size='sm' disabled={busy || (!bulkOwner && !bulkDue && !bulkPriority)} onClick={() => void applyBulk()}>اعمال روی همه</Button><Button size='sm' variant='ghost' onClick={() => setSelectedIds([])}>لغو انتخاب</Button>
     </div>}
     <div className='text-muted-foreground flex flex-wrap items-center justify-between gap-2 text-xs'><span>{boardLoading ? 'در حال دریافت کارت‌ها… · ' : ''}{number.format(filtered.length)} کارت در این نما · کارت را از دستهٔ ⠿ بگیرید و جابه‌جا کنید؛ جابه‌جایی خودکار ذخیره می‌شود.</span></div>
     <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={(event) => setDragged(localItems.find((item) => `card:${item.id}` === String(event.active.id)) || null)} onDragEnd={(event) => void handleDragEnd(event)} onDragCancel={() => setDragged(null)}><div className='flex gap-3 overflow-x-auto pb-4' dir='rtl'>{activeLanes.map((lane) => <BoardLane key={lane.key} lane={lane} items={rowsFor(lane)} fullscreen={fullscreen} grow={activeLanes.length <= 3}>
-      {rowsFor(lane).map((item) => <BoardCard key={item.id} item={item} people={eligiblePeople} canUpdate={canUpdate(item)} canLead={canLead(item.site_id)} canSelect={siteId !== 'all' && canLead(item.site_id)} busy={busy} selected={selectedIds.includes(item.id)} onSelect={() => setSelectedIds((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} onOpen={() => { setFullscreen(false); onOpen(item); }} onQuickSave={(patch) => quickSave(item, patch)} />)}
+      {rowsFor(lane).map((item) => <BoardCard key={item.id} item={item} people={eligiblePeople} canUpdate={canUpdate(item)} canSelect={siteId !== 'all' && canUpdate(item)} busy={busy} selected={selectedIds.includes(item.id)} onSelect={() => setSelectedIds((current) => current.includes(item.id) ? current.filter((id) => id !== item.id) : [...current, item.id])} onOpen={() => { setFullscreen(false); onOpen(item); }} onQuickSave={(patch) => quickSave(item, patch)} />)}
       {!rowsFor(lane).length && <p className='text-muted-foreground rounded-lg border border-dashed p-5 text-center text-xs'>کارتی در این ستون نیست</p>}
-      {groupBy === 'status' && siteId !== 'all' && canLead(siteId) && !['blocked', 'done'].includes(lane.key) && <div className='border-t pt-2'>{draftLane === lane.key ? <div className='space-y-2'><Input autoFocus aria-label={`عنوان کارت جدید ${lane.title}`} placeholder='عنوان کار جدید' value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void createCard(lane); }} /><NativeSelect aria-label='مسئول کارت جدید' value={draftOwner} onChange={(event) => setDraftOwner(event.target.value)}><NativeSelectOption value=''>بی‌مسئول</NativeSelectOption>{eligiblePeople.map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect><NativeSelect aria-label='اولویت کارت جدید' value={draftPriority} onChange={(event) => setDraftPriority(event.target.value as WorkPriority)}>{(Object.keys(priorityText) as WorkPriority[]).map((key) => <NativeSelectOption key={key} value={key}>{priorityText[key]}</NativeSelectOption>)}</NativeSelect><Input aria-label='موعد اختیاری کارت جدید' type='date' value={draftDue} onChange={(event) => setDraftDue(event.target.value)} /><div className='flex gap-2'><Button size='sm' disabled={busy || draftTitle.trim().length < 3} onClick={() => void createCard(lane)}>افزودن</Button><Button size='sm' variant='ghost' onClick={() => setDraftLane(null)}>انصراف</Button></div></div> : <button type='button' onClick={() => { setDraftLane(lane.key); setDraftTitle(''); setDraftOwner(''); setDraftDue(''); setDraftPriority('normal'); }} className='text-primary w-full rounded-lg p-2 text-right text-xs hover:bg-muted'>＋ افزودن کارت</button>}</div>}
+      {groupBy === 'status' && siteId !== 'all' && canLead(siteId) && !['blocked', 'done'].includes(lane.key) && <div className='border-t pt-2'>{draftLane === lane.key ? <div className='space-y-2'><Input autoFocus aria-label={`عنوان کارت جدید ${lane.title}`} placeholder='عنوان کار جدید' value={draftTitle} onChange={(event) => setDraftTitle(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void createCard(lane); }} /><NativeSelect aria-label='مسئول کارت جدید' value={draftOwner} onChange={(event) => setDraftOwner(event.target.value)}><NativeSelectOption value=''>بی‌مسئول</NativeSelectOption>{eligiblePeople.map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect><NativeSelect aria-label='اولویت کارت جدید' value={draftPriority} onChange={(event) => setDraftPriority(event.target.value as WorkPriority)}>{(Object.keys(priorityText) as WorkPriority[]).map((key) => <NativeSelectOption key={key} value={key}>{priorityText[key]}</NativeSelectOption>)}</NativeSelect><UserDateInput label='موعد اختیاری کارت جدید' value={draftDue} onChange={setDraftDue} /><div className='flex gap-2'><Button size='sm' disabled={busy || draftTitle.trim().length < 3} onClick={() => void createCard(lane)}>افزودن</Button><Button size='sm' variant='ghost' onClick={() => setDraftLane(null)}>انصراف</Button></div></div> : <button type='button' onClick={() => { setDraftLane(lane.key); setDraftTitle(''); setDraftOwner(''); setDraftDue(''); setDraftPriority('normal'); }} className='text-primary w-full rounded-lg p-2 text-right text-xs hover:bg-muted'>＋ افزودن کارت</button>}</div>}
     </BoardLane>)}</div><DragOverlay>{dragged && <div className='w-[280px] rotate-2 rounded-xl border bg-card p-3 shadow-xl'><strong className='text-sm'>{dragged.title}</strong><span className='text-muted-foreground mt-1 block text-xs'>{dragged.owner_name || 'بی‌مسئول'}</span></div>}</DragOverlay></DndContext>
   </div>;
 }

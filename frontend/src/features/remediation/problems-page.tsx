@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { api, endpoints, type AutoSyncPlan, type WpSyncStatus } from '@/lib/api/client';
 import type { components } from '@/lib/api/schema';
 import { RemediationAction } from './remediation-action';
+import { formatUserDate, useDatePreference } from '@/lib/date-preference';
 
 type Coverage = {
   status: string; complete: boolean; started_at?: string | null; finished_at?: string | null;
@@ -27,6 +28,7 @@ const categoryLabels: Record<string, string> = {
 };
 
 export function ProblemsPage({ sites, initialSiteId }: { sites: { site_id: string; name: string }[]; initialSiteId: string }) {
+  const { calendar } = useDatePreference();
   const [siteId, setSiteId] = useState(initialSiteId);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
@@ -140,10 +142,10 @@ export function ProblemsPage({ sites, initialSiteId }: { sites: { site_id: strin
       <Button type='button' variant='outline' disabled={loading} onClick={() => setRevision((n) => n + 1)}>تازه‌سازی فهرست</Button>
       <span className='text-muted-foreground'>
         {running ? `خزش در جریان است · ${syncStatus?.progress ?? 0}٪` : plan?.enabled && nextAt
-          ? `بررسی خودکار بعدی: ${new Date(nextAt).getTime() <= Date.now() ? 'در نوبت اجرا' : new Date(nextAt).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' })}`
+          ? `بررسی خودکار بعدی: ${new Date(nextAt).getTime() <= Date.now() ? 'در نوبت اجرا' : formatUserDate(nextAt, calendar, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Tehran' })}`
           : 'بررسی خودکار خاموش است'}
       </span>
-      {syncStatus?.finished_at && !running && <span className='text-muted-foreground'>آخرین بررسی: {new Date(syncStatus.finished_at).toLocaleString('fa-IR', { timeZone: 'Asia/Tehran' })}</span>}
+      {syncStatus?.finished_at && !running && <span className='text-muted-foreground'>آخرین بررسی: {formatUserDate(syncStatus.finished_at, calendar, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Tehran' })}</span>}
       {syncStatus?.status === 'failed' && <span className='text-destructive'>همگام‌سازی ناموفق: {syncStatus.errors?.[0] ?? 'گزارش اتصال را بررسی کنید'}</span>}
       {syncError && <span className='text-destructive'>{syncError}</span>}
     </div>

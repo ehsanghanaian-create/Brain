@@ -9,6 +9,7 @@ import { cookies } from 'next/headers';
 import { BackgroundJobs } from '@/components/layout/background-jobs';
 import { redirect } from 'next/navigation';
 import type { PanelRole } from '@/lib/panel-access';
+import { DatePreferenceProvider, type DateCalendar } from '@/lib/date-preference';
 
 export const metadata: Metadata = {
   description: 'داشبورد SEO Brain — سیستم‌عامل سئوی محلی',
@@ -27,8 +28,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const backend = (process.env.SEO_BRAIN_API_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
   const me = await fetch(`${backend}/api/v1/auth/me`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
   if (!me.ok) redirect('/login');
-  const user = await me.json() as { full_name: string; role: PanelRole };
+  const user = await me.json() as { username: string; full_name: string; role: PanelRole; date_calendar: DateCalendar };
   return (
+    <DatePreferenceProvider initialCalendar={user.date_calendar}>
     <KBar role={user.role}>
       <SidebarProvider defaultOpen={defaultOpen}>
         <a
@@ -41,7 +43,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <SidebarInset id='main-content' tabIndex={-1} className='scroll-mt-16'>
           <InfobarProvider defaultOpen={false}>
             <div className='flex min-w-0 flex-1 flex-col'>
-              <Header />
+              <Header user={user} />
               {children}
               {user.role === 'admin' && <BackgroundJobs />}
             </div>
@@ -50,5 +52,6 @@ export default async function DashboardLayout({ children }: { children: React.Re
         </SidebarInset>
       </SidebarProvider>
     </KBar>
+    </DatePreferenceProvider>
   );
 }

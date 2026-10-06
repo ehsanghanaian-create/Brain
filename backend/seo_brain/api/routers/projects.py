@@ -11,7 +11,7 @@ from sqlalchemy import Engine, text
 from sqlalchemy.exc import IntegrityError
 
 from ..deps import engine
-from ..project_access import require_assignee, require_lead
+from ..project_access import require_lead, require_task_editor
 from .work import _date_utc, now
 
 router = APIRouter(prefix="/work/projects", tags=["project-execution"])
@@ -242,8 +242,7 @@ def dependencies(site_id: str, item_id: int, eng: Engine = Depends(engine)) -> l
 def add_dependency(site_id: str, item_id: int, body: DependencyIn, request: Request,
                    eng: Engine = Depends(engine)) -> dict:
     with eng.begin() as cx:
-        _item(cx, site_id, item_id)
-        require_lead(cx, request, site_id)
+        require_task_editor(cx, request, site_id, _item(cx, site_id, item_id))
         _item(cx, site_id, body.depends_on_id)
         if item_id == body.depends_on_id:
             raise HTTPException(422, "work cannot depend on itself")
@@ -268,8 +267,7 @@ def add_dependency(site_id: str, item_id: int, body: DependencyIn, request: Requ
 def remove_dependency(site_id: str, item_id: int, depends_on_id: int, request: Request,
                       eng: Engine = Depends(engine)) -> None:
     with eng.begin() as cx:
-        _item(cx, site_id, item_id)
-        require_lead(cx, request, site_id)
+        require_task_editor(cx, request, site_id, _item(cx, site_id, item_id))
         result = cx.execute(text("DELETE FROM work_dependencies WHERE work_item_id=:id AND depends_on_id=:dep"),
                             {"id": item_id, "dep": depends_on_id})
         if result.rowcount == 0:
@@ -292,9 +290,9 @@ def log_time(site_id: str, item_id: int, body: TimeIn, request: Request,
              eng: Engine = Depends(engine)) -> dict:
     with eng.begin() as cx:
         item = _item(cx, site_id, item_id)
-        require_assignee(cx, request, site_id, item["owner_id"])
+        require_task_editor(cx, request, site_id, item)
         actor = getattr(request.state, "panel_user", None)
-        if actor and actor["role"] != "admin" and body.user_id != actor["id"]:
+        if actor and body.user_id != actor["id"]:
             raise HTTPException(403, "time can only be logged for the signed-in user")
         if not cx.execute(text("SELECT 1 FROM panel_users WHERE id=:id AND active=1"), {"id": body.user_id}).first():
             raise HTTPException(422, "time owner must be active")

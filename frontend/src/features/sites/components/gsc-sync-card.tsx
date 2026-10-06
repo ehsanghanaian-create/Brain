@@ -9,6 +9,7 @@ import { useIntegrationSyncStatus } from '../use-sync-status';
 import { queueMessage } from '../wp-sync';
 import { ConnectionTester } from './connection-tester';
 import { IntegrationCard, SyncCounters, SyncErrors, SyncProgress } from './integration-card';
+import { formatUserDateTime, useDatePreference } from '@/lib/date-preference';
 
 /**
  * GSC integration card — connection (property picker/tester) و pipeline «داده → فرصت‌ها → اسنپ‌شات → گراف» در یک قاب.
@@ -20,6 +21,7 @@ export function GscIntegrationCard({ siteId, initialValue, initialResult, refres
   initialResult?: ConnectionResult;
   refreshKey?: number;
 }) {
+  const { calendar } = useDatePreference();
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const load = useCallback(() => endpoints.gscSyncStatus(siteId), [siteId]);
@@ -54,7 +56,7 @@ export function GscIntegrationCard({ siteId, initialValue, initialResult, refres
           داده کوئری/صفحه از Search Console خوانده می‌شود، سپس فرصت‌های کلمات کلیدی، اسنپ‌شات عملکرد محتوا و گراف به‌روز می‌شوند. اجرا همیشه به‌صورت job در پس‌زمینه است.
           {status?.property && <span className='block' dir='ltr'>property: {status.property}</span>}
           {view.dateRange && <span className='block' dir='ltr'>بازه داده: {view.dateRange}</span>}
-          {view.lastSync && <span className='block' dir='ltr'>آخرین همگام‌سازی: {new Date(view.lastSync).toLocaleString('fa-IR')}</span>}
+          {view.lastSync && <span className='block' dir='ltr'>آخرین همگام‌سازی: {formatUserDateTime(view.lastSync, calendar)}</span>}
         </>
       }
     >

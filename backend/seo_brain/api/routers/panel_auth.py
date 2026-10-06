@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -38,7 +39,7 @@ def login(body: LoginIn, request: Request, eng: Engine = Depends(engine)) -> dic
         attempts = cx.execute(text("SELECT COUNT(*) FROM panel_login_attempts WHERE username=:username"),
                               {"username": username}).scalar_one()
         if attempts < 5:
-            row = cx.execute(text("SELECT id,username,full_name,email,role,active,password_hash FROM panel_users WHERE username=:username"),
+            row = cx.execute(text("SELECT id,username,full_name,email,role,date_calendar,active,password_hash FROM panel_users WHERE username=:username"),
                              {"username": username}).mappings().first()
             if not row or not row["active"] or not verify_password(body.password, row["password_hash"]):
                 cx.execute(text("INSERT INTO panel_login_attempts(username,attempted_at) VALUES (:username,:at)"),
@@ -55,7 +56,7 @@ def login(body: LoginIn, request: Request, eng: Engine = Depends(engine)) -> dic
         raise HTTPException(429, "تلاش‌های ورود بیش از حد مجاز است؛ ۱۵ دقیقه بعد دوباره تلاش کنید")
     if not row:
         raise HTTPException(401, "نام کاربری یا گذرواژه نادرست است")
-    return {"token": token, "user": {key: row[key] for key in ("id", "username", "full_name", "email", "role")}}
+    return {"token": token, "user": {key: row[key] for key in ("id", "username", "full_name", "email", "role", "date_calendar")}}
 
 
 
@@ -65,7 +66,7 @@ def current_user(authorization: str | None = Header(default=None), eng: Engine =
         user = session_user(cx, token)
     if not user:
         raise HTTPException(401, "نشست معتبر نیست")
-    return {key: user[key] for key in ("id", "username", "full_name", "email", "role")}
+    return {key: user[key] for key in ("id", "username", "full_name", "email", "role", "date_calendar")}
 
 
 @router.get("/me")
@@ -109,10 +110,24 @@ def update_profile(body: ProfilePatch, request: Request, user: dict = Depends(cu
             token = request.headers.get("authorization", "")[7:]
             cx.execute(text("UPDATE panel_sessions SET revoked_at=:at WHERE user_id=:id AND token_hash<>:hash"),
                        {"at": utcnow(), "id": user["id"], "hash": token_hash(token)})
-        row = cx.execute(text("SELECT id,username,full_name,email,role FROM panel_users WHERE id=:id"),
+        row = cx.execute(text("SELECT id,username,full_name,email,role,date_calendar FROM panel_users WHERE id=:id"),
                          {"id": user["id"]}).mappings().one()
     request.state.audit_fields = ["password_reset" if key == "password_hash" else key for key in values]
     return dict(row)
+
+
+class DatePreferencePatch(BaseModel):
+    date_calendar: Literal["jalali", "gregorian"]
+
+
+@router.patch("/me/preferences")
+def update_preferences(body: DatePreferencePatch, request: Request,
+                       user: dict = Depends(current_user), eng: Engine = Depends(engine)) -> dict:
+    with eng.begin() as cx:
+        cx.execute(text("UPDATE panel_users SET date_calendar=:calendar WHERE id=:id"),
+                   {"calendar": body.date_calendar, "id": user["id"]})
+    request.state.audit_fields = ["date_calendar"]
+    return {"date_calendar": body.date_calendar}
 
 
 @router.get("/notifications")

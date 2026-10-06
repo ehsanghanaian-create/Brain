@@ -13,7 +13,8 @@ from sqlalchemy import Engine, text
 from sqlalchemy.exc import IntegrityError
 
 from ..deps import engine, require_site
-from ..project_access import project_responsibility, require_assignee, require_lead
+from ..project_access import (project_responsibility, require_lead,
+                              require_task_commenter, require_task_editor)
 
 router = APIRouter(prefix="/sites/{site_id}/work", tags=["work"], dependencies=[Depends(require_site)])
 Kind = Literal["manual", "issue", "opportunity", "content"]
@@ -92,6 +93,80 @@ class ChecklistIn(BaseModel):
 
 class ChecklistPatch(BaseModel):
     done: bool
+
+
+class CommentIn(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class SubtaskIn(BaseModel):
+    title: str = Field(min_length=3, max_length=200)
+
+
+@router.get("/{item_id}/subtasks")
+def subtasks(site_id: str, item_id: int, eng: Engine = Depends(engine)) -> list[dict]:
+    with eng.connect() as cx:
+        if not cx.execute(text("SELECT 1 FROM work_items WHERE site_id=:site AND id=:id AND deleted_at IS NULL"),
+                          {"site": site_id, "id": item_id}).first():
+            raise HTTPException(404, "parent task not found")
+        rows = cx.execute(text("""SELECT child.*, owner.full_name AS owner_name,
+            creator.full_name AS created_by_name, site.name AS site_name
+            FROM work_items child JOIN sites site ON site.site_id=child.site_id
+            LEFT JOIN panel_users owner ON owner.id=child.owner_id
+            LEFT JOIN panel_users creator ON creator.id=child.created_by_id
+            WHERE child.site_id=:site AND child.parent_id=:id AND child.deleted_at IS NULL
+            ORDER BY child.board_order,child.id"""), {"site": site_id, "id": item_id}).mappings().all()
+    return [dict(row) for row in rows]
+
+
+@router.post("/{item_id}/subtasks", status_code=201)
+def create_subtask(site_id: str, item_id: int, body: SubtaskIn, request: Request,
+                   eng: Engine = Depends(engine)) -> dict:
+    with eng.begin() as cx:
+        parent = cx.execute(text("SELECT * FROM work_items WHERE site_id=:site AND id=:id AND deleted_at IS NULL"),
+                            {"site": site_id, "id": item_id}).mappings().first()
+        if not parent:
+            raise HTTPException(404, "parent task not found")
+        require_task_editor(cx, request, site_id, parent)
+        actor = getattr(request.state, "panel_user", None)
+        stamp = now()
+        result = cx.execute(text("""INSERT INTO work_items
+            (site_id,title,description,kind,status,owner_id,team_id,priority,parent_id,
+             created_by_id,created_at,updated_at,board_order)
+            VALUES (:site,:title,'','manual','new',:owner,:team,:priority,:parent,
+                    :creator,:at,:at,:order_value)"""),
+            {"site": site_id, "title": body.title.strip(), "owner": parent["owner_id"],
+             "team": parent["team_id"], "priority": parent["priority"], "parent": item_id,
+             "creator": actor["id"] if actor else None, "at": stamp,
+             "order_value": float(cx.execute(text("SELECT COALESCE(MAX(board_order),0)+1024 FROM work_items WHERE site_id=:site"),
+                                             {"site": site_id}).scalar_one())})
+        row = dict(cx.execute(text("SELECT * FROM work_items WHERE id=:id"),
+                              {"id": result.lastrowid}).mappings().one())
+        _record(cx, site_id, row["id"], "created", None, row, None, actor)
+        _record(cx, site_id, item_id, "subtask_added", dict(parent), {"child_id": row["id"], "title": row["title"]}, None, actor)
+    request.state.audit_fields = ["title", "parent_id"]
+    return row
+
+
+@router.post("/{item_id}/comments", status_code=201)
+def add_comment(site_id: str, item_id: int, body: CommentIn, request: Request,
+                eng: Engine = Depends(engine)) -> dict:
+    message = body.text.strip()
+    if not message:
+        raise HTTPException(422, "comment cannot be empty")
+    with eng.begin() as cx:
+        require_task_commenter(cx, request, site_id)
+        item = cx.execute(text("SELECT * FROM work_items WHERE site_id=:site AND id=:id AND deleted_at IS NULL"),
+                          {"site": site_id, "id": item_id}).mappings().first()
+        if not item:
+            raise HTTPException(404, "work item not found")
+        actor = getattr(request.state, "panel_user", None)
+        _record(cx, site_id, item_id, "comment", dict(item), dict(item), message, actor)
+        row = cx.execute(text("""SELECT id,event_type,note,actor_id,actor_username,created_at
+            FROM work_item_events WHERE work_item_id=:id ORDER BY id DESC LIMIT 1"""),
+            {"id": item_id}).mappings().one()
+    request.state.audit_fields = ["comment"]
+    return dict(row)
 
 
 class LabelIn(BaseModel):
@@ -256,7 +331,6 @@ def bulk_update_work(site_id: str, body: BulkWorkIn, request: Request,
     if "due_at" in patch:
         patch["due_at"] = _due_utc(patch["due_at"])
     with eng.begin() as cx:
-        require_lead(cx, request, site_id)
         identifiers = {f"item_{index}": item_id for index, item_id in enumerate(body.item_ids)}
         placeholders = ",".join(f":{key}" for key in identifiers)
         rows = cx.execute(text(f"""SELECT * FROM work_items WHERE site_id=:site
@@ -264,6 +338,9 @@ def bulk_update_work(site_id: str, body: BulkWorkIn, request: Request,
         if len(rows) != len(body.item_ids):
             raise HTTPException(404, "one or more work items are outside this project")
         for row in rows:
+            require_task_editor(cx, request, site_id, row)
+            if "owner_id" in patch and row["owner_id"] is not None:
+                raise HTTPException(403, "assigned work cannot be reassigned in bulk")
             _validate(cx, site_id, {**dict(row), **patch}, row["id"],
                       strict_owner=getattr(request.state, "panel_user", None) is not None and "owner_id" in patch)
         stamp = now()
@@ -296,13 +373,9 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
                              {"s": site_id, "id": item_id}).mappings().first()
         if not current:
             raise HTTPException(404, "work item not found")
-        require_assignee(cx, request, site_id, current["owner_id"])
-        if project_responsibility(cx, request, site_id) == "contributor":
-            allowed = {"status", "progress_percent", "blocked_reason", "note", "board_order"}
-            if not body.model_fields_set <= allowed:
-                raise HTTPException(403, "contributors may only update status, progress and blocker notes")
-            if patch.get("status") in {"rejected", "deferred", "approved", "assigned"}:
-                raise HTTPException(403, "project lead approval is required for this status")
+        require_task_editor(cx, request, site_id, current)
+        if "owner_id" in patch and current["owner_id"] is not None and patch["owner_id"] != current["owner_id"]:
+            raise HTTPException(403, "an assigned task cannot be reassigned by another user")
         before = dict(current)
         merged = {**before, **patch}
         if patch.get("status") in ("rejected", "deferred") and patch["status"] != before["status"] and not body.note:
@@ -352,34 +425,48 @@ def _notify_assignment(cx, user_id: int, item_id: int, title: str, actor: dict) 
 @router.delete("/{item_id}")
 def delete_work(site_id: str, item_id: int, request: Request, eng: Engine = Depends(engine)) -> dict:
     with eng.begin() as cx:
-        require_lead(cx, request, site_id)
         before = cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id AND deleted_at IS NULL"),
                             {"s": site_id, "id": item_id}).mappings().first()
         if not before:
             raise HTTPException(404, "work item not found")
+        require_task_editor(cx, request, site_id, before)
         actor = getattr(request.state, "panel_user", None)
-        cx.execute(text("UPDATE work_items SET deleted_at=:at,deleted_by_id=:actor,updated_at=:at WHERE id=:id"),
-                   {"at": now(), "actor": actor["id"] if actor else None, "id": item_id})
+        stamp = now()
+        descendants = cx.execute(text("""WITH RECURSIVE tree(id) AS (
+            SELECT id FROM work_items WHERE id=:id AND site_id=:site
+            UNION ALL SELECT child.id FROM work_items child JOIN tree ON child.parent_id=tree.id
+            WHERE child.site_id=:site AND child.deleted_at IS NULL
+        ) SELECT id FROM tree"""), {"id": item_id, "site": site_id}).scalars().all()
+        for descendant_id in descendants:
+            cx.execute(text("""UPDATE work_items SET deleted_at=:at,deleted_by_id=:actor,
+                deleted_root_id=:root,updated_at=:at WHERE id=:id AND deleted_at IS NULL"""),
+                {"at": stamp, "actor": actor["id"] if actor else None,
+                 "root": item_id, "id": descendant_id})
         after = dict(cx.execute(text("SELECT * FROM work_items WHERE id=:id"), {"id": item_id}).mappings().one())
         _record(cx, site_id, item_id, "deleted", dict(before), after, None, actor)
-    request.state.audit_fields = ["deleted_at"]
+    request.state.audit_fields = ["deleted_at", "deleted_root_id"]
     return after
 
 
 @router.post("/{item_id}/restore")
 def restore_work(site_id: str, item_id: int, request: Request, eng: Engine = Depends(engine)) -> dict:
     with eng.begin() as cx:
-        require_lead(cx, request, site_id)
         before = cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id AND deleted_at IS NOT NULL"),
                             {"s": site_id, "id": item_id}).mappings().first()
         if not before:
             raise HTTPException(404, "deleted work item not found")
-        cx.execute(text("UPDATE work_items SET deleted_at=NULL,deleted_by_id=NULL,updated_at=:at WHERE id=:id"),
-                   {"at": now(), "id": item_id})
+        require_task_editor(cx, request, site_id, before)
+        parent = cx.execute(text("SELECT deleted_at FROM work_items WHERE id=:id"),
+                            {"id": before["parent_id"]}).mappings().first() if before["parent_id"] else None
+        if parent and parent["deleted_at"]:
+            raise HTTPException(409, "restore the parent task first")
+        cx.execute(text("""UPDATE work_items SET deleted_at=NULL,deleted_by_id=NULL,
+            deleted_root_id=NULL,updated_at=:at WHERE id=:id OR deleted_root_id=:id"""),
+            {"at": now(), "id": item_id})
         after = dict(cx.execute(text("SELECT * FROM work_items WHERE id=:id"), {"id": item_id}).mappings().one())
         _record(cx, site_id, item_id, "restored", dict(before), after, None,
                 getattr(request.state, "panel_user", None))
-    request.state.audit_fields = ["deleted_at"]
+    request.state.audit_fields = ["deleted_at", "deleted_root_id"]
     return after
 
 
@@ -414,11 +501,11 @@ def add_checklist_item(site_id: str, item_id: int, body: ChecklistIn, request: R
     if len(title) < 2:
         raise HTTPException(422, "checklist title is too short")
     with eng.begin() as cx:
-        work = cx.execute(text("SELECT owner_id FROM work_items WHERE site_id=:site AND id=:item"),
+        work = cx.execute(text("SELECT owner_id,created_by_id FROM work_items WHERE site_id=:site AND id=:item AND deleted_at IS NULL"),
                           {"site": site_id, "item": item_id}).mappings().first()
         if not work:
             raise HTTPException(404, "work item not found")
-        require_assignee(cx, request, site_id, work["owner_id"])
+        require_task_editor(cx, request, site_id, work)
         actor = getattr(request.state, "panel_user", None)
         result = cx.execute(text("""INSERT INTO work_checklist_items
             (site_id,work_item_id,title,done,actor_id,created_at,updated_at)
@@ -436,11 +523,11 @@ def add_checklist_item(site_id: str, item_id: int, body: ChecklistIn, request: R
 def update_checklist_item(site_id: str, item_id: int, checklist_id: int, body: ChecklistPatch,
                           request: Request, eng: Engine = Depends(engine)) -> dict:
     with eng.begin() as cx:
-        work = cx.execute(text("SELECT owner_id FROM work_items WHERE site_id=:site AND id=:item"),
+        work = cx.execute(text("SELECT owner_id,created_by_id FROM work_items WHERE site_id=:site AND id=:item AND deleted_at IS NULL"),
                           {"site": site_id, "item": item_id}).mappings().first()
         if not work:
             raise HTTPException(404, "work item not found")
-        require_assignee(cx, request, site_id, work["owner_id"])
+        require_task_editor(cx, request, site_id, work)
         before = cx.execute(text("""SELECT * FROM work_checklist_items
             WHERE id=:id AND site_id=:site AND work_item_id=:item"""),
             {"id": checklist_id, "site": site_id, "item": item_id}).mappings().first()
@@ -463,7 +550,11 @@ def update_checklist_item(site_id: str, item_id: int, checklist_id: int, body: C
 def remove_checklist_item(site_id: str, item_id: int, checklist_id: int, request: Request,
                           eng: Engine = Depends(engine)) -> None:
     with eng.begin() as cx:
-        require_lead(cx, request, site_id)
+        work = cx.execute(text("SELECT owner_id,created_by_id FROM work_items WHERE site_id=:site AND id=:item AND deleted_at IS NULL"),
+                          {"site": site_id, "item": item_id}).mappings().first()
+        if not work:
+            raise HTTPException(404, "work item not found")
+        require_task_editor(cx, request, site_id, work)
         before = cx.execute(text("""SELECT * FROM work_checklist_items
             WHERE id=:id AND site_id=:site AND work_item_id=:item"""),
             {"id": checklist_id, "site": site_id, "item": item_id}).mappings().first()
@@ -547,11 +638,11 @@ def item_labels(site_id: str, item_id: int, request: Request, eng: Engine = Depe
 def add_item_label(site_id: str, item_id: int, label_id: int, request: Request,
                    eng: Engine = Depends(engine)) -> dict:
     with eng.begin() as cx:
-        work = cx.execute(text("SELECT owner_id FROM work_items WHERE site_id=:site AND id=:item"),
+        work = cx.execute(text("SELECT owner_id,created_by_id FROM work_items WHERE site_id=:site AND id=:item AND deleted_at IS NULL"),
                           {"site": site_id, "item": item_id}).mappings().first()
         if not work:
             raise HTTPException(404, "work item not found")
-        require_assignee(cx, request, site_id, work["owner_id"])
+        require_task_editor(cx, request, site_id, work)
         label = cx.execute(text("SELECT id,site_id,name,color FROM work_labels WHERE site_id=:site AND id=:id"),
                            {"site": site_id, "id": label_id}).mappings().first()
         if not label:
@@ -573,11 +664,11 @@ def add_item_label(site_id: str, item_id: int, label_id: int, request: Request,
 def remove_item_label(site_id: str, item_id: int, label_id: int, request: Request,
                       eng: Engine = Depends(engine)) -> None:
     with eng.begin() as cx:
-        work = cx.execute(text("SELECT owner_id FROM work_items WHERE site_id=:site AND id=:item"),
+        work = cx.execute(text("SELECT owner_id,created_by_id FROM work_items WHERE site_id=:site AND id=:item AND deleted_at IS NULL"),
                           {"site": site_id, "item": item_id}).mappings().first()
         if not work:
             raise HTTPException(404, "work item not found")
-        require_assignee(cx, request, site_id, work["owner_id"])
+        require_task_editor(cx, request, site_id, work)
         label = cx.execute(text("SELECT id,site_id,name,color FROM work_labels WHERE site_id=:site AND id=:id"),
                            {"site": site_id, "id": label_id}).mappings().first()
         if not label:
@@ -668,11 +759,11 @@ def item_fields(site_id: str, item_id: int, request: Request, eng: Engine = Depe
 def set_item_field(site_id: str, item_id: int, field_id: int, body: CustomValueIn,
                    request: Request, eng: Engine = Depends(engine)) -> dict:
     with eng.begin() as cx:
-        work = cx.execute(text("SELECT owner_id FROM work_items WHERE site_id=:site AND id=:item"),
+        work = cx.execute(text("SELECT owner_id,created_by_id FROM work_items WHERE site_id=:site AND id=:item AND deleted_at IS NULL"),
                           {"site": site_id, "item": item_id}).mappings().first()
         if not work:
             raise HTTPException(404, "work item not found")
-        require_assignee(cx, request, site_id, work["owner_id"])
+        require_task_editor(cx, request, site_id, work)
         field = cx.execute(text("SELECT * FROM work_custom_fields WHERE site_id=:site AND id=:id"),
                            {"site": site_id, "id": field_id}).mappings().first()
         if not field:

@@ -196,7 +196,8 @@ def test_project_membership_controls_collaboration(client):
                         json={'description': 'Ready for review'}).status_code == 200
     item_path = f'{path}/{created["id"]}'
     assert client.patch(item_path, headers=outsider, json={'status': 'in_progress'}).status_code == 403
-    assert client.patch(item_path, headers=worker, json={'priority': 'critical'}).status_code == 403
+    assert client.patch(item_path, headers=worker, json={'priority': 'critical'}).status_code == 200
+    assert client.patch(item_path, headers=lead, json={'priority': 'low'}).status_code == 403
     progressed = client.patch(item_path, headers=worker, json={'status': 'in_progress', 'progress_percent': 50,
         'note': 'Initial technical audit complete'})
     assert progressed.status_code == 200 and progressed.json()['progress_percent'] == 50
@@ -206,8 +207,8 @@ def test_project_membership_controls_collaboration(client):
     step = client.post(check_path, headers=worker, json={'title': 'Validate crawl coverage'})
     assert step.status_code == 201
     assert client.patch(f'{check_path}/{step.json()["id"]}', headers=worker, json={'done': True}).status_code == 200
-    assert client.delete(f'{check_path}/{step.json()["id"]}', headers=worker).status_code == 403
-    assert client.delete(f'{check_path}/{step.json()["id"]}', headers=lead).status_code == 204
+    assert client.delete(f'{check_path}/{step.json()["id"]}', headers=lead).status_code == 403
+    assert client.delete(f'{check_path}/{step.json()["id"]}', headers=worker).status_code == 204
     label = client.post(f'{path}/labels', headers=lead, json={'name': 'Content', 'color': '#16a34a'})
     assert label.status_code == 201
     assert client.get(f'{path}/labels', headers=outsider).status_code == 403
@@ -227,9 +228,9 @@ def test_project_membership_controls_collaboration(client):
     assert client.post(f'{path}/fields', headers=worker, json={'name': 'Nope', 'field_type': 'text'}).status_code == 403
     assert client.delete(f'{path}/fields/{field.json()["id"]}', headers=worker).status_code == 403
     assert client.post(f'{path}/bulk', headers=worker, json={'item_ids': [created['id']],
-        'patch': {'priority': 'high'}}).status_code == 403
-    assert client.post(f'{path}/bulk', headers=lead, json={'item_ids': [created['id']],
         'patch': {'priority': 'high'}}).status_code == 200
+    assert client.post(f'{path}/bulk', headers=lead, json={'item_ids': [created['id']],
+        'patch': {'priority': 'low'}}).status_code == 403
     view_path = '/api/v1/work/views/demo'
     assert client.get('/api/v1/work/board/demo', headers=outsider).status_code == 403
     assert client.get('/api/v1/work/board/demo', headers=worker).status_code == 200
@@ -252,7 +253,7 @@ def test_project_membership_controls_collaboration(client):
     logged = client.post(time_path, headers=worker, json=time_body)
     assert logged.status_code == 201 and logged.json()['minutes'] == 45
     assert client.patch(item_path, headers=worker, json={'status': 'verified'}).status_code == 200
-    assert client.patch(item_path, headers=lead, json={'status': 'verified', 'verification_note': 'Search Console checked'}).status_code == 200
+    assert client.patch(item_path, headers=lead, json={'status': 'verified', 'verification_note': 'Search Console checked'}).status_code == 403
 
 
 def test_panel_login_locks_after_repeated_failures(client):

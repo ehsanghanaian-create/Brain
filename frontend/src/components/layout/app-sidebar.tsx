@@ -34,7 +34,7 @@ import { Icons } from '@/components/icons';
 import { allowedPage, homeFor, type PanelRole } from '@/lib/panel-access';
 import { api } from '@/lib/api/client';
 
-export default function AppSidebar({ user }: { user: { full_name: string; role: PanelRole } }) {
+export default function AppSidebar({ user }: { user: { username: string; full_name: string; role: PanelRole } }) {
   const pathname = usePathname();
   const { isOpen } = useMediaQuery();
   const router = useRouter();
@@ -129,7 +129,7 @@ export default function AppSidebar({ user }: { user: { full_name: string; role: 
                   />
                 }
               >
-                <span className='truncate'>SEO Brain · نسخه محلی</span>
+                <span className='truncate'>{user.full_name} · @{user.username}</span>
                 <Icons.chevronsDown className='ms-auto size-4' />
               </DropdownMenuTrigger>
               <DropdownMenuContent

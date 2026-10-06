@@ -9,16 +9,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Progress } from '@/components/ui/progress';
+import { UserDateInput } from '@/components/user-date-input';
+import { formatUserDate, useDatePreference } from '@/lib/date-preference';
 import { commandApi, type CommandWorkItem, type ProjectMember, type ProjectMilestone,
   type ProjectSummary, type WorkPerson } from '../api';
 
 const number = new Intl.NumberFormat('fa-IR');
-const dateLabel = (value: string | null) => value ? new Date(value).toLocaleDateString('fa-IR', { month: 'short', day: 'numeric' }) : 'بی‌موعد';
 const active = (item: CommandWorkItem) => !['verified', 'rejected', 'deferred'].includes(item.status);
 
 export function ProjectExecution({ items, people, canEdit, preferredSiteId, onTask }: {
   items: CommandWorkItem[]; people: WorkPerson[]; canEdit: boolean; preferredSiteId?: string; onTask: (item: CommandWorkItem) => void;
 }) {
+  const { calendar } = useDatePreference();
+  const dateLabel = (value: string | null) => value ? formatUserDate(value, calendar, { month: 'short', day: 'numeric' }) : 'بی‌موعد';
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [siteId, setSiteId] = useState('');
   const [members, setMembers] = useState<ProjectMember[]>([]);
@@ -135,7 +138,7 @@ export function ProjectExecution({ items, people, canEdit, preferredSiteId, onTa
         <Card><CardHeader><CardTitle>مایلستون‌ها</CardTitle><CardDescription>نقاط تحویل پروژه و تعداد کارهای تأییدشدهٔ هر کدام.</CardDescription></CardHeader><CardContent className='space-y-2'>
           {milestones.map((entry) => <div key={entry.id} className='rounded-lg border p-2.5 text-xs'><div className='flex justify-between'><strong>{entry.title}</strong><span className='text-muted-foreground'>{dateLabel(entry.due_at)}</span></div><div className='mt-1 flex items-center justify-between gap-2'><span className='text-muted-foreground'>{number.format(entry.verified_tasks)} از {number.format(entry.tasks)} کار تأیید شده</span>{canPlan && <Button size='sm' variant='ghost' onClick={() => { setEditingMilestone(entry.id); setMilestoneTitle(entry.title); setMilestoneDue(entry.due_at ? new Date(new Date(entry.due_at).getTime() - new Date(entry.due_at).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ''); }}>ویرایش</Button>}</div></div>)}
           {!milestones.length && <p className='text-muted-foreground text-xs'>مایلستونی ثبت نشده است.</p>}
-          {canPlan && <div className='grid gap-2 border-t pt-3'><Input aria-label='عنوان مایلستون' placeholder='مثلاً پایان فاز سئوی فنی' value={milestoneTitle} onChange={(e) => setMilestoneTitle(e.target.value)} /><Input aria-label='موعد مایلستون' type='datetime-local' value={milestoneDue} onChange={(e) => setMilestoneDue(e.target.value)} /><div className='flex gap-2'><Button size='sm' disabled={milestoneTitle.trim().length < 2 || busy} onClick={createMilestone}>{editingMilestone === null ? 'ثبت مایلستون' : 'ذخیرهٔ ویرایش'}</Button>{editingMilestone !== null && <Button size='sm' variant='outline' onClick={() => { setEditingMilestone(null); setMilestoneTitle(''); setMilestoneDue(''); }}>انصراف</Button>}</div></div>}
+          {canPlan && <div className='grid gap-2 border-t pt-3'><Input aria-label='عنوان مایلستون' placeholder='مثلاً پایان فاز سئوی فنی' value={milestoneTitle} onChange={(e) => setMilestoneTitle(e.target.value)} /><UserDateInput label='موعد مایلستون' mode='datetime-local' value={milestoneDue} onChange={setMilestoneDue} /><div className='flex gap-2'><Button size='sm' disabled={milestoneTitle.trim().length < 2 || busy} onClick={createMilestone}>{editingMilestone === null ? 'ثبت مایلستون' : 'ذخیرهٔ ویرایش'}</Button>{editingMilestone !== null && <Button size='sm' variant='outline' onClick={() => { setEditingMilestone(null); setMilestoneTitle(''); setMilestoneDue(''); }}>انصراف</Button>}</div></div>}
         </CardContent></Card></div>
       </div>
       <Card><CardHeader><CardTitle>خط زمانی پروژه</CardTitle><CardDescription>بازهٔ شروع تا تحویل کارهای زمان‌بندی‌شده؛ رنگ قرمز نشان‌دهندهٔ مانع است.</CardDescription></CardHeader><CardContent className='space-y-2'>

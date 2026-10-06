@@ -4,6 +4,7 @@
  * Passes X-Request-ID through (or generates one) and returns the backend body/status untouched.
  */
 import { NextRequest, NextResponse } from 'next/server';
+import { isPublicBackendRoute } from '@/lib/backend-route-access';
 
 const BASE = (process.env.SEO_BRAIN_API_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
 
@@ -14,7 +15,7 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   }
   const target = `${BASE}/api/v1/${path.map(encodeURIComponent).join('/')}${req.nextUrl.search}`;
   const authPath = path.join('/');
-  const publicAuth = authPath === 'auth/login' || authPath === 'auth/status';
+  const publicAuth = isPublicBackendRoute(path);
   const session = req.cookies.get('sb_panel_session')?.value;
   if (!publicAuth && !session) {
     return NextResponse.json({ error: { code: 'unauthorized', message: 'ورود به حساب کاربری لازم است', request_id: null } }, { status: 401 });

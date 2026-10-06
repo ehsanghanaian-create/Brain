@@ -23,6 +23,7 @@ export type CommandWorkItem = WorkItem & {
   board_order: number;
   checklist_total: number;
   checklist_done: number;
+  checklist?: { id: number; title: string; done: boolean }[];
   labels: WorkLabel[];
   custom_fields?: { id: number; name: string; field_type: WorkCustomField['field_type']; value: string | number }[];
 };

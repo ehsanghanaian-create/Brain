@@ -22,6 +22,21 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _checklists_for(cx, rows) -> dict[int, list[dict]]:
+    """Fetch checklist previews for a board page with one query, not one per card."""
+    result: dict[int, list[dict]] = {row["id"]: [] for row in rows}
+    if not rows:
+        return result
+    identifiers = {f"item_{index}": row["id"] for index, row in enumerate(rows)}
+    placeholders = ",".join(f":{key}" for key in identifiers)
+    steps = cx.execute(text(f"""SELECT id,work_item_id,title,done FROM work_checklist_items
+        WHERE work_item_id IN ({placeholders}) ORDER BY id"""), identifiers).mappings().all()
+    for step in steps:
+        result[step["work_item_id"]].append({"id": step["id"], "title": step["title"],
+                                             "done": bool(step["done"])})
+    return result
+
+
 @router.get("/reports")
 def work_report(period: Literal["week", "month"] = "week", anchor: date | None = None,
                 site_id: str | None = None, user_id: int | None = None,
@@ -336,6 +351,7 @@ def overview(site_id: str | None = None, owner_id: int | None = None, team_id: i
             WHERE w.deleted_at IS NULL
             ORDER BY e.id DESC LIMIT 12""")).mappings().all()
         labels_by_item: dict[int, list[dict]] = {row["id"]: [] for row in rows}
+        checklists_by_item = _checklists_for(cx, rows)
         if rows:
             identifiers = {f"item_{index}": row["id"] for index, row in enumerate(rows)}
             placeholders = ",".join(f":{key}" for key in identifiers)
@@ -345,7 +361,8 @@ def overview(site_id: str | None = None, owner_id: int | None = None, team_id: i
             for label in label_rows:
                 labels_by_item[label["work_item_id"]].append({"id": label["id"], "name": label["name"], "color": label["color"]})
     return {"summary": {k: (float(v or 0) if k == "hours_open" else int(v or 0)) for k, v in summary.items()},
-            "items": [{**dict(row), "labels": labels_by_item[row["id"]]} for row in rows], "limit": limit, "offset": offset,
+            "items": [{**dict(row), "labels": labels_by_item[row["id"]],
+                       "checklist": checklists_by_item[row["id"]]} for row in rows], "limit": limit, "offset": offset,
             "by_status": [dict(row) for row in by_status],
             "by_site": [{k: int(v or 0) if k in {"total", "open", "overdue", "unassigned"} else v for k, v in row.items()} for row in by_site],
             "by_owner": [{k: (float(v or 0) if k == "hours_open" else int(v or 0)) if k in {"total", "open", "overdue", "hours_open"} else v for k, v in row.items()} for row in by_owner],
@@ -384,8 +401,12 @@ def personal_board(request: Request, after_id: int = Query(0, ge=0),
             WHERE w.owner_id=:owner AND w.deleted_at IS NULL AND w.status NOT IN ('verified','rejected','deferred')
             AND w.id>:after ORDER BY w.id LIMIT :limit"""),
             {"owner": actor["id"], "after": after_id, "limit": limit + 1}).mappings().all()
-    page = rows[:limit]
-    return {"items": [{**dict(row), "labels": [], "custom_fields": []} for row in page],
+        page = rows[:limit]
+        checklists = _checklists_for(cx, page)
+    return {"items": [{**dict(row), "labels": [], "custom_fields": [],
+                       "checklist": checklists[row["id"]],
+                       "checklist_total": len(checklists[row["id"]]),
+                       "checklist_done": sum(step["done"] for step in checklists[row["id"]])} for row in page],
             "next_after_id": page[-1]["id"] if len(rows) > limit else None}
 
 
@@ -406,8 +427,12 @@ def created_board(request: Request, after_id: int = Query(0, ge=0),
             AND w.status NOT IN ('verified','rejected','deferred')
             AND w.id>:after ORDER BY w.id LIMIT :limit"""),
             {"creator": actor["id"], "after": after_id, "limit": limit + 1}).mappings().all()
-    page = rows[:limit]
-    return {"items": [{**dict(row), "labels": [], "custom_fields": []} for row in page],
+        page = rows[:limit]
+        checklists = _checklists_for(cx, page)
+    return {"items": [{**dict(row), "labels": [], "custom_fields": [],
+                       "checklist": checklists[row["id"]],
+                       "checklist_total": len(checklists[row["id"]]),
+                       "checklist_done": sum(step["done"] for step in checklists[row["id"]])} for row in page],
             "next_after_id": page[-1]["id"] if len(rows) > limit else None}
 
 
@@ -431,6 +456,7 @@ def project_board(site_id: str, request: Request, after_id: int = Query(0, ge=0)
             WHERE w.site_id=:site AND w.deleted_at IS NULL AND w.id>:after ORDER BY w.id LIMIT :limit"""),
             {"site": site_id, "after": after_id, "limit": limit + 1}).mappings().all()
         page = rows[:limit]
+        checklists_by_item = _checklists_for(cx, page)
         labels_by_item: dict[int, list[dict]] = {row["id"]: [] for row in page}
         fields_by_item: dict[int, list[dict]] = {row["id"]: [] for row in page}
         if page:
@@ -450,5 +476,6 @@ def project_board(site_id: str, request: Request, after_id: int = Query(0, ge=0)
                 fields_by_item[field["work_item_id"]].append({"id": field["id"], "name": field["name"],
                     "field_type": field["field_type"], "value": json.loads(field["value_json"])})
     return {"items": [{**dict(row), "labels": labels_by_item[row["id"]],
+                        "checklist": checklists_by_item[row["id"]],
                         "custom_fields": fields_by_item[row["id"]]} for row in page],
             "next_after_id": page[-1]["id"] if len(rows) > limit else None}

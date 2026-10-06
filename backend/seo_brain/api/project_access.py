@@ -47,6 +47,15 @@ def require_task_editor(cx, request: Request, site_id: str, item: dict) -> None:
         raise HTTPException(403, "only a project lead may manage unowned legacy work")
 
 
+def require_task_creator(cx, request: Request, site_id: str, item: dict) -> None:
+    """Only the signed-in author may archive or restore a task, even after assignment."""
+    actor = getattr(request.state, "panel_user", None)
+    if not actor:
+        raise HTTPException(403, "فقط سازندهٔ تسک می‌تواند آن را به آرشیو ببرد")
+    if project_responsibility(cx, request, site_id) == "none" or item["created_by_id"] != actor["id"]:
+        raise HTTPException(403, "فقط سازندهٔ تسک می‌تواند آن را به آرشیو ببرد")
+
+
 def require_task_commenter(cx, request: Request, site_id: str) -> None:
     if project_responsibility(cx, request, site_id) == "none":
         raise HTTPException(403, "project membership is required to comment")

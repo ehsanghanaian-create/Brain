@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ..deps import engine, require_site
 from ..project_access import (project_responsibility, require_lead,
-                              require_task_commenter, require_task_editor)
+                              require_task_commenter, require_task_creator, require_task_editor)
 
 router = APIRouter(prefix="/sites/{site_id}/work", tags=["work"], dependencies=[Depends(require_site)])
 Kind = Literal["manual", "issue", "opportunity", "content"]
@@ -509,19 +509,22 @@ def delete_work(site_id: str, item_id: int, request: Request, eng: Engine = Depe
                             {"s": site_id, "id": item_id}).mappings().first()
         if not before:
             raise HTTPException(404, "work item not found")
-        require_task_editor(cx, request, site_id, before)
+        require_task_creator(cx, request, site_id, before)
         actor = getattr(request.state, "panel_user", None)
         stamp = now()
         descendants = cx.execute(text("""WITH RECURSIVE tree(id) AS (
             SELECT id FROM work_items WHERE id=:id AND site_id=:site
             UNION ALL SELECT child.id FROM work_items child JOIN tree ON child.parent_id=tree.id
             WHERE child.site_id=:site AND child.deleted_at IS NULL
-        ) SELECT id FROM tree"""), {"id": item_id, "site": site_id}).scalars().all()
+        ) SELECT w.id,w.created_by_id FROM work_items w JOIN tree ON tree.id=w.id
+          WHERE w.deleted_at IS NULL"""), {"id": item_id, "site": site_id}).mappings().all()
+        if any(child["created_by_id"] != actor["id"] for child in descendants):
+            raise HTTPException(409, "این کار زیرتسکی دارد که شخص دیگری ساخته است؛ سازندهٔ آن باید ابتدا زیرتسک را به آرشیو ببرد")
         for descendant_id in descendants:
             cx.execute(text("""UPDATE work_items SET deleted_at=:at,deleted_by_id=:actor,
                 deleted_root_id=:root,updated_at=:at WHERE id=:id AND deleted_at IS NULL"""),
                 {"at": stamp, "actor": actor["id"] if actor else None,
-                 "root": item_id, "id": descendant_id})
+                 "root": item_id, "id": descendant_id["id"]})
         after = dict(cx.execute(text("SELECT * FROM work_items WHERE id=:id"), {"id": item_id}).mappings().one())
         _record(cx, site_id, item_id, "deleted", dict(before), after, None, actor)
     request.state.audit_fields = ["deleted_at", "deleted_root_id"]
@@ -535,7 +538,7 @@ def restore_work(site_id: str, item_id: int, request: Request, eng: Engine = Dep
                             {"s": site_id, "id": item_id}).mappings().first()
         if not before:
             raise HTTPException(404, "deleted work item not found")
-        require_task_editor(cx, request, site_id, before)
+        require_task_creator(cx, request, site_id, before)
         parent = cx.execute(text("SELECT deleted_at FROM work_items WHERE id=:id"),
                             {"id": before["parent_id"]}).mappings().first() if before["parent_id"] else None
         if parent and parent["deleted_at"]:

@@ -279,14 +279,33 @@ def test_manual_project_assignment_priority_archive_and_profile(client):
     assert notifications["unread"] == 2
     assert client.post(f"/api/v1/auth/notifications/{notifications['items'][0]['id']}/read", headers=analyst).status_code == 200
     assert client.get("/api/v1/auth/notifications", headers=analyst).json()["unread"] == 1
+    step = client.post(f"{base}/{task_id}/checklist", headers=analyst, json={"title": "Check page indexability"})
+    assert step.status_code == 201, step.text
+    preview = next(row for row in client.get("/api/v1/work/board/all", headers=analyst).json()["items"] if row["id"] == task_id)
+    assert preview["checklist_total"] == 1 and preview["checklist"][0]["title"] == "Check page indexability"
+    assert client.patch(f"{base}/{task_id}/checklist/{step.json()['id']}", headers=admin,
+                        json={"done": True}).status_code == 403
+    assert client.patch(f"{base}/{task_id}/checklist/{step.json()['id']}", headers=analyst,
+                        json={"done": True}).status_code == 200
+    preview = next(row for row in client.get("/api/v1/work/board/all", headers=analyst).json()["items"] if row["id"] == task_id)
+    assert preview["checklist_done"] == 1 and preview["checklist"][0]["done"] is True
+    project_preview = next(row for row in client.get(f"/api/v1/work/board/{project}", headers=admin).json()["items"] if row["id"] == task_id)
+    assert project_preview["checklist"][0]["done"] is True
+    overview_preview = next(row for row in client.get("/api/v1/work/overview", headers=admin).json()["items"] if row["id"] == task_id)
+    assert overview_preview["checklist"][0]["title"] == "Check page indexability"
 
     assert client.patch(f"{base}/{task_id}", headers=analyst, json={"status": "verified"}).status_code == 200
     assert any(row["id"] == task_id for row in client.get("/api/v1/work/archive?kind=completed", headers=admin).json())
-    assert client.delete(f"{base}/{ordinary.json()['id']}", headers=admin).status_code == 403
-    assert client.delete(f"{base}/{ordinary.json()['id']}", headers=analyst).status_code == 200
+    assert client.delete(f"{base}/{task_id}", headers=analyst).status_code == 403
+    assert client.delete(f"{base}/{task_id}", headers=admin).status_code == 200
+    assert all(row["id"] != task_id for row in client.get("/api/v1/work/archive?kind=completed", headers=admin).json())
+    assert any(row["id"] == task_id for row in client.get("/api/v1/work/archive?kind=deleted", headers=admin).json())
+    assert client.delete(f"{base}/{ordinary.json()['id']}", headers=analyst).status_code == 403
+    assert client.delete(f"{base}/{ordinary.json()['id']}", headers=admin).status_code == 200
     assert any(row["id"] == ordinary.json()["id"] for row in client.get("/api/v1/work/archive?kind=deleted", headers=admin).json())
     assert all(row["id"] != ordinary.json()["id"] for row in client.get(f"/api/v1/work/board/{project}", headers=admin).json()["items"])
-    assert client.post(f"{base}/{ordinary.json()['id']}/restore", headers=analyst).status_code == 200
+    assert client.post(f"{base}/{ordinary.json()['id']}/restore", headers=analyst).status_code == 403
+    assert client.post(f"{base}/{ordinary.json()['id']}/restore", headers=admin).status_code == 200
 
     assert client.patch("/api/v1/auth/me", headers=analyst,
                         json={"username": "analyst2", "current_password": "wrong"}).status_code == 403
@@ -333,11 +352,16 @@ def test_task_owner_isolation_subtasks_comments_and_calendar(client):
     assert child.status_code == 201, child.text
     child_id = child.json()["id"]
     assert client.get(f"{root}/{draft['id']}/subtasks", headers=observer).json()[0]["id"] == child_id
-    assert client.delete(f"{root}/{draft['id']}", headers=lead).status_code == 403
-    assert client.delete(f"{root}/{draft['id']}", headers=worker).status_code == 200
+    assert client.delete(f"{root}/{draft['id']}", headers=worker).status_code == 403
+    assert client.delete(f"{root}/{draft['id']}", headers=lead).status_code == 409
+    assert client.delete(f"{root}/{child_id}", headers=lead).status_code == 403
+    assert client.delete(f"{root}/{child_id}", headers=worker).status_code == 200
+    assert client.delete(f"{root}/{draft['id']}", headers=lead).status_code == 200
     assert all(row["id"] not in {draft["id"], child_id}
                for row in client.get("/api/v1/work/board/demo", headers=lead).json()["items"])
-    assert client.post(f"{root}/{draft['id']}/restore", headers=worker).status_code == 200
+    assert client.post(f"{root}/{draft['id']}/restore", headers=worker).status_code == 403
+    assert client.post(f"{root}/{draft['id']}/restore", headers=lead).status_code == 200
+    assert client.post(f"{root}/{child_id}/restore", headers=worker).status_code == 200
     assert {draft["id"], child_id} <= {row["id"] for row in client.get("/api/v1/work/board/demo", headers=lead).json()["items"]}
     assert client.get("/api/v1/auth/me", headers=worker).json()["date_calendar"] == "jalali"
     assert client.patch("/api/v1/auth/me/preferences", headers=worker,

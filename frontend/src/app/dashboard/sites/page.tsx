@@ -1,6 +1,7 @@
 import PageContainer from '@/components/layout/page-container';
 import { BackendError } from '@/components/seo-brain/backend-error';
 import { SitesCommandCenter } from '@/features/sites/components/sites-command-center';
+import { SiteLeads } from '@/features/sites/components/site-leads';
 import { endpoints, settle } from '@/lib/api/client';
 
 export const dynamic = 'force-dynamic';
@@ -17,7 +18,7 @@ export default async function SitesPage() {
       {sites.error && <BackendError error={sites.error} />}
       {!sites.error && portfolio.error && <BackendError error={portfolio.error} />}
       {!sites.error && !portfolio.error && (
-        <SitesCommandCenter sites={sites.data} portfolio={portfolio.data} />
+        <><SiteLeads /><SitesCommandCenter sites={sites.data} portfolio={portfolio.data} /></>
       )}
     </PageContainer>
   );

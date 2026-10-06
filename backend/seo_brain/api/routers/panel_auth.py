@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import Engine, text
 
 from ..deps import engine
-from ..panel_auth import create_session, session_user, token_hash, utcnow
+from ..panel_auth import create_session, hash_password, session_user, token_hash, utcnow, verify_password
 
 router = APIRouter(prefix="/auth", tags=["panel-auth"])
 
@@ -71,6 +71,71 @@ def current_user(authorization: str | None = Header(default=None), eng: Engine =
 @router.get("/me")
 def me(user: dict = Depends(current_user)) -> dict:
     return user
+
+
+class ProfilePatch(BaseModel):
+    username: str | None = Field(default=None, min_length=3, max_length=40, pattern=r"^[A-Za-z0-9_.-]+$")
+    full_name: str | None = Field(default=None, min_length=2, max_length=100)
+    email: str | None = Field(default=None, max_length=255)
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str | None = Field(default=None, min_length=8, max_length=256)
+
+
+@router.patch("/me")
+def update_profile(body: ProfilePatch, request: Request, user: dict = Depends(current_user),
+                   eng: Engine = Depends(engine)) -> dict:
+    values = body.model_dump(exclude_unset=True, exclude={"current_password", "new_password"})
+    if not values and not body.new_password:
+        raise HTTPException(422, "profile changes are required")
+    if "username" in values:
+        values["username"] = values["username"].strip().lower()
+    if "full_name" in values:
+        values["full_name"] = values["full_name"].strip()
+        if len(values["full_name"]) < 2:
+            raise HTTPException(422, "full name is too short")
+    with eng.begin() as cx:
+        current = cx.execute(text("SELECT password_hash FROM panel_users WHERE id=:id"),
+                             {"id": user["id"]}).scalar_one()
+        if not verify_password(body.current_password, current):
+            raise HTTPException(403, "current password is incorrect")
+        if body.new_password:
+            values["password_hash"] = hash_password(body.new_password)
+        if "username" in values and cx.execute(text("SELECT 1 FROM panel_users WHERE username=:name AND id<>:id"),
+                                                 {"name": values["username"], "id": user["id"]}).first():
+            raise HTTPException(409, "username already exists")
+        cx.execute(text("UPDATE panel_users SET " + ",".join(f"{key}=:{key}" for key in values) +
+                        " WHERE id=:id"), {**values, "id": user["id"]})
+        if body.new_password:
+            token = request.headers.get("authorization", "")[7:]
+            cx.execute(text("UPDATE panel_sessions SET revoked_at=:at WHERE user_id=:id AND token_hash<>:hash"),
+                       {"at": utcnow(), "id": user["id"], "hash": token_hash(token)})
+        row = cx.execute(text("SELECT id,username,full_name,email,role FROM panel_users WHERE id=:id"),
+                         {"id": user["id"]}).mappings().one()
+    request.state.audit_fields = ["password_reset" if key == "password_hash" else key for key in values]
+    return dict(row)
+
+
+@router.get("/notifications")
+def notifications(user: dict = Depends(current_user), eng: Engine = Depends(engine)) -> dict:
+    with eng.connect() as cx:
+        rows = cx.execute(text("""SELECT n.id,n.work_item_id,n.kind,n.title,n.body,n.created_at,n.read_at,
+            w.site_id FROM panel_notifications n LEFT JOIN work_items w ON w.id=n.work_item_id
+            WHERE n.user_id=:user ORDER BY n.id DESC LIMIT 50"""), {"user": user["id"]}).mappings().all()
+        unread = cx.execute(text("SELECT COUNT(*) FROM panel_notifications WHERE user_id=:user AND read_at IS NULL"),
+                            {"user": user["id"]}).scalar_one()
+    return {"items": [dict(row) for row in rows], "unread": unread}
+
+
+@router.post("/notifications/{notification_id}/read")
+def read_notification(notification_id: int, request: Request, user: dict = Depends(current_user),
+                      eng: Engine = Depends(engine)) -> dict:
+    with eng.begin() as cx:
+        result = cx.execute(text("""UPDATE panel_notifications SET read_at=COALESCE(read_at,:at)
+            WHERE id=:id AND user_id=:user"""), {"at": utcnow(), "id": notification_id, "user": user["id"]})
+        if not result.rowcount:
+            raise HTTPException(404, "notification not found")
+    request.state.audit_fields = ["read_at"]
+    return {"ok": True}
 
 
 @router.post("/logout")

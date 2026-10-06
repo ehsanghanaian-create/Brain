@@ -1,4 +1,4 @@
-"""Work items stay within their site, require ownership for active work, and keep an event trail."""
+"""Work items stay within their project and keep an event trail."""
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -8,6 +8,7 @@ from seo_brain.api.main import create_app
 from seo_brain.api.routers import sites as sites_router
 from seo_brain.db.engine import make_engine
 from seo_brain.db.migrate import migrate
+from seo_brain.api.panel_auth import hash_password
 
 
 @pytest.fixture
@@ -39,7 +40,7 @@ def test_work_lifecycle_and_events(client):
     item = created.json()
     assert item["status"] == "new" and item["owner_id"] is None
     assert client.post(base, json={"title": "اصلاح صفحه یتیم", "kind": "issue", "source_id": 1}).status_code == 409
-    assert client.patch(f"{base}/{item['id']}", json={"status": "in_progress"}).status_code == 422
+    assert client.patch(f"{base}/{item['id']}", json={"status": "in_progress"}).status_code == 200
     assert client.patch(f"{base}/{item['id']}", json={"title": None}).status_code == 422
     assert client.patch(f"{base}/{item['id']}", json={"status": "rejected"}).status_code == 422
     assert client.patch(f"{base}/{item['id']}", json={"owner_id": 1,
@@ -48,12 +49,11 @@ def test_work_lifecycle_and_events(client):
         "due_at": "2026-10-20T12:00:00Z", "note": "در حال بررسی"})
     assert changed.status_code == 200, changed.text
     assert changed.json()["owner_id"] == 1
-    assert client.patch(f"{base}/{item['id']}", json={"status": "verified"}).status_code == 422
-    done = client.patch(f"{base}/{item['id']}", json={"status": "verified", "verification_note": "خزش دوباره تأیید شد"})
+    done = client.patch(f"{base}/{item['id']}", json={"status": "verified"})
     assert done.status_code == 200
     events = client.get(f"{base}/{item['id']}/events").json()
-    assert [event["event_type"] for event in events] == ["created", "updated", "updated"]
-    assert events[1]["note"] == "در حال بررسی"
+    assert [event["event_type"] for event in events] == ["created", "updated", "updated", "updated"]
+    assert events[2]["note"] == "در حال بررسی"
     assert client.get(base).json()["summary"]["unassigned"] == 0
 
 
@@ -231,3 +231,67 @@ def test_site_project_members_hierarchy_dependencies_time_and_progress(client):
     assert demo["progress_percent"] == 25
     assert client.get(root + "/milestones").json()[0]["tasks"] == 1
     assert client.delete(root + "/members/1").status_code == 204
+
+
+def test_manual_project_assignment_priority_archive_and_profile(client):
+    with client.eng.begin() as cx:
+        cx.execute(text("UPDATE panel_users SET username='analyst',password_hash=:hash WHERE id=1"),
+                   {"hash": hash_password("analyst-password")})
+        cx.execute(text("""INSERT INTO panel_users(username,full_name,email,role,active,password_hash,created_at,updated_at)
+            VALUES ('manager','Manager','manager@example.com','admin',1,:hash,'2026-01-01','2026-01-01')"""),
+            {"hash": hash_password("manager-password")})
+    admin_login = client.post("/api/v1/auth/login", json={"username": "manager", "password": "manager-password"})
+    assert admin_login.status_code == 200, admin_login.text
+    admin = {"Authorization": "Bearer " + admin_login.json()["token"]}
+    analyst_login = client.post("/api/v1/auth/login", json={"username": "analyst", "password": "analyst-password"})
+    assert analyst_login.status_code == 200, analyst_login.text
+    analyst = {"Authorization": "Bearer " + analyst_login.json()["token"]}
+
+    created = client.post("/api/v1/work/projects", json={"name": "SEO Brain"}, headers=admin)
+    assert created.status_code == 201, created.text
+    project = created.json()["site_id"]
+    assert project not in {site["site_id"] for site in client.get("/api/v1/sites", headers=admin).json()}
+    assert next(row for row in client.get("/api/v1/work/projects", headers=admin).json()
+                if row["site_id"] == project)["kind"] == "manual"
+    assert client.put("/api/v1/work/projects/demo/members/1", headers=admin,
+                      json={"user_id": 1, "responsibility": "lead"}).status_code == 200
+    assert client.put("/api/v1/work/projects/demo/members/2", headers=admin,
+                      json={"user_id": 2, "responsibility": "lead"}).status_code == 200
+    demo_project = next(row for row in client.get("/api/v1/work/projects", headers=admin).json()
+                        if row["site_id"] == "demo")
+    assert demo_project["lead_id"] == 2
+    demo_members = client.get("/api/v1/work/projects/demo/members", headers=admin).json()
+    assert next(row for row in demo_members if row["user_id"] == 1)["responsibility"] == "contributor"
+    base = f"/api/v1/sites/{project}/work"
+    urgent = client.post(base, headers=admin, json={"title": "Urgent task", "priority": "critical", "owner_id": 1})
+    assert urgent.status_code == 201, urgent.text
+    task_id = urgent.json()["id"]
+    assert urgent.json()["created_by_id"] == 2
+    assert next(row for row in client.get(f"/api/v1/work/projects/{project}/members", headers=admin).json()
+                if row["user_id"] == 1)["responsibility"] == "contributor"
+    ordinary = client.post(base, headers=admin, json={"title": "Next task", "priority": "normal", "owner_id": 1})
+    assert ordinary.status_code == 201, ordinary.text
+    board = client.get("/api/v1/work/board/all", headers=analyst)
+    assert board.status_code == 200, board.text
+    assert {row["priority"] for row in board.json()["items"]} == {"critical", "normal"}
+    assert next(row for row in board.json()["items"] if row["id"] == task_id)["created_by_name"] == "Manager"
+    notifications = client.get("/api/v1/auth/notifications", headers=analyst).json()
+    assert notifications["unread"] == 2
+    assert client.post(f"/api/v1/auth/notifications/{notifications['items'][0]['id']}/read", headers=analyst).status_code == 200
+    assert client.get("/api/v1/auth/notifications", headers=analyst).json()["unread"] == 1
+
+    assert client.patch(f"{base}/{task_id}", headers=analyst, json={"status": "verified"}).status_code == 200
+    assert any(row["id"] == task_id for row in client.get("/api/v1/work/archive?kind=completed", headers=admin).json())
+    assert client.delete(f"{base}/{ordinary.json()['id']}", headers=admin).status_code == 200
+    assert any(row["id"] == ordinary.json()["id"] for row in client.get("/api/v1/work/archive?kind=deleted", headers=admin).json())
+    assert all(row["id"] != ordinary.json()["id"] for row in client.get(f"/api/v1/work/board/{project}", headers=admin).json()["items"])
+    assert client.post(f"{base}/{ordinary.json()['id']}/restore", headers=admin).status_code == 200
+
+    assert client.patch("/api/v1/auth/me", headers=analyst,
+                        json={"username": "analyst2", "current_password": "wrong"}).status_code == 403
+    updated = client.patch("/api/v1/auth/me", headers=analyst,
+                           json={"username": "analyst2", "full_name": "New Analyst",
+                                 "current_password": "analyst-password", "new_password": "new-password-123"})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["username"] == "analyst2"
+    assert client.post("/api/v1/auth/login", json={"username": "analyst2", "password": "new-password-123"}).status_code == 200

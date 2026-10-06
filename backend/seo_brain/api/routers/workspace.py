@@ -115,7 +115,7 @@ def teams(eng: Engine = Depends(engine)) -> list[dict]:
         rows = cx.execute(text("""SELECT t.*, COUNT(DISTINCT u.id) AS members,
             COUNT(DISTINCT CASE WHEN w.status NOT IN ('verified','rejected','deferred') THEN w.id END) AS open_work
             FROM panel_teams t LEFT JOIN panel_users u ON u.team_id=t.id AND u.active=1
-            LEFT JOIN work_items w ON w.team_id=t.id
+            LEFT JOIN work_items w ON w.team_id=t.id AND w.deleted_at IS NULL
             GROUP BY t.id ORDER BY t.active DESC, t.name""")).mappings().all()
     return [{**dict(row), "active": bool(row["active"])} for row in rows]
 
@@ -164,9 +164,10 @@ def update_team(team_id: int, body: TeamPatch, request: Request, eng: Engine = D
 @router.get("/overview")
 def overview(site_id: str | None = None, owner_id: int | None = None, team_id: int | None = None,
              status: str | None = None, priority: str | None = None, q: str | None = None,
+             created_by_id: int | None = None,
              limit: int = Query(200, ge=1, le=500), offset: int = Query(0, ge=0),
              eng: Engine = Depends(engine)) -> dict:
-    clauses = ["1=1"]
+    clauses = ["w.deleted_at IS NULL"]
     args: dict = {"now": now(), "lim": limit, "off": offset}
     for key, value in (("site_id", site_id), ("owner_id", owner_id), ("team_id", team_id),
                        ("status", status), ("priority", priority)):
@@ -176,6 +177,9 @@ def overview(site_id: str | None = None, owner_id: int | None = None, team_id: i
     if q:
         clauses.append("(w.title LIKE :q OR w.description LIKE :q OR w.url LIKE :q OR w.query LIKE :q)")
         args["q"] = "%" + q.strip() + "%"
+    if created_by_id is not None:
+        clauses.append("w.created_by_id=:created_by_id")
+        args["created_by_id"] = created_by_id
     where = " AND ".join(clauses)
     base = f"FROM work_items w LEFT JOIN sites s ON s.site_id=w.site_id " \
            f"LEFT JOIN panel_users u ON u.id=w.owner_id LEFT JOIN panel_teams t ON t.id=w.team_id WHERE {where}"
@@ -189,9 +193,13 @@ def overview(site_id: str | None = None, owner_id: int | None = None, team_id: i
             COALESCE(SUM(CASE WHEN w.status NOT IN ('verified','rejected','deferred') THEN w.estimated_hours ELSE 0 END),0) AS hours_open
             {base}"""), {**args, "week_end": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(timespec="seconds")}).mappings().one()
         rows = cx.execute(text(f"""SELECT w.*, s.name AS site_name, u.full_name AS owner_name,
+            creator.full_name AS created_by_name,
             t.name AS team_name, t.color AS team_color,
             (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id) AS checklist_total,
-            (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id AND ci.done=1) AS checklist_done {base}
+            (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id AND ci.done=1) AS checklist_done
+            FROM work_items w LEFT JOIN sites s ON s.site_id=w.site_id
+            LEFT JOIN panel_users u ON u.id=w.owner_id LEFT JOIN panel_users creator ON creator.id=w.created_by_id
+            LEFT JOIN panel_teams t ON t.id=w.team_id WHERE {where}
             ORDER BY CASE WHEN w.status='blocked' THEN 0 WHEN w.status NOT IN ('verified','rejected','deferred') AND w.due_at<:now THEN 1 ELSE 2 END,
             CASE w.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
             w.due_at, w.id DESC LIMIT :lim OFFSET :off"""), args).mappings().all()
@@ -217,6 +225,7 @@ def overview(site_id: str | None = None, owner_id: int | None = None, team_id: i
         recent = cx.execute(text("""SELECT e.id,e.site_id,e.work_item_id,e.event_type,e.note,e.actor_username,e.created_at,
             w.title, s.name AS site_name FROM work_item_events e
             JOIN work_items w ON w.id=e.work_item_id JOIN sites s ON s.site_id=e.site_id
+            WHERE w.deleted_at IS NULL
             ORDER BY e.id DESC LIMIT 12""")).mappings().all()
         labels_by_item: dict[int, list[dict]] = {row["id"]: [] for row in rows}
         if rows:
@@ -236,6 +245,42 @@ def overview(site_id: str | None = None, owner_id: int | None = None, team_id: i
             "due_days": [dict(row) for row in due_days], "recent": [dict(row) for row in recent]}
 
 
+@router.get("/archive")
+def archive(kind: Literal["completed", "deleted"], site_id: str | None = None,
+            limit: int = Query(200, ge=1, le=500), eng: Engine = Depends(engine)) -> list[dict]:
+    condition = "w.deleted_at IS NOT NULL" if kind == "deleted" else "w.deleted_at IS NULL AND w.status='verified'"
+    with eng.connect() as cx:
+        rows = cx.execute(text(f"""SELECT w.*,s.name AS site_name,u.full_name AS owner_name,
+            creator.full_name AS created_by_name FROM work_items w
+            JOIN sites s ON s.site_id=w.site_id LEFT JOIN panel_users u ON u.id=w.owner_id
+            LEFT JOIN panel_users creator ON creator.id=w.created_by_id
+            WHERE {condition} AND (:site IS NULL OR w.site_id=:site)
+            ORDER BY COALESCE(w.deleted_at,w.updated_at) DESC LIMIT :limit"""),
+            {"site": site_id, "limit": limit}).mappings().all()
+    return [dict(row) for row in rows]
+
+
+@router.get("/board/all")
+def personal_board(request: Request, after_id: int = Query(0, ge=0),
+                   limit: int = Query(200, ge=1, le=500), eng: Engine = Depends(engine)) -> dict:
+    actor = getattr(request.state, "panel_user", None)
+    if not actor:
+        raise HTTPException(401, "sign in to view assigned tasks")
+    with eng.connect() as cx:
+        rows = cx.execute(text("""SELECT w.*,s.name AS site_name,u.full_name AS owner_name,
+            creator.full_name AS created_by_name,t.name AS team_name,t.color AS team_color,
+            0 AS checklist_total,0 AS checklist_done FROM work_items w
+            JOIN sites s ON s.site_id=w.site_id LEFT JOIN panel_users u ON u.id=w.owner_id
+            LEFT JOIN panel_users creator ON creator.id=w.created_by_id
+            LEFT JOIN panel_teams t ON t.id=w.team_id
+            WHERE w.owner_id=:owner AND w.deleted_at IS NULL AND w.status NOT IN ('verified','rejected','deferred')
+            AND w.id>:after ORDER BY w.id LIMIT :limit"""),
+            {"owner": actor["id"], "after": after_id, "limit": limit + 1}).mappings().all()
+    page = rows[:limit]
+    return {"items": [{**dict(row), "labels": [], "custom_fields": []} for row in page],
+            "next_after_id": page[-1]["id"] if len(rows) > limit else None}
+
+
 @router.get("/board/{site_id}")
 def project_board(site_id: str, request: Request, after_id: int = Query(0, ge=0),
                   limit: int = Query(200, ge=1, le=500), eng: Engine = Depends(engine)) -> dict:
@@ -246,12 +291,14 @@ def project_board(site_id: str, request: Request, after_id: int = Query(0, ge=0)
         if project_responsibility(cx, request, site_id) == "none":
             raise HTTPException(403, "project membership is required")
         rows = cx.execute(text("""SELECT w.*,s.name AS site_name,u.full_name AS owner_name,
+            creator.full_name AS created_by_name,
             t.name AS team_name,t.color AS team_color,
             (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id) AS checklist_total,
             (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id AND ci.done=1) AS checklist_done
             FROM work_items w JOIN sites s ON s.site_id=w.site_id
-            LEFT JOIN panel_users u ON u.id=w.owner_id LEFT JOIN panel_teams t ON t.id=w.team_id
-            WHERE w.site_id=:site AND w.id>:after ORDER BY w.id LIMIT :limit"""),
+            LEFT JOIN panel_users u ON u.id=w.owner_id LEFT JOIN panel_users creator ON creator.id=w.created_by_id
+            LEFT JOIN panel_teams t ON t.id=w.team_id
+            WHERE w.site_id=:site AND w.deleted_at IS NULL AND w.id>:after ORDER BY w.id LIMIT :limit"""),
             {"site": site_id, "after": after_id, "limit": limit + 1}).mappings().all()
         page = rows[:limit]
         labels_by_item: dict[int, list[dict]] = {row["id"]: [] for row in page}

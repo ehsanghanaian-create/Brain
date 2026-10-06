@@ -131,7 +131,8 @@ async def import_calls(file: UploadFile = File(...), dry_run: bool = Form(True),
                      "ads": "ads", "ادز": "ads", "google ads": "ads", "تبلیغات": "ads",
                      "direct": "direct", "مستقیم": "direct", "referral": "referral", "ارجاع": "referral"}
     with eng.begin() as cx:
-        site_ids = {str(row[0]) for row in cx.execute(text("SELECT site_id FROM sites")).all()}
+        site_ids = {str(row[0]) for row in cx.execute(text("""SELECT site_id FROM sites
+            WHERE site_id NOT IN (SELECT site_id FROM manual_projects)""")).all()}
         if default_site_id and default_site_id not in site_ids:
             raise ApiError(422, "سایت پیش‌فرض پیدا نشد", code="validation_error")
         for index, row in enumerate(rows, start=2):

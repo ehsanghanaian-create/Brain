@@ -29,6 +29,7 @@ export function ProjectExecution({ items, people, canEdit, preferredSiteId, onTa
   const [milestoneDue, setMilestoneDue] = useState('');
   const [editingMilestone, setEditingMilestone] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
 
   const refreshProjects = useCallback(async () => {
     try { const rows = await commandApi.projects(); setProjects(rows); setSiteId((current) => current || rows[0]?.site_id || ''); }
@@ -62,6 +63,15 @@ export function ProjectExecution({ items, people, canEdit, preferredSiteId, onTa
     catch (cause) { toast.error(cause instanceof Error ? cause.message : 'تخصیص سایت انجام نشد'); }
     finally { setBusy(false); }
   }
+  async function createProject() {
+    if (newProjectName.trim().length < 2) return;
+    setBusy(true);
+    try { const created = await commandApi.createProject(newProjectName.trim());
+      setNewProjectName(''); await refreshProjects(); setSiteId(created.site_id);
+      toast.success('پروژهٔ مستقل ساخته شد'); }
+    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ایجاد پروژه انجام نشد'); }
+    finally { setBusy(false); }
+  }
   async function remove(userId: number) {
     setBusy(true);
     try { await commandApi.removeProjectMember(siteId, userId); await Promise.all([refreshProjects(), refreshDetail()]); toast.success('عضویت پروژه برداشته شد'); }
@@ -88,21 +98,27 @@ export function ProjectExecution({ items, people, canEdit, preferredSiteId, onTa
   }
 
   return <div className='space-y-4'>
+    <div className='flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3'>
+      <span className='text-sm font-medium'>پروژهٔ مستقل از سایت</span>
+      <Input aria-label='نام پروژهٔ جدید' placeholder='مثلاً کلیکر یا SEO Brain' value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void createProject(); }} className='min-w-48 flex-1' />
+      <Button size='sm' disabled={busy || newProjectName.trim().length < 2} onClick={() => void createProject()}>＋ افزودن پروژه</Button>
+    </div>
     <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>
       {projects.map((row) => <button key={row.site_id} onClick={() => setSiteId(row.site_id)}
         className={`rounded-xl border bg-card p-4 text-right transition-all hover:-translate-y-0.5 hover:shadow-md ${siteId === row.site_id ? 'border-emerald-500/70 ring-1 ring-emerald-500/20' : ''}`}>
         <span className='flex items-center justify-between gap-2'><strong>{row.name}</strong><Badge variant='outline'>{number.format(row.members)} عضو</Badge></span>
-        <span className='text-muted-foreground mt-1 block truncate text-xs' dir='ltr'>{row.canonical_url}</span>
+        <span className='text-muted-foreground mt-1 block truncate text-xs' dir={row.kind === 'site' ? 'ltr' : 'rtl'}>{row.kind === 'manual' ? 'پروژهٔ داخلی · مستقل از سایت' : row.canonical_url}</span>
+        <span className='text-muted-foreground mt-1 block text-xs'>مسئول اصلی: {row.lead_name || 'تعیین نشده'}</span>
         <span className='mt-4 flex items-center justify-between text-xs'><span>پیشرفت کارها</span><strong>{number.format(row.progress_percent)}٪</strong></span>
         <Progress value={row.progress_percent} className='mt-1.5 h-2' />
         <span className='text-muted-foreground mt-3 flex justify-between text-xs'><span>{number.format(row.open_tasks)} باز · {number.format(row.overdue_tasks)} عقب‌افتاده</span><span>{number.format(row.spent_hours)} / {number.format(row.estimated_hours)} ساعت</span></span>
       </button>)}
-      {!projects.length && <p className='text-muted-foreground rounded-xl border border-dashed p-8 text-sm'>برای ایجاد پروژه، ابتدا یک سایت به SEO Brain اضافه کنید.</p>}
+      {!projects.length && <p className='text-muted-foreground rounded-xl border border-dashed p-8 text-sm'>یک پروژهٔ مستقل بسازید یا سایت اضافه کنید.</p>}
     </div>
     {project && <>
       <div className='flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-muted/30 p-4'><div><h3 className='font-bold'>پروژهٔ {project.name}</h3>
-        <p className='text-muted-foreground mt-1 text-xs'>هر سایت یک پروژه است؛ پیشرفت از کارهای نهایی و درصد تکمیل زیرکارها محاسبه می‌شود.</p></div>
-        <Link href={`/dashboard/reports?site=${encodeURIComponent(siteId)}`} className='text-primary text-xs hover:underline'>مشاهدهٔ گزارش سئوی این سایت ←</Link></div>
+        <p className='text-muted-foreground mt-1 text-xs'>پیشرفت از کارهای نهایی و درصد تکمیل زیرکارها محاسبه می‌شود.</p></div>
+        {project.kind === 'site' && <Link href={`/dashboard/reports?site=${encodeURIComponent(siteId)}`} className='text-primary text-xs hover:underline'>مشاهدهٔ گزارش سئوی این سایت ←</Link>}</div>
       <div className='grid gap-4 xl:grid-cols-[1.4fr_1fr]'>
         <Card><CardHeader><CardTitle>ساختار کار و زیرکار</CardTitle><CardDescription>با باز کردن هر کار می‌توانید آن را ریزتر کنید، زمان‌بندی بدهید و وابستگی تعریف کنید.</CardDescription></CardHeader><CardContent className='space-y-2'>
           {parents.map((parent) => { const children = siteTasks.filter((row) => row.parent_id === parent.id);

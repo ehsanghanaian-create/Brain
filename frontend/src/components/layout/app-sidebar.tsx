@@ -147,6 +147,10 @@ export default function AppSidebar({ user }: { user: { full_name: string; role: 
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={() => router.push('/dashboard/profile')}>
+                    <Icons.profile className='me-2 h-4 w-4' />
+                    پروفایل و رمز عبور
+                  </DropdownMenuItem>
                   {user?.role === 'admin' && <DropdownMenuItem onClick={() => router.push('/dashboard/settings')}>
                     <Icons.settings className='me-2 h-4 w-4' />
                     تنظیمات

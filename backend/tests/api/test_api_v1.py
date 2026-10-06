@@ -184,8 +184,6 @@ def test_project_membership_controls_collaboration(client):
     assert next(row for row in client.get('/api/v1/work/projects', headers=lead).json()
                 if row['site_id'] == 'demo')['my_responsibility'] == 'lead'
     assert client.post(path, headers=worker, json={'title': 'Unapproved task'}).status_code == 403
-    assert client.post(path, headers=lead, json={'title': 'Not a member', 'owner_id': ids['outsider'],
-        'due_at': (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(), 'status': 'assigned'}).status_code == 422
     due = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
     created = client.post(path, headers=lead, json={'title': 'Assigned SEO task', 'owner_id': ids['worker'],
         'due_at': due, 'status': 'assigned'}).json()
@@ -199,7 +197,6 @@ def test_project_membership_controls_collaboration(client):
     item_path = f'{path}/{created["id"]}'
     assert client.patch(item_path, headers=outsider, json={'status': 'in_progress'}).status_code == 403
     assert client.patch(item_path, headers=worker, json={'priority': 'critical'}).status_code == 403
-    assert client.patch(item_path, headers=worker, json={'status': 'verified', 'verification_note': 'done'}).status_code == 403
     progressed = client.patch(item_path, headers=worker, json={'status': 'in_progress', 'progress_percent': 50,
         'note': 'Initial technical audit complete'})
     assert progressed.status_code == 200 and progressed.json()['progress_percent'] == 50
@@ -254,6 +251,7 @@ def test_project_membership_controls_collaboration(client):
     assert client.post(time_path, headers=worker, json={**time_body, 'user_id': ids['lead']}).status_code == 403
     logged = client.post(time_path, headers=worker, json=time_body)
     assert logged.status_code == 201 and logged.json()['minutes'] == 45
+    assert client.patch(item_path, headers=worker, json={'status': 'verified'}).status_code == 200
     assert client.patch(item_path, headers=lead, json={'status': 'verified', 'verification_note': 'Search Console checked'}).status_code == 200
 
 

@@ -12,10 +12,10 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Textarea } from '@/components/ui/textarea';
-import { api, type PortfolioOverview, type Site } from '@/lib/api/client';
+import { api, type PortfolioOverview } from '@/lib/api/client';
 import type { WorkStatus } from '@/features/reports/types';
 import { commandApi, type CommandFilters, type CommandOverview, type CommandWorkItem, type WorkPerson,
-  type WorkPriority, type WorkTeam, type ProjectSummary, type ProjectMember } from '../api';
+  type WorkPriority, type WorkTeam, type ProjectSummary } from '../api';
 import { WorkGraph } from './work-graph';
 import { ProjectExecution } from './project-execution';
 import { TeamPlanner } from './team-planner';
@@ -30,9 +30,8 @@ const statusLabel: Record<WorkStatus, string> = {
   rejected: 'رد شده', deferred: 'تعویق'
 };
 const priorityLabel: Record<WorkPriority, string> = { critical: 'فوری', high: 'بالا', normal: 'معمولی', low: 'پایین' };
-const activeStatuses = new Set<WorkStatus>(['approved', 'assigned', 'in_progress', 'review', 'published', 'measurement_pending', 'verified', 'blocked']);
 const closedStatuses = new Set<WorkStatus>(['verified', 'rejected', 'deferred']);
-type View = 'command' | 'mine' | 'projects' | 'planner' | 'sheet' | 'kanban' | 'timeline' | 'graph' | 'teams';
+type View = 'command' | 'mine' | 'assigned' | 'archive' | 'projects' | 'planner' | 'sheet' | 'kanban' | 'timeline' | 'graph' | 'teams';
 type Focus = 'all' | 'overdue' | 'unassigned' | 'blocked' | 'due_week' | 'hours';
 type TaskForm = { site_id: string; title: string; description: string; url: string; status: WorkStatus;
   priority: WorkPriority; owner_id: string; team_id: string; due_at: string; estimated_hours: string;
@@ -42,7 +41,7 @@ const blankForm: TaskForm = { site_id: '', title: '', description: '', url: '', 
   owner_id: '', team_id: '', due_at: '', start_at: '', progress_percent: '0', parent_id: '', milestone_id: '',
   estimated_hours: '', blocked_reason: '', verification_note: '', note: '' };
 const views: { key: View; label: string }[] = [
-  { key: 'kanban', label: 'برد تیم' }, { key: 'mine', label: 'کارهای من' }, { key: 'projects', label: 'پروژه‌ها' }, { key: 'planner', label: 'برنامهٔ تیم' }, { key: 'sheet', label: 'شیت کارها' },
+  { key: 'kanban', label: 'برد تیم' }, { key: 'mine', label: 'کارهای من' }, { key: 'assigned', label: 'واگذاری‌های من' }, { key: 'archive', label: 'آرشیو' }, { key: 'projects', label: 'پروژه‌ها' }, { key: 'planner', label: 'برنامهٔ تیم' }, { key: 'sheet', label: 'شیت کارها' },
   { key: 'command', label: 'فرماندهی' }, { key: 'timeline', label: 'تایم‌لاین' },
   { key: 'graph', label: 'گراف مسیر' }, { key: 'teams', label: 'تیم‌ها' }
 ];
@@ -59,7 +58,11 @@ const statusTone = (status: WorkStatus) => status === 'blocked' ? 'border-rose-5
 
 export function WorkCommandCenter() {
   const [data, setData] = useState<CommandOverview | null>(null);
-  const [sites, setSites] = useState<Site[]>([]);
+  const [assignedData, setAssignedData] = useState<CommandOverview | null>(null);
+  const [archiveKind, setArchiveKind] = useState<'completed' | 'deleted'>('completed');
+  const [archiveItems, setArchiveItems] = useState<CommandWorkItem[]>([]);
+  const [assignedSite, setAssignedSite] = useState('');
+  const [assignedOwner, setAssignedOwner] = useState('');
   const [people, setPeople] = useState<WorkPerson[]>([]);
   const [teams, setTeams] = useState<WorkTeam[]>([]);
   const [portfolio, setPortfolio] = useState<PortfolioOverview | null>(null);
@@ -78,7 +81,6 @@ export function WorkCommandCenter() {
   const [saving, setSaving] = useState(false);
   const [events, setEvents] = useState<Awaited<ReturnType<typeof commandApi.events>> | null>(null);
   const [milestones, setMilestones] = useState<Awaited<ReturnType<typeof commandApi.milestones>>>([]);
-  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
   const [teamName, setTeamName] = useState('');
   const [teamColor, setTeamColor] = useState('#1abb9c');
   const [teamDescription, setTeamDescription] = useState('');
@@ -92,12 +94,13 @@ export function WorkCommandCenter() {
     const currentRequest = ++requestId.current;
     if (!quiet) setLoading(true);
     try {
-      const [overview, teamRows, personRows, siteRows, me, portfolioRows, projectRows] = await Promise.all([
+      const [overview, teamRows, personRows, me, portfolioRows, projectRows] = await Promise.all([
         commandApi.overview(filters), commandApi.teams(), commandApi.people(),
-        api<Site[]>('/sites'), commandApi.me(), api<PortfolioOverview>('/portfolio/overview'), commandApi.projects()
+        commandApi.me(), api<PortfolioOverview>('/portfolio/overview'), commandApi.projects()
       ]);
       if (currentRequest === requestId.current) {
-        setData(overview); setTeams(teamRows); setPeople(personRows); setSites(siteRows); setRole(me.role); setMeId(me.id); setProjects(projectRows); setPortfolio(portfolioRows); setError('');
+        setData(overview); setTeams(teamRows); setPeople(personRows); setRole(me.role); setMeId(me.id); setProjects(projectRows); setPortfolio(portfolioRows); setError('');
+        void commandApi.overview({ created_by_id: me.id, limit: 500 }).then(setAssignedData).catch(() => setAssignedData(null));
       }
     } catch (cause) { if (currentRequest === requestId.current) setError(cause instanceof Error ? cause.message : 'دریافت داده انجام نشد'); }
     finally { if (currentRequest === requestId.current) setLoading(false); }
@@ -107,10 +110,13 @@ export function WorkCommandCenter() {
     const q = search.trim() || undefined;
     return previous.q === q ? previous : { ...previous, q };
   }), 300); return () => clearTimeout(timer); }, [search]);
+  useEffect(() => { if (view !== 'archive') return;
+    void commandApi.archive(archiveKind).then(setArchiveItems).catch(() => setArchiveItems([]));
+  }, [view, archiveKind, data]);
   useEffect(() => { if (!editing || !form.site_id) return; let active = true;
-    void Promise.all([commandApi.milestones(form.site_id), commandApi.projectMembers(form.site_id)])
-      .then(([rows, members]) => { if (active) { setMilestones(rows); setProjectMembers(members); } })
-      .catch(() => { if (active) { setMilestones([]); setProjectMembers([]); } });
+    void commandApi.milestones(form.site_id)
+      .then((rows) => { if (active) setMilestones(rows); })
+      .catch(() => { if (active) setMilestones([]); });
     return () => { active = false; };
   }, [editing, form.site_id]);
 
@@ -139,6 +145,9 @@ export function WorkCommandCenter() {
     .toSorted((a, b) => (a.status === 'blocked' ? -1 : b.status === 'blocked' ? 1 : 0) ||
       (isOverdue(a) ? -1 : isOverdue(b) ? 1 : 0) ||
       (a.due_at || '9999').localeCompare(b.due_at || '9999')), [data, meId]);
+  const assignedItems = useMemo(() => (assignedData?.items ?? []).filter((item) =>
+    (!assignedSite || item.site_id === assignedSite) && (!assignedOwner || item.owner_id?.toString() === assignedOwner)),
+    [assignedData, assignedSite, assignedOwner]);
 
   function openTask(item: CommandWorkItem | 'new') {
     setEvents(null); setEditing(item);
@@ -154,10 +163,7 @@ export function WorkCommandCenter() {
   }
   async function saveTask() {
     if (!editing) return;
-    if (form.title.trim().length < 3 || !form.site_id) { toast.error('سایت و عنوان کار را مشخص کنید'); return; }
-    if (activeStatuses.has(form.status) && (!form.owner_id || !form.due_at)) { toast.error('برای کار فعال، مسئول و موعد لازم است'); return; }
-    if (form.status === 'blocked' && !form.blocked_reason.trim()) { toast.error('دلیل مسدود شدن را بنویسید'); return; }
-    if (form.status === 'verified' && !form.verification_note.trim()) { toast.error('نتیجهٔ سنجش را ثبت کنید'); return; }
+    if (form.title.trim().length < 3 || !form.site_id) { toast.error('پروژه و عنوان کار را مشخص کنید'); return; }
     setSaving(true);
     const body = { title: form.title.trim(), description: form.description.trim(), url: form.url.trim() || null,
       status: form.status, priority: form.priority, owner_id: form.owner_id ? Number(form.owner_id) : null,
@@ -170,13 +176,35 @@ export function WorkCommandCenter() {
       note: form.note.trim() || null };
     try {
       if (editing === 'new') await commandApi.createWork(form.site_id, body);
-      else await commandApi.updateWork(editing, canManageEditing ? body : {
-        status: form.status, progress_percent: Number(form.progress_percent || 0),
-        blocked_reason: form.blocked_reason.trim() || null, note: form.note.trim() || null
-      });
+      else {
+        const permitted = canManageEditing ? body : { status: body.status, progress_percent: body.progress_percent,
+          blocked_reason: body.blocked_reason, note: body.note };
+        const changed = Object.fromEntries(Object.entries(permitted).filter(([key, value]) => {
+          if (key === 'note') return Boolean(value);
+          const previous = editing[key as keyof CommandWorkItem];
+          if (key === 'due_at' || key === 'start_at') return (value ? Date.parse(String(value)) : null) !==
+            (previous ? Date.parse(String(previous)) : null);
+          return value !== previous;
+        }));
+        if (!Object.keys(changed).length) { setEditing(null); return; }
+        await commandApi.updateWork(editing, changed);
+      }
       setEditing(null); await refresh(true); toast.success('کار و تاریخچهٔ آن ذخیره شد');
     } catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ذخیره انجام نشد'); }
     finally { setSaving(false); }
+  }
+  async function completeTask(item: CommandWorkItem) {
+    try { await commandApi.updateWork(item, { status: 'verified' }); setEditing(null); await refresh(true); toast.success('کار انجام شد'); }
+    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'تکمیل کار انجام نشد'); }
+  }
+  async function quickTaskPatch(item: CommandWorkItem, patch: Record<string, unknown>) {
+    try { await commandApi.updateWork(item, patch); await refresh(true); toast.success('کار به‌روز شد'); }
+    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ویرایش سریع انجام نشد'); }
+  }
+  async function deleteTask(item: CommandWorkItem) {
+    if (!window.confirm(`کار «${item.title}» به آرشیو حذف‌شده‌ها منتقل شود؟`)) return;
+    try { await commandApi.deleteWork(item); setEditing(null); await refresh(true); toast.success('کار به آرشیو حذف‌شده‌ها منتقل شد'); }
+    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'حذف کار انجام نشد'); }
   }
   async function loadEvents(item: CommandWorkItem) {
     try { setEvents(await commandApi.events(item)); }
@@ -223,7 +251,7 @@ export function WorkCommandCenter() {
     {error && <Card className='border-rose-500/40'><CardContent className='pt-5 text-sm text-rose-600'>{error} <Button variant='outline' size='sm' onClick={() => void refresh()}>تلاش دوباره</Button></CardContent></Card>}
     {loading && !data && <div className='text-muted-foreground rounded-xl border p-12 text-center text-sm'>در حال خواندن کارهای همهٔ سایت‌ها…</div>}
     {data && <>
-      {view !== 'kanban' && <><section className='grid grid-cols-2 gap-2 md:grid-cols-3 2xl:grid-cols-6' aria-label='شاخص‌های عملیات'>
+      {view === 'command' && <section className='grid grid-cols-2 gap-2 md:grid-cols-3 2xl:grid-cols-6' aria-label='شاخص‌های عملیات'>
         {([
           ['کار باز', data.summary.open, 'all', 'text-sky-600'],
           ['عقب‌افتاده', data.summary.overdue, 'overdue', 'text-rose-600'],
@@ -235,22 +263,22 @@ export function WorkCommandCenter() {
           onClick={() => setFocus(key)} aria-pressed={focus === key} className={`rounded-xl border bg-card p-3 text-right shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${focus === key ? 'border-emerald-500/60 ring-1 ring-emerald-500/20' : 'border-border/70'}`}>
           <span className='text-muted-foreground text-xs'>{label}</span><strong className={`mt-1 block text-xl tabular-nums ${tone}`}>{num.format(value)}</strong>
         </motion.button>)}
-      </section>
+      </section>}
 
-      <div className='flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3'>
+      {(view === 'command' || view === 'sheet') && <div className='flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3'>
         <Input aria-label='جست‌وجوی کار' value={search} onChange={(e) => setSearch(e.target.value)} placeholder='جست‌وجو در عنوان، URL و توضیح…' className='min-w-48 flex-1' />
-        <NativeSelect aria-label='فیلتر سایت' value={filters.site_id || ''} onChange={(e) => setFilters((f) => ({ ...f, site_id: e.target.value || undefined }))} className='w-40'><NativeSelectOption value=''>همهٔ سایت‌ها</NativeSelectOption>{sites.map((site) => <NativeSelectOption key={site.site_id} value={site.site_id}>{site.name}</NativeSelectOption>)}</NativeSelect>
+        <NativeSelect aria-label='فیلتر پروژه' value={filters.site_id || ''} onChange={(e) => setFilters((f) => ({ ...f, site_id: e.target.value || undefined }))} className='w-40'><NativeSelectOption value=''>همهٔ پروژه‌ها</NativeSelectOption>{projects.map((project) => <NativeSelectOption key={project.site_id} value={project.site_id}>{project.name}</NativeSelectOption>)}</NativeSelect>
         <NativeSelect aria-label='فیلتر تیم' value={filters.team_id || ''} onChange={(e) => setFilters((f) => ({ ...f, team_id: e.target.value ? Number(e.target.value) : undefined }))} className='w-36'><NativeSelectOption value=''>همهٔ تیم‌ها</NativeSelectOption>{teams.map((team) => <NativeSelectOption key={team.id} value={String(team.id)}>{team.name}</NativeSelectOption>)}</NativeSelect>
         <NativeSelect aria-label='فیلتر مسئول' value={filters.owner_id || ''} onChange={(e) => setFilters((f) => ({ ...f, owner_id: e.target.value ? Number(e.target.value) : undefined }))} className='w-40'><NativeSelectOption value=''>همهٔ مسئولان</NativeSelectOption>{people.filter((person) => person.active).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect>
         <NativeSelect aria-label='فیلتر وضعیت' value={filters.status || ''} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value || undefined }))} className='w-40'><NativeSelectOption value=''>همهٔ وضعیت‌ها</NativeSelectOption>{(Object.keys(statusLabel) as WorkStatus[]).map((status) => <NativeSelectOption key={status} value={status}>{statusLabel[status]}</NativeSelectOption>)}</NativeSelect>
         <NativeSelect aria-label='فیلتر اولویت' value={filters.priority || ''} onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value || undefined }))} className='w-32'><NativeSelectOption value=''>همهٔ اولویت‌ها</NativeSelectOption>{(Object.keys(priorityLabel) as WorkPriority[]).map((priority) => <NativeSelectOption key={priority} value={priority}>{priorityLabel[priority]}</NativeSelectOption>)}</NativeSelect>
-      </div></>}
+      </div>}
 
       <div className='flex flex-wrap gap-1.5 border-b pb-2' role='tablist' aria-label='نماهای میز عملیات'>
         {views.map((entry) => <Button key={entry.key} size='sm' variant={view === entry.key ? 'default' : 'ghost'} role='tab' aria-selected={view === entry.key} onClick={() => setView(entry.key)}>{entry.label}</Button>)}
         {focus !== 'all' && <Button size='sm' variant='outline' onClick={() => setFocus('all')}>حذف تمرکز</Button>}
       </div>
-      {displayCount > data.items.length && <p className='rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs'>از {num.format(displayCount)} کار مطابق فیلتر، {num.format(data.items.length)} کار نخست نمایش داده می‌شود. برای دیدن بقیه، فیلترها را محدودتر کنید.</p>}
+      {view === 'command' && displayCount > data.items.length && <p className='rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs'>از {num.format(displayCount)} کار مطابق فیلتر، {num.format(data.items.length)} کار نخست نمایش داده می‌شود. برای دیدن بقیه، فیلترها را محدودتر کنید.</p>}
 
       {view === 'command' && <div className='grid gap-4 xl:grid-cols-[1.55fr_1fr]'>
         {portfolio && <Card className='xl:col-span-2'><CardHeader><CardTitle>نقشهٔ اقدام سایت‌ها</CardTitle><CardDescription>پیشنهادهای این بخش از وضعیت اتصال، داده و گراف هر سایت می‌آیند. مدیر می‌تواند آن‌ها را به کارِ قابل پیگیری تبدیل کند.</CardDescription></CardHeader><CardContent className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>
@@ -283,7 +311,7 @@ export function WorkCommandCenter() {
 
       {view === 'mine' && <div className='grid gap-4 xl:grid-cols-[1.5fr_1fr]'>
         <Card><CardHeader><CardTitle>صف کارهای من</CardTitle><CardDescription>کارهای مسدود و عقب‌افتاده بالاترند؛ هر ردیف را باز کنید و پیشرفت یا زمان انجام را ثبت کنید.</CardDescription></CardHeader><CardContent className='space-y-2'>
-          {myItems.map((item) => <button key={item.id} onClick={() => openTask(item)} className='flex w-full items-start justify-between gap-3 rounded-xl border p-3 text-right transition-colors hover:bg-muted/50'><span className='min-w-0'><strong className='block truncate text-sm'>{item.title}</strong><span className='text-muted-foreground mt-1 block text-xs'>{item.site_name} · {dateText(item.due_at)} · {num.format(item.progress_percent || 0)}٪ پیشرفت</span></span><Badge variant='outline' className={statusTone(item.status)}>{isOverdue(item) ? 'عقب‌افتاده' : statusLabel[item.status]}</Badge></button>)}
+          {myItems.map((item) => <div key={item.id} className='flex items-start justify-between gap-3 rounded-xl border p-3 transition-colors hover:bg-muted/50'><button onClick={() => openTask(item)} className='min-w-0 flex-1 text-right'><strong className='block truncate text-sm'>{item.title}</strong><span className='text-muted-foreground mt-1 block text-xs'>{item.site_name} · واگذارکننده: {item.created_by_name || 'سیستم'} · {dateText(item.due_at)}</span><Badge variant='outline' className='mt-1'>{priorityLabel[item.priority]}</Badge></button><div className='flex flex-col items-end gap-2'><Badge variant='outline' className={statusTone(item.status)}>{isOverdue(item) ? 'عقب‌افتاده' : statusLabel[item.status]}</Badge><Button size='sm' variant='outline' onClick={() => void completeTask(item)}>✓ انجام شد</Button></div></div>)}
           {!myItems.length && <p className='text-muted-foreground py-10 text-center text-sm'>کار بازی به شما واگذار نشده است. راهبر پروژه می‌تواند از بخش پروژه‌ها شما را عضو و مسئول کار کند.</p>}
         </CardContent></Card>
         <div className='space-y-4'><Card><CardHeader><CardTitle>وضعیت شخصی</CardTitle></CardHeader><CardContent className='grid grid-cols-2 gap-3 text-center text-sm'><div className='rounded-lg bg-muted p-4'><strong className='block text-2xl'>{num.format(myItems.length)}</strong>کار باز</div><div className='rounded-lg bg-rose-500/10 p-4'><strong className='block text-2xl text-rose-600'>{num.format(myItems.filter(isOverdue).length)}</strong>عقب‌افتاده</div><div className='rounded-lg bg-amber-500/10 p-4'><strong className='block text-2xl text-amber-600'>{num.format(myItems.filter((item) => item.status === 'blocked').length)}</strong>مانع‌دار</div><div className='rounded-lg bg-sky-500/10 p-4'><strong className='block text-2xl text-sky-600'>{num.format(myItems.reduce((sum, item) => sum + (item.estimated_hours || 0), 0))}</strong>ساعت برآوردی باز</div></CardContent></Card>
@@ -291,18 +319,38 @@ export function WorkCommandCenter() {
         </div>
       </div>}
 
+      {view === 'assigned' && <Card><CardHeader><CardTitle>کارهایی که من واگذار کرده‌ام</CardTitle><CardDescription>مسئول، پروژه و وضعیت هر واگذاری را یکجا دنبال کنید. این فهرست تا ۵۰۰ کار اخیر را نشان می‌دهد.</CardDescription></CardHeader><CardContent className='space-y-3'>
+        <div className='flex flex-wrap gap-2'><NativeSelect aria-label='فیلتر پروژهٔ واگذاری' value={assignedSite} onChange={(e) => setAssignedSite(e.target.value)} className='min-w-44'><NativeSelectOption value=''>همهٔ پروژه‌ها</NativeSelectOption>{projects.map((project) => <NativeSelectOption key={project.site_id} value={project.site_id}>{project.name}</NativeSelectOption>)}</NativeSelect><NativeSelect aria-label='فیلتر مسئول واگذاری' value={assignedOwner} onChange={(e) => setAssignedOwner(e.target.value)} className='min-w-44'><NativeSelectOption value=''>همهٔ مسئولان</NativeSelectOption>{people.filter((person) => person.active).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect></div>
+        {assignedItems.map((item) => <button key={item.id} onClick={() => openTask(item)} className='flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-right hover:bg-muted/50'><span><strong className='block text-sm'>{item.title}</strong><span className='text-muted-foreground text-xs'>{item.site_name} · {item.owner_name || 'بی‌مسئول'} · {dateText(item.due_at)}</span></span><span className='flex gap-1'><Badge variant='outline'>{priorityLabel[item.priority]}</Badge><Badge variant='outline'>{statusLabel[item.status]}</Badge></span></button>)}
+        {!assignedItems.length && <p className='text-muted-foreground py-8 text-center text-sm'>واگذاری مطابق فیلتر فعلی پیدا نشد.</p>}
+      </CardContent></Card>}
+
+      {view === 'archive' && <Card><CardHeader><CardTitle>آرشیو کارها</CardTitle><CardDescription>کارهای انجام‌شده و حذف‌شده جدا هستند؛ حذف، داده و تاریخچه را پاک نمی‌کند.</CardDescription></CardHeader><CardContent className='space-y-3'>
+        <div className='flex gap-2'><Button size='sm' variant={archiveKind === 'completed' ? 'default' : 'outline'} onClick={() => setArchiveKind('completed')}>انجام‌شده‌ها</Button><Button size='sm' variant={archiveKind === 'deleted' ? 'default' : 'outline'} onClick={() => setArchiveKind('deleted')}>حذف‌شده‌ها</Button></div>
+        {archiveItems.map((item) => <div key={item.id} className='flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3'><span><strong className='block text-sm'>{item.title}</strong><span className='text-muted-foreground text-xs'>{item.site_name} · {item.owner_name || 'بی‌مسئول'} · {dateText(item.deleted_at || item.updated_at)}</span></span><div className='flex gap-2'>{archiveKind === 'completed' && <Button size='sm' variant='outline' onClick={() => openTask(item)}>جزئیات</Button>}{archiveKind === 'deleted' && canLead(item.site_id) && <Button size='sm' variant='outline' onClick={() => void commandApi.restoreWork(item).then(() => refresh(true)).then(() => toast.success('کار بازیابی شد')).catch((cause) => toast.error(cause instanceof Error ? cause.message : 'بازیابی انجام نشد'))}>بازیابی</Button>}</div></div>)}
+        {!archiveItems.length && <p className='text-muted-foreground py-8 text-center text-sm'>در این بخش کاری نیست.</p>}
+      </CardContent></Card>}
+
       {view === 'projects' && <ProjectExecution items={data.items} people={people} canEdit={canEdit} preferredSiteId={filters.site_id} onTask={openTask} />}
 
       {view === 'planner' && <TeamPlanner items={items} people={people} onTask={openTask} />}
 
       {view === 'sheet' && <Card><CardHeader><CardTitle>شیت مدیریت کارها</CardTitle><CardDescription>مرور همهٔ سایت‌ها، مسئولیت، موعد، اولویت و مرحلهٔ اجرا. برای تغییر هر ردیف، آن را باز کنید.</CardDescription></CardHeader><CardContent>
         <div className='overflow-x-auto rounded-lg border'><table className='w-full min-w-[1050px] text-right text-sm'><thead className='bg-muted/50 text-xs'><tr><th className='p-3'>کار / منبع</th><th>سایت</th><th>تیم</th><th>مسئول</th><th>اولویت</th><th>وضعیت</th><th>موعد</th><th>ساعت</th><th className='p-3'>جزئیات</th></tr></thead><tbody>
-          {items.map((item) => <tr key={item.id} className='border-t transition-colors hover:bg-muted/40'><td className='max-w-64 p-3'><strong className='block truncate'>{item.title}</strong>{item.url && <span className='text-muted-foreground block truncate text-[11px]' dir='ltr'>{item.url}</span>}</td><td>{item.site_name}</td><td>{item.team_name || '—'}</td><td>{item.owner_name || <span className='text-amber-600'>بی‌مسئول</span>}</td><td><Badge variant='outline'>{priorityLabel[item.priority]}</Badge></td><td><Badge variant='outline' className={statusTone(item.status)}>{statusLabel[item.status]}</Badge></td><td className={isOverdue(item) ? 'text-rose-600' : ''}>{dateText(item.due_at)}</td><td>{item.estimated_hours ?? '—'}</td><td className='p-3'><Button size='sm' variant='outline' onClick={() => openTask(item)}>باز کردن</Button></td></tr>)}
+          {items.map((item) => <tr key={item.id} className='border-t transition-colors hover:bg-muted/40'>
+            <td className='max-w-64 p-3'><strong className='block truncate'>{item.title}</strong><span className='text-muted-foreground block text-[11px]'>واگذارکننده: {item.created_by_name || 'سیستم'}</span></td>
+            <td>{item.site_name}</td><td>{item.team_name || '—'}</td>
+            <td>{canLead(item.site_id) ? <NativeSelect aria-label={`مسئول ${item.title}`} value={item.owner_id?.toString() || ''} onChange={(event) => void quickTaskPatch(item, { owner_id: event.target.value ? Number(event.target.value) : null })} className='min-w-32'><NativeSelectOption value=''>بی‌مسئول</NativeSelectOption>{people.filter((person) => person.active && person.role !== 'call_center').map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect> : item.owner_name || 'بی‌مسئول'}</td>
+            <td>{canLead(item.site_id) ? <NativeSelect aria-label={`اولویت ${item.title}`} value={item.priority} onChange={(event) => void quickTaskPatch(item, { priority: event.target.value })} className='w-28'>{(Object.keys(priorityLabel) as WorkPriority[]).map((key) => <NativeSelectOption key={key} value={key}>{priorityLabel[key]}</NativeSelectOption>)}</NativeSelect> : <Badge variant='outline'>{priorityLabel[item.priority]}</Badge>}</td>
+            <td>{canUpdate(item) ? <NativeSelect aria-label={`وضعیت ${item.title}`} value={item.status} onChange={(event) => void quickTaskPatch(item, { status: event.target.value })} className='w-32'>{(Object.keys(statusLabel) as WorkStatus[]).filter((status) => canLead(item.site_id) || !['approved','assigned','rejected','deferred'].includes(status)).map((status) => <NativeSelectOption key={status} value={status}>{statusLabel[status]}</NativeSelectOption>)}</NativeSelect> : <Badge variant='outline' className={statusTone(item.status)}>{statusLabel[item.status]}</Badge>}</td>
+            <td className={isOverdue(item) ? 'text-rose-600' : ''}>{dateText(item.due_at)}</td><td>{item.estimated_hours ?? '—'}</td>
+            <td className='p-3'><Button size='sm' variant='outline' onClick={() => openTask(item)}>جزئیات</Button></td>
+          </tr>)}
         </tbody></table></div>{!items.length && <p className='text-muted-foreground py-10 text-center text-sm'>کاری مطابق فیلتر پیدا نشد.</p>}
       </CardContent></Card>}
 
-      {view === 'kanban' && <TeamBoard items={data.items} sites={sites.filter((site) => canEdit || projects.some((project) => project.site_id === site.site_id && project.my_responsibility))} people={people} preferredSiteId={filters.site_id} meId={meId}
-        canLead={canLead} canUpdate={canUpdate} onOpen={openTask} onPrepareStatus={(item, status) => { openTask(item); setForm((current) => ({ ...current, status })); }}
+      {view === 'kanban' && <TeamBoard items={data.items} sites={projects.filter((project) => canEdit || project.my_responsibility).map((project) => ({ site_id: project.site_id, name: project.name }))} people={people} preferredSiteId={filters.site_id} meId={meId}
+        canLead={canLead} canUpdate={canUpdate} onOpen={openTask}
         onSiteChange={(siteId) => setFilters((current) => ({ ...current, site_id: siteId || undefined }))}
         onChanged={async () => { await refresh(true); }} />}
 
@@ -314,7 +362,7 @@ export function WorkCommandCenter() {
         </CardContent></Card>
       </div>}
 
-      {view === 'graph' && <Card><CardHeader><CardTitle>گراف مسئولیت و اجرا</CardTitle><CardDescription>رابطهٔ هر سایت با کارها و ارتباط مستقیم هر کار با مسئول و تیمش؛ با کلیک روی کار، جزئیات آن را باز کنید.</CardDescription></CardHeader><CardContent><WorkGraph items={items} onWork={openTask} /></CardContent></Card>}
+      {view === 'graph' && <Card><CardHeader><CardTitle>گراف واگذاری و اجرا</CardTitle><CardDescription>پروژه را انتخاب کنید تا فقط کارهای همان پروژه و جهت واگذاری تا اجرا دیده شود.</CardDescription></CardHeader><CardContent><WorkGraph items={items} projects={projects} onWork={openTask} /></CardContent></Card>}
 
       {view === 'teams' && <div className='grid gap-4 xl:grid-cols-[1fr_1.4fr]'><div className='space-y-4'>
         <Card><CardHeader><CardTitle>تیم‌های اجرایی</CardTitle><CardDescription>ظرفیت کاری و عضویت هر تیم به کارهای واقعی وصل می‌شود.</CardDescription></CardHeader><CardContent className='space-y-2'>
@@ -330,26 +378,28 @@ export function WorkCommandCenter() {
       </CardContent></Card></div>}
     </>}
 
-    <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) setEditing(null); }}><DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-2xl' dir='rtl'><DialogHeader><DialogTitle>{editing === 'new' ? 'کار جدید' : editing?.title}</DialogTitle><DialogDescription>هر کار باید مسیر اجرا و نتیجهٔ قابل بررسی داشته باشد. تاریخچهٔ تغییرات در همین پنجره دیده می‌شود.</DialogDescription></DialogHeader>
+    <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) setEditing(null); }}><DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-2xl' dir='rtl'><DialogHeader><DialogTitle>{editing === 'new' ? 'کار جدید' : editing?.title}</DialogTitle><DialogDescription>{editing && editing !== 'new' ? `ثبت‌شده در ${new Date(editing.created_at).toLocaleString('fa-IR')} · واگذارکننده: ${editing.created_by_name || 'سیستم'}` : 'عنوان، پروژه و مسئول کافی است؛ جزئیات دیگر اختیاری‌اند.'}</DialogDescription></DialogHeader>
       {editing && <div className='grid gap-3 sm:grid-cols-2'>
-        <label className='space-y-1 text-xs'>سایت<NativeSelect disabled={editing !== 'new'} value={form.site_id} onChange={(e) => setForm((f) => ({ ...f, site_id: e.target.value }))}><NativeSelectOption value=''>انتخاب سایت</NativeSelectOption>{sites.filter((site) => canLead(site.site_id) || editing !== 'new').map((site) => <NativeSelectOption key={site.site_id} value={site.site_id}>{site.name}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>پروژه<NativeSelect disabled={editing !== 'new'} value={form.site_id} onChange={(e) => setForm((f) => ({ ...f, site_id: e.target.value }))}><NativeSelectOption value=''>انتخاب پروژه</NativeSelectOption>{projects.filter((project) => canLead(project.site_id) || editing !== 'new').map((project) => <NativeSelectOption key={project.site_id} value={project.site_id}>{project.name}</NativeSelectOption>)}</NativeSelect></label>
         <label className='space-y-1 text-xs'>عنوان<Input disabled={!canManageEditing} value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} /></label>
+        <label className='space-y-1 text-xs'>مسئول<NativeSelect disabled={!canManageEditing} value={form.owner_id} onChange={(e) => { const person = people.find((row) => row.id === Number(e.target.value)); setForm((f) => ({ ...f, owner_id: e.target.value, team_id: f.team_id || person?.team_id?.toString() || '' })); }}><NativeSelectOption value=''>بی‌مسئول</NativeSelectOption>{people.filter((person) => person.active && person.role !== 'call_center' && (!form.team_id || person.team_id?.toString() === form.team_id || person.id.toString() === form.owner_id)).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>وضعیت<NativeSelect disabled={!canUpdateEditing} value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as WorkStatus }))}>{(Object.keys(statusLabel) as WorkStatus[]).filter((status) => canManageEditing || !['verified', 'rejected', 'deferred', 'approved', 'assigned'].includes(status)).map((status) => <NativeSelectOption key={status} value={status}>{statusLabel[status]}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>اولویت<NativeSelect disabled={!canManageEditing} value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as WorkPriority }))}>{(Object.keys(priorityLabel) as WorkPriority[]).map((priority) => <NativeSelectOption key={priority} value={priority}>{priorityLabel[priority]}</NativeSelectOption>)}</NativeSelect></label>
+        <label className='space-y-1 text-xs'>موعد اختیاری<Input disabled={!canManageEditing} type='datetime-local' value={form.due_at} onChange={(e) => setForm((f) => ({ ...f, due_at: e.target.value }))} /></label>
+        <details className='sm:col-span-2 rounded-lg border p-3'><summary className='cursor-pointer text-sm font-medium'>جزئیات بیشتر · شرح، لینک، زمان‌بندی و زیرکار</summary><div className='mt-3 grid gap-3 sm:grid-cols-2'>
         <label className='space-y-1 text-xs sm:col-span-2'>شرح کار<Textarea disabled={!canManageEditing} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></label>
         <label className='space-y-1 text-xs sm:col-span-2'>URL مرتبط<Input disabled={!canManageEditing} dir='ltr' value={form.url} onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))} /></label>
         <label className='space-y-1 text-xs'>تیم<NativeSelect disabled={!canManageEditing} value={form.team_id} onChange={(e) => setForm((f) => ({ ...f, team_id: e.target.value }))}><NativeSelectOption value=''>بدون تیم</NativeSelectOption>{teams.filter((team) => team.active).map((team) => <NativeSelectOption key={team.id} value={String(team.id)}>{team.name}</NativeSelectOption>)}</NativeSelect></label>
-        <label className='space-y-1 text-xs'>مسئول<NativeSelect disabled={!canManageEditing} value={form.owner_id} onChange={(e) => { const person = people.find((row) => row.id === Number(e.target.value)); setForm((f) => ({ ...f, owner_id: e.target.value, team_id: f.team_id || person?.team_id?.toString() || '' })); }}><NativeSelectOption value=''>بی‌مسئول</NativeSelectOption>{people.filter((person) => person.active && person.role !== 'call_center' && (person.role === 'admin' || projectMembers.some((member) => member.user_id === person.id && member.responsibility !== 'viewer') || person.id.toString() === form.owner_id) && (!form.team_id || person.team_id?.toString() === form.team_id || person.id.toString() === form.owner_id)).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect></label>
-        <label className='space-y-1 text-xs'>وضعیت<NativeSelect disabled={!canUpdateEditing} value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as WorkStatus }))}>{(Object.keys(statusLabel) as WorkStatus[]).filter((status) => canManageEditing || !['verified', 'rejected', 'deferred', 'approved', 'assigned'].includes(status)).map((status) => <NativeSelectOption key={status} value={status}>{statusLabel[status]}</NativeSelectOption>)}</NativeSelect></label>
-        <label className='space-y-1 text-xs'>اولویت<NativeSelect disabled={!canManageEditing} value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as WorkPriority }))}>{(Object.keys(priorityLabel) as WorkPriority[]).map((priority) => <NativeSelectOption key={priority} value={priority}>{priorityLabel[priority]}</NativeSelectOption>)}</NativeSelect></label>
-        <label className='space-y-1 text-xs'>موعد<Input disabled={!canManageEditing} type='datetime-local' value={form.due_at} onChange={(e) => setForm((f) => ({ ...f, due_at: e.target.value }))} /></label>
         <label className='space-y-1 text-xs'>شروع<Input disabled={!canManageEditing} type='datetime-local' value={form.start_at} onChange={(e) => setForm((f) => ({ ...f, start_at: e.target.value }))} /></label>
         <label className='space-y-1 text-xs'>ساعت برآوردی<Input disabled={!canManageEditing} type='number' min={0} max={1000} step={.5} value={form.estimated_hours} onChange={(e) => setForm((f) => ({ ...f, estimated_hours: e.target.value }))} /></label>
         <label className='space-y-1 text-xs'>درصد پیشرفت<Input disabled={!canUpdateEditing} type='number' min={0} max={100} value={form.progress_percent} onChange={(e) => setForm((f) => ({ ...f, progress_percent: e.target.value }))} /></label>
         <label className='space-y-1 text-xs'>زیرکارِ<NativeSelect disabled={!canManageEditing} value={form.parent_id} onChange={(e) => setForm((f) => ({ ...f, parent_id: e.target.value }))}><NativeSelectOption value=''>کار اصلی</NativeSelectOption>{(data?.items || []).filter((item) => item.site_id === form.site_id && (editing === 'new' || item.id !== editing.id)).map((item) => <NativeSelectOption key={item.id} value={String(item.id)}>{item.title}</NativeSelectOption>)}</NativeSelect></label>
         <label className='space-y-1 text-xs'>مایلستون<NativeSelect disabled={!canManageEditing} value={form.milestone_id} onChange={(e) => setForm((f) => ({ ...f, milestone_id: e.target.value }))}><NativeSelectOption value=''>بدون مایلستون</NativeSelectOption>{milestones.map((entry) => <NativeSelectOption key={entry.id} value={String(entry.id)}>{entry.title}</NativeSelectOption>)}</NativeSelect></label>
+        </div></details>
         {form.status === 'blocked' && <label className='space-y-1 text-xs sm:col-span-2'>دلیل مانع<Textarea disabled={!canUpdateEditing} value={form.blocked_reason} onChange={(e) => setForm((f) => ({ ...f, blocked_reason: e.target.value }))} /></label>}
         {form.status === 'verified' && <label className='space-y-1 text-xs sm:col-span-2'>نتیجهٔ سنجش<Textarea disabled={!canManageEditing} value={form.verification_note} onChange={(e) => setForm((f) => ({ ...f, verification_note: e.target.value }))} /></label>}
         {canUpdateEditing && <label className='space-y-1 text-xs sm:col-span-2'>یادداشت این تغییر<Input value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder='پیشرفت، مانع یا تصمیم انجام‌شده را ثبت کنید' /></label>}
-        <div className='flex flex-wrap gap-2 sm:col-span-2'>{canUpdateEditing && <Button onClick={saveTask} disabled={saving}>{saving ? 'در حال ذخیره…' : 'ذخیرهٔ کار'}</Button>}{editing !== 'new' && <Button variant='outline' onClick={() => void loadEvents(editing)}>نمایش تاریخچه</Button>}</div>
+        <div className='flex flex-wrap gap-2 sm:col-span-2'>{canUpdateEditing && <Button onClick={saveTask} disabled={saving}>{saving ? 'در حال ذخیره…' : 'ذخیرهٔ کار'}</Button>}{editing !== 'new' && canUpdate(editing) && editing.status !== 'verified' && <Button variant='outline' onClick={() => void completeTask(editing)}>✓ انجام شد</Button>}{editing !== 'new' && canLead(editing.site_id) && <Button variant='outline' onClick={() => void deleteTask(editing)}>حذف کار</Button>}{editing !== 'new' && <Button variant='outline' onClick={() => void loadEvents(editing)}>نمایش تاریخچه</Button>}</div>
         {events && <div className='space-y-2 border-t pt-3 sm:col-span-2'><strong className='text-sm'>تاریخچهٔ کار</strong>{events.map((event) => <div key={event.id} className='rounded-lg border p-2 text-xs'><span className='text-muted-foreground'>{new Date(event.created_at).toLocaleString('fa-IR')}</span> · {event.event_type === 'created' ? 'ایجاد' : event.event_type === 'comment' ? 'یادداشت' : event.event_type === 'checklist_added' ? 'افزودن گام' : event.event_type === 'checklist_updated' ? 'تغییر گام' : event.event_type === 'checklist_removed' ? 'برداشتن گام' : 'ویرایش'} · {event.actor_username || 'سیستم'} {event.note && <span>· {event.note}</span>}</div>)}</div>}
         {editing !== 'new' && <TaskExecutionDetails item={editing} items={data?.items || []} people={people} canEdit={canManageEditing} canLogTime={canUpdate(editing)} canLogOthers={canEdit} meId={meId} onChanged={() => void refresh(true)} />}
       </div>}

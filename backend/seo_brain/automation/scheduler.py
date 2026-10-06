@@ -265,6 +265,7 @@ def run_tick(engine: Engine, queue, max_sites: int = 2, stale_after_minutes: int
         site_ids = [r[0] for r in cx.execute(text("""SELECT s.site_id FROM sites s
             LEFT JOIN sync_runs r ON r.site_id=s.site_id AND r.source IN
                 ('wordpress_pipeline','gsc_pipeline','ga4_pipeline')
+            WHERE NOT EXISTS (SELECT 1 FROM manual_projects mp WHERE mp.site_id=s.site_id)
             GROUP BY s.site_id ORDER BY MAX(r.started_at) ASC, s.site_id""")).all()]
         active_sites = {r[0] for r in cx.execute(text("SELECT DISTINCT site_id FROM sync_runs WHERE source IN "
             "('wordpress_pipeline','gsc_pipeline','ga4_pipeline') AND status IN ('queued','running')")).all()}

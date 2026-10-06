@@ -134,12 +134,7 @@ def _record(cx, site_id: str, item_id: int, event_type: str, before: dict | None
 
 def _validate(cx, site_id: str, values: dict, item_id: int | None = None,
               strict_owner: bool = False) -> None:
-    if values.get("status") in ACTIVE and (not values.get("owner_id") or not values.get("due_at")):
-        raise HTTPException(422, "active work requires an owner and due date")
-    if values.get("status") == "blocked" and not values.get("blocked_reason"):
-        raise HTTPException(422, "blocked work requires a reason")
-    if values.get("status") == "verified" and not values.get("verification_note"):
-        raise HTTPException(422, "verified work requires a verification note")
+    # A board move changes only the stage. Planning details can be filled in later.
     if values.get("owner_id") is not None:
         owner = cx.execute(text("SELECT role FROM panel_users WHERE id=:id AND active=1"),
                            {"id": values["owner_id"]}).scalar_one_or_none()
@@ -150,7 +145,11 @@ def _validate(cx, site_id: str, values: dict, item_id: int | None = None,
         if strict_owner and owner != "admin" and not cx.execute(text("""SELECT 1 FROM site_assignments
             WHERE site_id=:site AND user_id=:user AND responsibility IN ('lead','contributor')"""),
             {"site": site_id, "user": values["owner_id"]}).first():
-            raise HTTPException(422, "owner must be a lead or contributor in this project")
+            # Assigning a task grants its owner the minimum project access needed to execute it.
+            cx.execute(text("""INSERT INTO site_assignments(site_id,user_id,responsibility,created_at)
+                VALUES (:site,:user,'contributor',:at) ON CONFLICT(site_id,user_id)
+                DO UPDATE SET responsibility='contributor'"""),
+                {"site": site_id, "user": values["owner_id"], "at": now()})
     if values.get("team_id") is not None:
         exists = cx.execute(text("SELECT 1 FROM panel_teams WHERE id=:id AND active=1"),
                             {"id": values["team_id"]}).first()
@@ -188,7 +187,7 @@ def _validate(cx, site_id: str, values: dict, item_id: int | None = None,
 def list_work(site_id: str, status: Status | None = None, owner_id: int | None = None,
               q: str | None = None, limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0),
               eng: Engine = Depends(engine)) -> dict:
-    clauses = ["w.site_id=:s"]
+    clauses = ["w.site_id=:s", "w.deleted_at IS NULL"]
     args: dict = {"s": site_id, "lim": limit, "off": offset}
     if status:
         clauses.append("w.status=:status"); args["status"] = status
@@ -208,7 +207,7 @@ def list_work(site_id: str, status: Status | None = None, owner_id: int | None =
             SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END) AS blocked,
             SUM(CASE WHEN status NOT IN ('verified','rejected','deferred') AND due_at<:now THEN 1 ELSE 0 END) AS overdue,
             SUM(CASE WHEN status NOT IN ('verified','rejected','deferred') AND owner_id IS NULL THEN 1 ELSE 0 END) AS unassigned
-            FROM work_items WHERE site_id=:s"""), {"s": site_id, "now": now()}).mappings().one()
+            FROM work_items WHERE site_id=:s AND deleted_at IS NULL"""), {"s": site_id, "now": now()}).mappings().one()
     return {"items": [dict(r) for r in rows], "total": total, "limit": limit, "offset": offset,
             "summary": {k: int(v or 0) for k, v in summary.items()}}
 
@@ -222,7 +221,9 @@ def create_work(site_id: str, body: WorkIn, request: Request, eng: Engine = Depe
     values["start_at"] = _date_utc(body.start_at, "start date")
     if values["status"] == "verified":
         values["progress_percent"] = 100
-    values.update(site_id=site_id, created_at=now(), updated_at=now())
+    actor = getattr(request.state, "panel_user", None)
+    values.update(site_id=site_id, created_at=now(), updated_at=now(),
+                  created_by_id=actor["id"] if actor else None)
     try:
         with eng.begin() as cx:
             require_lead(cx, request, site_id)
@@ -236,6 +237,8 @@ def create_work(site_id: str, body: WorkIn, request: Request, eng: Engine = Depe
             row = dict(cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id"),
                                   {"s": site_id, "id": item_id}).mappings().one())
             _record(cx, site_id, item_id, "created", None, row, body.note, getattr(request.state, "panel_user", None))
+            if body.owner_id and actor and body.owner_id != actor["id"]:
+                _notify_assignment(cx, body.owner_id, item_id, row["title"], actor)
     except IntegrityError as exc:
         raise HTTPException(409, "work already exists for this source") from exc
     request.state.audit_fields = list(body.model_fields_set)
@@ -257,7 +260,7 @@ def bulk_update_work(site_id: str, body: BulkWorkIn, request: Request,
         identifiers = {f"item_{index}": item_id for index, item_id in enumerate(body.item_ids)}
         placeholders = ",".join(f":{key}" for key in identifiers)
         rows = cx.execute(text(f"""SELECT * FROM work_items WHERE site_id=:site
-            AND id IN ({placeholders})"""), {**identifiers, "site": site_id}).mappings().all()
+            AND deleted_at IS NULL AND id IN ({placeholders})"""), {**identifiers, "site": site_id}).mappings().all()
         if len(rows) != len(body.item_ids):
             raise HTTPException(404, "one or more work items are outside this project")
         for row in rows:
@@ -289,7 +292,7 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
     if patch.get("status") == "verified":
         patch["progress_percent"] = 100
     with eng.begin() as cx:
-        current = cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id"),
+        current = cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id AND deleted_at IS NULL"),
                              {"s": site_id, "id": item_id}).mappings().first()
         if not current:
             raise HTTPException(404, "work item not found")
@@ -298,7 +301,7 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
             allowed = {"status", "progress_percent", "blocked_reason", "note", "board_order"}
             if not body.model_fields_set <= allowed:
                 raise HTTPException(403, "contributors may only update status, progress and blocker notes")
-            if patch.get("status") in {"verified", "rejected", "deferred", "approved", "assigned"}:
+            if patch.get("status") in {"rejected", "deferred", "approved", "assigned"}:
                 raise HTTPException(403, "project lead approval is required for this status")
         before = dict(current)
         merged = {**before, **patch}
@@ -313,7 +316,8 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
             if unfinished:
                 raise HTTPException(422, "prerequisite work is not verified")
             unfinished_child = cx.execute(text("""SELECT 1 FROM work_items
-                WHERE site_id=:s AND parent_id=:id AND status NOT IN ('verified','rejected','deferred') LIMIT 1"""),
+                WHERE site_id=:s AND parent_id=:id AND deleted_at IS NULL
+                AND status NOT IN ('verified','rejected','deferred') LIMIT 1"""),
                 {"s": site_id, "id": item_id}).first()
             if unfinished_child:
                 raise HTTPException(422, "child work is not complete")
@@ -330,7 +334,52 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
         after = dict(cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id"),
                                 {"s": site_id, "id": item_id}).mappings().one())
         _record(cx, site_id, item_id, "updated", before, after, body.note, getattr(request.state, "panel_user", None))
+        actor = getattr(request.state, "panel_user", None)
+        if after["owner_id"] and after["owner_id"] != before["owner_id"] and actor and after["owner_id"] != actor["id"]:
+            _notify_assignment(cx, after["owner_id"], item_id, after["title"], actor)
     request.state.audit_fields = list(body.model_fields_set)
+    return after
+
+
+def _notify_assignment(cx, user_id: int, item_id: int, title: str, actor: dict) -> None:
+    cx.execute(text("""INSERT INTO panel_notifications
+        (user_id,work_item_id,kind,title,body,created_at)
+        VALUES (:user,:item,'assignment',:title,:body,:at)"""),
+        {"user": user_id, "item": item_id, "title": title,
+         "body": f"{actor['full_name']} این کار را به شما واگذار کرد", "at": now()})
+
+
+@router.delete("/{item_id}")
+def delete_work(site_id: str, item_id: int, request: Request, eng: Engine = Depends(engine)) -> dict:
+    with eng.begin() as cx:
+        require_lead(cx, request, site_id)
+        before = cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id AND deleted_at IS NULL"),
+                            {"s": site_id, "id": item_id}).mappings().first()
+        if not before:
+            raise HTTPException(404, "work item not found")
+        actor = getattr(request.state, "panel_user", None)
+        cx.execute(text("UPDATE work_items SET deleted_at=:at,deleted_by_id=:actor,updated_at=:at WHERE id=:id"),
+                   {"at": now(), "actor": actor["id"] if actor else None, "id": item_id})
+        after = dict(cx.execute(text("SELECT * FROM work_items WHERE id=:id"), {"id": item_id}).mappings().one())
+        _record(cx, site_id, item_id, "deleted", dict(before), after, None, actor)
+    request.state.audit_fields = ["deleted_at"]
+    return after
+
+
+@router.post("/{item_id}/restore")
+def restore_work(site_id: str, item_id: int, request: Request, eng: Engine = Depends(engine)) -> dict:
+    with eng.begin() as cx:
+        require_lead(cx, request, site_id)
+        before = cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id AND deleted_at IS NOT NULL"),
+                            {"s": site_id, "id": item_id}).mappings().first()
+        if not before:
+            raise HTTPException(404, "deleted work item not found")
+        cx.execute(text("UPDATE work_items SET deleted_at=NULL,deleted_by_id=NULL,updated_at=:at WHERE id=:id"),
+                   {"at": now(), "id": item_id})
+        after = dict(cx.execute(text("SELECT * FROM work_items WHERE id=:id"), {"id": item_id}).mappings().one())
+        _record(cx, site_id, item_id, "restored", dict(before), after, None,
+                getattr(request.state, "panel_user", None))
+    request.state.audit_fields = ["deleted_at"]
     return after
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -34,6 +35,31 @@ class AssignmentIn(BaseModel):
     responsibility: Literal["lead", "contributor", "viewer"] = "contributor"
 
 
+class ManualProjectIn(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+
+
+@router.post("", status_code=201)
+def create_manual_project(body: ManualProjectIn, request: Request, eng: Engine = Depends(engine)) -> dict:
+    name = body.name.strip()
+    if len(name) < 2:
+        raise HTTPException(422, "project name is too short")
+    actor = getattr(request.state, "panel_user", None)
+    if not actor:
+        raise HTTPException(401, "sign in to create a project")
+    site_id = "project-" + uuid4().hex[:16]
+    with eng.begin() as cx:
+        cx.execute(text("""INSERT INTO sites(site_id,name,canonical_url,created_at,updated_at)
+            VALUES (:id,:name,:url,:at,:at)"""),
+            {"id": site_id, "name": name, "url": "internal://" + site_id, "at": now()})
+        cx.execute(text("INSERT INTO manual_projects(site_id,created_by_id,created_at) VALUES (:id,:actor,:at)"),
+                   {"id": site_id, "actor": actor["id"], "at": now()})
+        cx.execute(text("""INSERT INTO site_assignments(site_id,user_id,responsibility,created_at)
+            VALUES (:id,:actor,'lead',:at)"""), {"id": site_id, "actor": actor["id"], "at": now()})
+    request.state.audit_fields = ["name"]
+    return {"site_id": site_id, "name": name, "kind": "manual", "my_responsibility": "lead"}
+
+
 class MilestoneIn(BaseModel):
     title: str = Field(min_length=2, max_length=160)
     description: str = Field(default="", max_length=3000)
@@ -62,22 +88,28 @@ def list_projects(request: Request, eng: Engine = Depends(engine)) -> list[dict]
     """Progress counts leaf work once and uses saved progress, never synthetic traffic metrics."""
     with eng.connect() as cx:
         rows = cx.execute(text("""SELECT s.site_id,s.name,s.canonical_url,
+            CASE WHEN mp.site_id IS NULL THEN 'site' ELSE 'manual' END AS kind,
+            (SELECT u.full_name FROM site_assignments lead JOIN panel_users u ON u.id=lead.user_id
+             WHERE lead.site_id=s.site_id AND lead.responsibility='lead' ORDER BY lead.created_at LIMIT 1) AS lead_name,
+            (SELECT lead.user_id FROM site_assignments lead WHERE lead.site_id=s.site_id
+             AND lead.responsibility='lead' ORDER BY lead.created_at LIMIT 1) AS lead_id,
             COUNT(DISTINCT a.user_id) AS members,
             COUNT(DISTINCT w.id) AS tasks,
             COUNT(DISTINCT CASE WHEN w.status NOT IN ('verified','rejected','deferred') THEN w.id END) AS open_tasks,
             COUNT(DISTINCT CASE WHEN w.status='blocked' THEN w.id END) AS blocked_tasks,
             COUNT(DISTINCT CASE WHEN w.status NOT IN ('verified','rejected','deferred') AND w.owner_id IS NULL THEN w.id END) AS unassigned_tasks,
             COUNT(DISTINCT CASE WHEN w.status NOT IN ('verified','rejected','deferred') AND w.due_at<:at THEN w.id END) AS overdue_tasks
-            FROM sites s LEFT JOIN site_assignments a ON a.site_id=s.site_id
-            LEFT JOIN work_items w ON w.site_id=s.site_id
+            FROM sites s LEFT JOIN manual_projects mp ON mp.site_id=s.site_id
+            LEFT JOIN site_assignments a ON a.site_id=s.site_id
+            LEFT JOIN work_items w ON w.site_id=s.site_id AND w.deleted_at IS NULL
             GROUP BY s.site_id ORDER BY s.name"""), {"at": now()}).mappings().all()
         progress = cx.execute(text("""SELECT w.site_id,
             COALESCE(SUM(CASE WHEN w.status='verified' THEN 100 ELSE w.progress_percent END *
                 CASE WHEN w.estimated_hours>0 THEN w.estimated_hours ELSE 1 END) /
                 NULLIF(SUM(CASE WHEN w.estimated_hours>0 THEN w.estimated_hours ELSE 1 END),0),0) AS progress_percent,
             COALESCE(SUM(w.estimated_hours),0) AS estimated_hours
-            FROM work_items w WHERE w.status NOT IN ('rejected','deferred')
-                AND NOT EXISTS (SELECT 1 FROM work_items child WHERE child.parent_id=w.id)
+            FROM work_items w WHERE w.deleted_at IS NULL AND w.status NOT IN ('rejected','deferred')
+                AND NOT EXISTS (SELECT 1 FROM work_items child WHERE child.parent_id=w.id AND child.deleted_at IS NULL)
             GROUP BY w.site_id""")).mappings().all()
         spent = cx.execute(text("SELECT site_id,COALESCE(SUM(minutes),0) AS minutes FROM work_time_entries GROUP BY site_id")).mappings().all()
         milestones = cx.execute(text("SELECT site_id,COUNT(*) AS count FROM work_milestones GROUP BY site_id")).mappings().all()
@@ -119,6 +151,10 @@ def assign_member(site_id: str, user_id: int, body: AssignmentIn, request: Reque
             raise HTTPException(422, "member must be an active panel user")
         if member_role == "call_center" and body.responsibility != "viewer":
             raise HTTPException(422, "call center operators cannot execute SEO project work")
+        if body.responsibility == "lead":
+            cx.execute(text("""UPDATE site_assignments SET responsibility='contributor'
+                WHERE site_id=:s AND responsibility='lead' AND user_id<>:id"""),
+                {"s": site_id, "id": user_id})
         cx.execute(text("""INSERT INTO site_assignments(site_id,user_id,responsibility,created_at)
             VALUES (:s,:id,:role,:at) ON CONFLICT(site_id,user_id)
             DO UPDATE SET responsibility=excluded.responsibility"""),
@@ -145,7 +181,7 @@ def list_milestones(site_id: str, eng: Engine = Depends(engine)) -> list[dict]:
         _site(cx, site_id)
         rows = cx.execute(text("""SELECT m.*,COUNT(w.id) AS tasks,
             SUM(CASE WHEN w.status='verified' THEN 1 ELSE 0 END) AS verified_tasks
-            FROM work_milestones m LEFT JOIN work_items w ON w.milestone_id=m.id
+            FROM work_milestones m LEFT JOIN work_items w ON w.milestone_id=m.id AND w.deleted_at IS NULL
             WHERE m.site_id=:s GROUP BY m.id ORDER BY m.due_at,m.id"""), {"s": site_id}).mappings().all()
     return [{**dict(row), "verified_tasks": int(row["verified_tasks"] or 0)} for row in rows]
 

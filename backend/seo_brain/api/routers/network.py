@@ -32,7 +32,8 @@ def network(eng: Engine = Depends(engine)) -> dict:
                       "meta": {"name": p.name, "kind": p.kind, "model": p.default_model, "configured": d["configured"], "key_days_left": d.get("key_days_left"), "key_expired": d.get("key_expired")}})
         edges.append({"id": f"{BRAIN}->{nid}", "source": BRAIN, "target": nid, "kind": "ai", "label": "نویسندهٔ هوش مصنوعی", "status": status, "weight": 3 if status == "ok" else 1})
     with eng.connect() as cx:
-        sites = cx.execute(text("SELECT site_id, name, canonical_url, wp_url, mode, gsc_property, ga4_property FROM sites ORDER BY site_id")).all()
+        sites = cx.execute(text("""SELECT site_id, name, canonical_url, wp_url, mode, gsc_property, ga4_property
+            FROM sites WHERE site_id NOT IN (SELECT site_id FROM manual_projects) ORDER BY site_id""")).all()
         conns = {(r[0], r[1]): r[2] for r in cx.execute(text("SELECT site_id, kind, status FROM site_connections")).all()}
         posts = {r[0]: int(r[1]) for r in cx.execute(text("SELECT site_id, COUNT(*) FROM posts GROUP BY site_id")).all()}
         external = cx.execute(text("SELECT site_id, target_url FROM links WHERE is_internal=0")).all()

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from ..tables import sites
 from .base import Repository, utcnow
@@ -39,7 +39,8 @@ def _row_to_site(r) -> Site:
 class SitesRepository(Repository):
     def list(self) -> list[Site]:
         with self.engine.connect() as cx:
-            return [_row_to_site(r) for r in cx.execute(select(sites).order_by(sites.c.site_id))]
+            return [_row_to_site(r) for r in cx.execute(text("""SELECT * FROM sites
+                WHERE site_id NOT IN (SELECT site_id FROM manual_projects) ORDER BY site_id"""))]
 
     def get(self, site_id: str) -> Site | None:
         with self.engine.connect() as cx:

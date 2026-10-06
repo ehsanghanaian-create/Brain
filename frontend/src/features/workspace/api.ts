@@ -12,6 +12,9 @@ export type SavedBoardView = { id: number; site_id: string; name: string; config
   created_at: string; updated_at: string };
 export type CommandWorkItem = WorkItem & {
   site_name: string;
+  created_by_id: number | null;
+  created_by_name: string | null;
+  deleted_at: string | null;
   team_id: number | null;
   team_name: string | null;
   team_color: string | null;
@@ -26,7 +29,7 @@ export type CommandWorkItem = WorkItem & {
 export type WorkTeam = { id: number; name: string; color: string; description: string; active: boolean;
   members: number; open_work: number };
 export type WorkPerson = { id: number; full_name: string; active: boolean; team_id: number | null; role: string };
-export type ProjectSummary = { site_id: string; name: string; canonical_url: string; members: number; tasks: number;
+export type ProjectSummary = { site_id: string; name: string; canonical_url: string; kind: 'site' | 'manual'; lead_name: string | null; lead_id: number | null; members: number; tasks: number;
   open_tasks: number; blocked_tasks: number; unassigned_tasks: number; overdue_tasks: number;
   progress_percent: number; estimated_hours: number; spent_hours: number; milestones: number;
   my_responsibility: 'admin' | 'lead' | 'contributor' | 'viewer' | null };
@@ -52,7 +55,7 @@ export type CommandOverview = {
     created_at: string; title: string; site_name: string }[];
 };
 export type CommandFilters = { site_id?: string; owner_id?: number; team_id?: number;
-  status?: string; priority?: string; q?: string; limit?: number; offset?: number };
+  status?: string; priority?: string; q?: string; created_by_id?: number; limit?: number; offset?: number };
 export const commandApi = {
   me: () => api<{ id: number; role: 'admin' | 'analyst' | 'call_center' }>('/auth/me'),
   overview: (filters: CommandFilters = {}) => {
@@ -62,8 +65,13 @@ export const commandApi = {
   },
   boardPage: (siteId: string, afterId = 0) =>
     api<{ items: CommandWorkItem[]; next_after_id: number | null }>(`/work/board/${encodeURIComponent(siteId)}?after_id=${afterId}&limit=500`),
+  personalBoardPage: (afterId = 0) =>
+    api<{ items: CommandWorkItem[]; next_after_id: number | null }>(`/work/board/all?after_id=${afterId}&limit=500`),
+  archive: (kind: 'completed' | 'deleted', siteId?: string) =>
+    api<CommandWorkItem[]>(`/work/archive?kind=${kind}${siteId ? `&site_id=${encodeURIComponent(siteId)}` : ''}`),
   teams: () => api<WorkTeam[]>('/work/teams'),
   projects: () => api<ProjectSummary[]>('/work/projects'),
+  createProject: (name: string) => api<ProjectSummary>('/work/projects', { method: 'POST', json: { name } }),
   projectMembers: (siteId: string) => api<ProjectMember[]>(`/work/projects/${encodeURIComponent(siteId)}/members`),
   assignProjectMember: (siteId: string, userId: number, responsibility: ProjectMember['responsibility']) =>
     api(`/work/projects/${encodeURIComponent(siteId)}/members/${userId}`, { method: 'PUT', json: { user_id: userId, responsibility } }),
@@ -95,6 +103,8 @@ export const commandApi = {
     api<CommandWorkItem>(`/sites/${encodeURIComponent(siteId)}/work`, { method: 'POST', json: body }),
   updateWork: (item: CommandWorkItem, body: Record<string, unknown>) =>
     api<CommandWorkItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}`, { method: 'PATCH', json: body }),
+  deleteWork: (item: CommandWorkItem) => api<CommandWorkItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}`, { method: 'DELETE' }),
+  restoreWork: (item: CommandWorkItem) => api<CommandWorkItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/restore`, { method: 'POST' }),
   events: (item: CommandWorkItem) =>
     api<{ id: number; event_type: string; before_json: string | null; after_json: string; note: string | null; actor_username: string | null; created_at: string }[]>(
       `/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/events`),

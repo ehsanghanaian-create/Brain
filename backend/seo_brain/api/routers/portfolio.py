@@ -81,7 +81,8 @@ def overview(eng: Engine = Depends(engine)) -> dict[str, Any]:
     today = datetime.now(timezone.utc).date()
     window_start = (today - timedelta(days=27)).isoformat()
     with eng.connect() as cx:
-        site_rows = [dict(row._mapping) for row in cx.execute(text("SELECT * FROM sites ORDER BY name, site_id")).all()]
+        site_rows = [dict(row._mapping) for row in cx.execute(text("""SELECT * FROM sites
+            WHERE site_id NOT IN (SELECT site_id FROM manual_projects) ORDER BY name, site_id""")).all()]
         node_rows = cx.execute(text("SELECT site_id, node_type, COUNT(*) AS n FROM graph_nodes GROUP BY site_id, node_type")).all()
         nodes: dict[str, int] = defaultdict(int)
         by_type: dict[str, int] = defaultdict(int)

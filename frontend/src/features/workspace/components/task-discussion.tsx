@@ -14,13 +14,15 @@ const noteType: Record<string, string> = {
 };
 const activityType: Record<string, string> = {
   created: 'ساخته شد', updated: 'ویرایش شد', deleted: 'حذف شد', restored: 'بازیابی شد',
+  comment_edited: 'پیام را ویرایش کرد',
   subtask_added: 'زیرتسک افزوده شد', checklist_added: 'گام افزوده شد',
   checklist_updated: 'گام تغییر کرد', bulk_updated: 'گروهی ویرایش شد',
   handoff: 'ارجاع شد'
 };
 
-export function TaskDiscussion({ item, canEdit, canComment, onChanged }: {
+export function TaskDiscussion({ item, canEdit, canComment, meId, canModerate, onChanged }: {
   item: CommandWorkItem; canEdit: boolean; canComment: boolean;
+  meId: number | null; canModerate: boolean;
   onChanged: () => void;
 }) {
   const { calendar } = useDatePreference();
@@ -29,6 +31,8 @@ export function TaskDiscussion({ item, canEdit, canComment, onChanged }: {
   const [thread, setThread] = useState<TaskDiscussionData | null>(null);
   const [checklistTitle, setChecklistTitle] = useState('');
   const [message, setMessage] = useState('');
+  const [editingMessageId, setEditingMessageId] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState('');
   const [caret, setCaret] = useState(0);
   const [focused, setFocused] = useState(false);
   const [mentionIndex, setMentionIndex] = useState(0);
@@ -100,6 +104,16 @@ export function TaskDiscussion({ item, canEdit, canComment, onChanged }: {
     } catch (error) { toast.error(error instanceof Error ? error.message : 'ارسال پیام انجام نشد'); }
     finally { setBusy(false); }
   }
+  async function saveMessageEdit() {
+    if (editingMessageId === null || !editingText.trim() || busy) return;
+    setBusy(true);
+    try {
+      await commandApi.editComment(item, editingMessageId, editingText.trim());
+      setEditingMessageId(null); setEditingText(''); await refresh(); onChanged();
+      toast.success('پیام ویرایش شد');
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'ویرایش پیام انجام نشد'); }
+    finally { setBusy(false); }
+  }
 
   function renderMessage(text: string) {
     const known = new Set((thread?.participants || []).map((person) => person.username.toLowerCase()));
@@ -121,15 +135,29 @@ export function TaskDiscussion({ item, canEdit, canComment, onChanged }: {
       <div className='max-h-80 min-h-32 space-y-3 overflow-y-auto p-4' aria-live='polite'>
         {threadError && <p role='alert' className='text-destructive text-sm'>{threadError}</p>}
         {!threadError && !thread && <p className='text-muted-foreground text-xs'>در حال دریافت گفتگو…</p>}
-        {thread?.messages.map((entry) => <div key={entry.id} className='rounded-lg border bg-background p-3 text-sm'>
+        {thread?.messages.map((entry) => {
+          const mayEdit = canComment && (entry.actor_id === meId || canModerate) &&
+            ['comment', 'created', 'updated'].includes(entry.event_type);
+          return <div key={entry.id} className='rounded-lg border bg-background p-3 text-sm'>
           <div className='text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-xs'>
             <strong className='text-foreground'>{entry.actor_name || entry.actor_username || 'سیستم'}</strong>
             <span>· {noteType[entry.event_type] || 'فعالیت'}</span>
             {entry.work_item_id !== thread.root_id && <span className='rounded bg-muted px-1.5 py-0.5'>زیرتسک: {entry.task_title}</span>}
+            {entry.edited_at && <span>· ویرایش‌شده</span>}
             <time className='mr-auto'>{formatUserDateTime(entry.created_at, calendar)}</time>
+            {mayEdit && editingMessageId !== entry.id && <Button size='sm' variant='ghost' disabled={busy}
+              onClick={() => { setEditingMessageId(entry.id); setEditingText(entry.note); }}>ویرایش</Button>}
           </div>
-          <p className='mt-2 whitespace-pre-wrap break-words leading-6' dir='auto'>{renderMessage(entry.note)}</p>
-        </div>)}
+          {editingMessageId === entry.id ? <div className='mt-2 space-y-2'>
+            <Textarea aria-label='ویرایش پیام گفت‌وگو' rows={4} maxLength={2000} value={editingText}
+              onChange={(event) => setEditingText(event.target.value)} />
+            <div className='flex gap-2'><Button size='sm' disabled={busy || !editingText.trim()}
+              onClick={() => void saveMessageEdit()}>ذخیرهٔ پیام</Button>
+              <Button size='sm' variant='outline' disabled={busy}
+                onClick={() => { setEditingMessageId(null); setEditingText(''); }}>انصراف</Button></div>
+          </div> : <p className='mt-2 whitespace-pre-wrap break-words leading-6' dir='auto'>{renderMessage(entry.note)}</p>}
+        </div>;
+        })}
         {thread && !thread.messages.length && <p className='text-muted-foreground text-xs'>هنوز پیامی ثبت نشده است؛ اولین توضیح را همین‌جا بنویسید.</p>}
       </div>
       {!!thread?.activity.length && <details className='border-t px-4 py-2 text-xs'>

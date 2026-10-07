@@ -184,6 +184,57 @@ def add_comment(site_id: str, item_id: int, body: CommentIn, request: Request,
     return dict(row)
 
 
+@router.patch("/{item_id}/comments/{comment_id}")
+def edit_comment(site_id: str, item_id: int, comment_id: int, body: CommentIn,
+                 request: Request, eng: Engine = Depends(engine)) -> dict:
+    """Revise a discussion message while retaining its original event and each edit."""
+    message = body.text.strip()
+    if not message:
+        raise HTTPException(422, "comment cannot be empty")
+    actor = getattr(request.state, "panel_user", None)
+    if not actor:
+        raise HTTPException(401, "sign in to edit a message")
+    with eng.begin() as cx:
+        require_task_commenter(cx, request, site_id)
+        item = cx.execute(text("""SELECT id FROM work_items
+            WHERE site_id=:site AND id=:id AND deleted_at IS NULL"""),
+            {"site": site_id, "id": item_id}).first()
+        if not item:
+            raise HTTPException(404, "work item not found")
+        original = cx.execute(text("""SELECT id,work_item_id,event_type,note,actor_id
+            FROM work_item_events WHERE site_id=:site AND id=:comment"""),
+            {"site": site_id, "comment": comment_id}).mappings().first()
+        if (not original or original["event_type"] not in {"comment", "created", "updated"}
+                or not original["note"] or
+                _discussion_root(cx, site_id, original["work_item_id"]) !=
+                _discussion_root(cx, site_id, item_id)):
+            raise HTTPException(404, "discussion message not found")
+        if original["actor_id"] != actor["id"] and not actor.get("is_superadmin"):
+            raise HTTPException(403, "only the message author may edit it")
+        revisions = cx.execute(text("""SELECT after_json FROM work_item_events
+            WHERE site_id=:site AND work_item_id=:item AND event_type='comment_edited'
+            ORDER BY id DESC"""),
+            {"site": site_id, "item": original["work_item_id"]}).mappings().all()
+        current = next((edit["text"] for row in revisions
+                        if (edit := json.loads(row["after_json"])).get("comment_id") == comment_id),
+                       original["note"])
+        if current == message:
+            return {"id": comment_id, "note": message, "edited": bool(revisions)}
+        _record(cx, site_id, original["work_item_id"], "comment_edited",
+                {"comment_id": comment_id, "text": current},
+                {"comment_id": comment_id, "text": message}, None, actor)
+        added_mentions = _mentioned_users(cx, site_id, message) - _mentioned_users(cx, site_id, current) - {actor["id"]}
+        if added_mentions:
+            root_id = _discussion_root(cx, site_id, item_id)
+            title = cx.execute(text("SELECT title FROM work_items WHERE id=:id"), {"id": root_id}).scalar_one()
+            for recipient in added_mentions:
+                _notify(cx, recipient, root_id, "mention", "discussion", title,
+                        f"{actor['full_name']} شما را در ویرایش گفت‌وگوی این کار منشن کرد")
+        edited_at = cx.execute(text("SELECT created_at FROM work_item_events WHERE id=last_insert_rowid()")).scalar_one()
+    request.state.audit_fields = ["comment_id", "text"]
+    return {"id": comment_id, "note": message, "edited_at": edited_at}
+
+
 def _discussion_root(cx, site_id: str, item_id: int) -> int:
     """Resolve the current hierarchy without trusting a client supplied root."""
     current = item_id
@@ -241,12 +292,28 @@ def discussion(site_id: str, item_id: int, eng: Engine = Depends(engine)) -> dic
         JOIN work_items w ON w.id=e.work_item_id
         WHERE e.site_id=:site AND e.event_type<>'comment'
         ORDER BY e.id DESC LIMIT 80"""), {"site": site_id, "root": root_id}).mappings().all()
+        edits = cx.execute(text("""WITH RECURSIVE tree(id) AS (
+            SELECT id FROM work_items WHERE site_id=:site AND id=:root
+            UNION ALL SELECT child.id FROM work_items child JOIN tree ON child.parent_id=tree.id
+            WHERE child.site_id=:site
+        ) SELECT e.after_json,e.created_at FROM work_item_events e
+        JOIN tree ON tree.id=e.work_item_id
+        WHERE e.site_id=:site AND e.event_type='comment_edited' ORDER BY e.id"""),
+            {"site": site_id, "root": root_id}).mappings().all()
         participants = cx.execute(text("""SELECT u.id,u.username,u.full_name FROM panel_users u
             WHERE u.active=1 AND u.username IS NOT NULL AND (u.role='admin' OR EXISTS
               (SELECT 1 FROM site_assignments a WHERE a.site_id=:site AND a.user_id=u.id))
             ORDER BY u.full_name"""), {"site": site_id}).mappings().all()
+    messages = [dict(row) for row in reversed(rows)]
+    by_id = {entry["id"]: entry for entry in messages}
+    for edit in edits:
+        revised = json.loads(edit["after_json"])
+        entry = by_id.get(revised.get("comment_id"))
+        if entry:
+            entry["note"] = revised["text"]
+            entry["edited_at"] = edit["created_at"]
     return {"root_id": root_id, "root_title": root,
-            "messages": [dict(row) for row in reversed(rows)],
+            "messages": messages,
             "activity": [dict(row) for row in activity],
             "participants": [dict(row) for row in participants]}
 

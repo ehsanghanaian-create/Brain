@@ -441,6 +441,27 @@ def test_shared_discussion_and_project_mentions(client):
     assert [row["note"] for row in messages] == ["Initial explanation\nwith details",
         "Please review @worker and @manager; not @outsider", "Progress\n@colleague please check"]
     assert messages[1]["work_item_id"] == grandchild["id"]
+    edit_url = f"{base}/{root['id']}/comments/{messages[1]['id']}"
+    assert client.patch(edit_url, headers=worker, json={"text": "Changed by coworker"}).status_code == 403
+    assert client.patch(edit_url, headers=outsider, json={"text": "Changed by outsider"}).status_code == 403
+    edited = client.patch(edit_url, headers=colleague,
+                          json={"text": "Updated message for @worker"})
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["note"] == "Updated message for @worker"
+    revised = client.get(f"{base}/{root['id']}/discussion", headers=worker).json()
+    assert revised["messages"][1]["note"] == "Updated message for @worker"
+    assert revised["messages"][1]["edited_at"]
+    assert any(event["event_type"] == "comment_edited" for event in revised["activity"])
+    assert client.patch(edit_url, headers=colleague,
+                        json={"text": "Final corrected message"}).status_code == 200
+    assert client.get(f"{base}/{root['id']}/discussion", headers=worker).json()["messages"][1]["note"] == "Final corrected message"
+    original_event = next(event for event in client.get(f"{base}/{grandchild['id']}/events", headers=worker).json()
+                          if event["id"] == messages[1]["id"])
+    assert original_event["note"] == "Please review @worker and @manager; not @outsider"
+    initial_edit = client.patch(f"{base}/{root['id']}/comments/{messages[0]['id']}", headers=manager,
+                                json={"text": "Revised initial explanation"})
+    assert initial_edit.status_code == 200, initial_edit.text
+    assert client.get(f"{base}/{root['id']}/discussion", headers=manager).json()["messages"][0]["note"] == "Revised initial explanation"
     assert any(row["event_type"] == "subtask_added" for row in threads[0].json()["activity"])
     participants = {row["username"] for row in threads[0].json()["participants"]}
     assert {"worker", "manager", "colleague"} <= participants and "outsider" not in participants

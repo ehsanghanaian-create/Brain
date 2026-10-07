@@ -72,7 +72,7 @@ export type ProjectMember = { site_id: string; user_id: number; responsibility: 
   full_name: string; username: string; role: string; active: boolean; created_at: string };
 export type TaskDiscussionData = { root_id: number; root_title: string;
   messages: { id: number; event_type: string; note: string; actor_id: number | null;
-    actor_username: string | null; actor_name: string | null; created_at: string;
+    actor_username: string | null; actor_name: string | null; created_at: string; edited_at?: string;
     work_item_id: number; task_title: string }[];
   activity: { id: number; event_type: string; actor_username: string | null;
     created_at: string; work_item_id: number; task_title: string }[];
@@ -185,6 +185,9 @@ export const commandApi = {
     api<TaskDiscussionData>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/discussion`),
   addComment: (item: CommandWorkItem, text: string) =>
     api(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/comments`, { method: 'POST', json: { text } }),
+  editComment: (item: CommandWorkItem, commentId: number, text: string) =>
+    api(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/comments/${commentId}`,
+      { method: 'PATCH', json: { text } }),
   subtasks: (item: CommandWorkItem) =>
     api<CommandWorkItem[]>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/subtasks`),
   createSubtask: (item: CommandWorkItem, title: string) =>

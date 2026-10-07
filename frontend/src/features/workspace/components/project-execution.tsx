@@ -153,11 +153,9 @@ export function ProjectExecution({ items, people, canEdit, preferredSiteId, onTa
         </div>}
       </div>
       <div className='grid gap-4 xl:grid-cols-[1.4fr_1fr]'>
-        <Card><CardHeader><CardTitle>ساختار کار و زیرکار</CardTitle><CardDescription>با باز کردن هر کار می‌توانید آن را ریزتر کنید، زمان‌بندی بدهید و وابستگی تعریف کنید.</CardDescription></CardHeader><CardContent className='space-y-2'>
-          {parents.map((parent) => { const children = siteTasks.filter((row) => row.parent_id === parent.id);
-            return <div key={parent.id} className='rounded-lg border p-3'><button className='flex w-full items-center justify-between gap-2 text-right' onClick={() => onTask(parent)}><strong className='text-sm'>{parent.title}</strong><span className='text-muted-foreground text-xs'>{number.format(parent.progress_percent || 0)}٪ · {parent.owner_name || 'بی‌مسئول'}</span></button>
-              {!!children.length && <div className='mt-3 space-y-1.5 border-r-2 border-emerald-500/30 pr-3'>{children.map((child) => <button key={child.id} onClick={() => onTask(child)} className='flex w-full justify-between rounded-md bg-muted/40 p-2 text-right text-xs hover:bg-muted'><span>{child.title}</span><span className='text-muted-foreground'>{child.owner_name || 'بی‌مسئول'} · {dateLabel(child.due_at)}</span></button>)}</div>}
-            </div>; })}
+        <Card><CardHeader><CardTitle>کارهای پروژه</CardTitle><CardDescription>زیرکارها داخل چک‌لیست همان کار هستند؛ برای دیدن و تیک‌زدن، کار را باز کنید.</CardDescription></CardHeader><CardContent className='space-y-2'>
+          {parents.map((parent) => <div key={parent.id} className='rounded-lg border p-3'><button className='flex w-full items-center justify-between gap-2 text-right' onClick={() => onTask(parent)}><strong className='text-sm'>{parent.title}</strong><span className='text-muted-foreground text-xs'>{number.format(parent.checklist_done || 0)}/{number.format(parent.checklist_total || 0)} زیرکار · {parent.owner_name || 'بی‌مسئول'}</span></button>
+            </div>)}
           {!parents.length && <p className='text-muted-foreground py-8 text-center text-sm'>برای این سایت هنوز کاری ثبت نشده است.</p>}
         </CardContent></Card>
         <div className='space-y-4'><Card><CardHeader><CardTitle>مسئولان سایت</CardTitle><CardDescription>نقش پروژه جدا از سطح دسترسی حساب پنل ثبت می‌شود.</CardDescription></CardHeader><CardContent className='space-y-2'>

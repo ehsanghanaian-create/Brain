@@ -383,7 +383,18 @@ def test_task_owner_isolation_subtasks_comments_and_calendar(client):
     assert client.post(f"{root}/{draft['id']}/restore", headers=worker).status_code == 403
     assert client.post(f"{root}/{draft['id']}/restore", headers=lead).status_code == 200
     assert client.post(f"{root}/{child_id}/restore", headers=worker).status_code == 200
-    assert {draft["id"], child_id} <= {row["id"] for row in client.get("/api/v1/work/board/demo", headers=lead).json()["items"]}
+    restored_board = client.get("/api/v1/work/board/demo", headers=lead).json()["items"]
+    assert draft["id"] in {row["id"] for row in restored_board}
+    assert child_id not in {row["id"] for row in restored_board}
+    assert {"id": -child_id, "title": "Worker child", "done": False, "legacy": True} in next(
+        row["checklist"] for row in restored_board if row["id"] == draft["id"])
+    step_url = f"{root}/{draft['id']}/checklist/{-child_id}"
+    assert client.patch(step_url, headers=observer, json={"done": True}).status_code == 403
+    toggled = client.patch(step_url, headers=worker, json={"done": True})
+    assert toggled.status_code == 200, toggled.text
+    assert any(step["id"] == -child_id and step["done"] for step in client.get(
+        f"{root}/{draft['id']}/checklist", headers=worker).json())
+    assert client.get("/api/v1/work/board/all", headers=worker).json()["items"][0]["checklist_done"] == 1
     assert client.get("/api/v1/auth/me", headers=worker).json()["date_calendar"] == "jalali"
     assert client.patch("/api/v1/auth/me/preferences", headers=worker,
                         json={"date_calendar": "gregorian"}).status_code == 200
@@ -549,6 +560,13 @@ def test_personal_and_delegated_boards_keep_task_ownership_separate(client):
         to_manager["id"]}
     assert {row["id"] for row in client.get("/api/v1/work/board/all", headers=worker).json()["items"]} == {
         to_worker["id"], second_to_worker["id"]}
+    added_step = client.post(f"{base}/{to_worker['id']}/checklist", headers=worker,
+                             json={"title": "Review page content"})
+    assert added_step.status_code == 201, added_step.text
+    worker_board = client.get("/api/v1/work/board/all", headers=worker).json()["items"]
+    assert {row["id"] for row in worker_board} == {to_worker["id"], second_to_worker["id"]}
+    assert any(step["id"] == added_step.json()["id"] for row in worker_board
+               if row["id"] == to_worker["id"] for step in row["checklist"])
 
     first_page = client.get("/api/v1/work/board/delegated?limit=1", headers=manager).json()
     assert [row["id"] for row in first_page["items"]] == [to_worker["id"]]
@@ -558,12 +576,24 @@ def test_personal_and_delegated_boards_keep_task_ownership_separate(client):
     assert [row["id"] for row in second_page["items"]] == [second_to_worker["id"]]
     assert second_page["next_after_id"] is None
 
+    handed_off = client.post(f"{base}/{to_manager['id']}/handoff", headers=manager,
+                             json={"owner_id": 1, "reason": "Worker can finish this"})
+    assert handed_off.status_code == 200, handed_off.text
+    assert to_manager["id"] not in {row["id"] for row in client.get(
+        "/api/v1/work/board/all", headers=manager).json()["items"]}
+    assert to_manager["id"] in {row["id"] for row in client.get(
+        "/api/v1/work/board/delegated", headers=manager).json()["items"]}
+    assert to_manager["id"] in {row["id"] for row in client.get(
+        "/api/v1/work/board/all", headers=worker).json()["items"]}
+    assert to_manager["id"] not in {row["id"] for row in client.get(
+        "/api/v1/work/board/delegated", headers=worker).json()["items"]}
+
     assert client.delete(f"{base}/{to_worker['id']}", headers=manager).status_code == 200
     assert [row["id"] for row in client.get("/api/v1/work/board/delegated", headers=manager).json()["items"]] == [
-        second_to_worker["id"]]
+        second_to_worker["id"], to_manager["id"]]
     assert client.post(f"{base}/{to_worker['id']}/restore", headers=manager).status_code == 200
     assert {row["id"] for row in client.get("/api/v1/work/board/delegated", headers=manager).json()["items"]} == {
-        to_worker["id"], second_to_worker["id"]}
+        to_worker["id"], second_to_worker["id"], to_manager["id"]}
 
 
 def test_manager_dashboard_and_admin_task_override(client):
@@ -603,8 +633,8 @@ def test_manager_dashboard_and_admin_task_override(client):
     dashboard = client.get("/api/v1/work/team-management?user_id=1", headers=manager)
     assert dashboard.status_code == 200, dashboard.text
     person = next(row for row in dashboard.json()["people"] if row["id"] == 1)
-    assert person["open_tasks"] == 2
-    assert dashboard.json()["summary"]["open_tasks"] >= 2
+    assert person["open_tasks"] == 1
+    assert dashboard.json()["summary"]["open_tasks"] >= 1
     assert any(row["work_item_id"] == task["id"] for row in dashboard.json()["recent"])
     ledger_url = "/api/v1/work/team-management/tasks"
     assert client.get(ledger_url, headers=other_admin).status_code == 403
@@ -612,15 +642,15 @@ def test_manager_dashboard_and_admin_task_override(client):
     ledger = client.get(ledger_url + "?site_id=demo&owner_id=1&focus=unscheduled&limit=1",
                         headers=manager)
     assert ledger.status_code == 200, ledger.text
-    assert ledger.json()["total"] == 2
-    assert ledger.json()["schedule"]["unscheduled"] == 2
-    assert ledger.json()["workload"][0]["open"] == 2
-    assert sum(row["count"] for row in ledger.json()["timeline"] if row["week_index"] == -2) == 2
+    assert ledger.json()["total"] == 1
+    assert ledger.json()["schedule"]["unscheduled"] == 1
+    assert ledger.json()["workload"][0]["open"] == 1
+    assert sum(row["count"] for row in ledger.json()["timeline"] if row["week_index"] == -2) == 1
     assert len(ledger.json()["items"]) == 1
-    next_page = client.get(ledger_url + "?site_id=demo&owner_id=1&focus=unscheduled&limit=1&offset=1",
-                           headers=manager)
-    assert next_page.status_code == 200
-    assert {ledger.json()["items"][0]["id"], next_page.json()["items"][0]["id"]} == {task["id"], child["id"]}
+    assert ledger.json()["items"][0]["id"] == task["id"]
+    assert ledger.json()["items"][0]["checklist_total"] == 1
+    assert client.get(ledger_url + "?site_id=demo&owner_id=1&focus=unscheduled&limit=1&offset=1",
+                      headers=manager).json()["items"] == []
     assert client.get(ledger_url + "?status=made_up", headers=manager).status_code == 422
     assert client.get(ledger_url + "?q=Worker%20task", headers=manager).json()["total"] == 1
     assert client.patch(f"{base}/{task['id']}", headers=other_admin,
@@ -634,7 +664,7 @@ def test_manager_dashboard_and_admin_task_override(client):
     assert client.delete(f"{base}/{task['id']}", headers=next_user).status_code == 403
     assert client.delete(f"{base}/{task['id']}", headers=manager).status_code == 200
     deleted = {row["id"] for row in client.get("/api/v1/work/archive?kind=deleted", headers=manager).json()}
-    assert {task["id"], child["id"]} <= deleted
+    assert task["id"] in deleted and child["id"] not in deleted
     assert client.post(f"{base}/{task['id']}/restore", headers=manager).status_code == 200
     assert client.get(f"{base}/{task['id']}/subtasks", headers=next_user).status_code == 200
     due = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()

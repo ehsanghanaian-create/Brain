@@ -654,7 +654,17 @@ def checklist(site_id: str, item_id: int, eng: Engine = Depends(engine)) -> list
         rows = cx.execute(text("""SELECT id,site_id,work_item_id,title,done,actor_id,created_at,updated_at
             FROM work_checklist_items WHERE site_id=:site AND work_item_id=:item ORDER BY id"""),
             {"site": site_id, "item": item_id}).mappings().all()
-    return [{**dict(row), "done": bool(row["done"])} for row in rows]
+        children = cx.execute(text("""WITH RECURSIVE tree(id) AS (
+            SELECT id FROM work_items WHERE site_id=:site AND parent_id=:item AND deleted_at IS NULL
+            UNION ALL SELECT child.id FROM work_items child JOIN tree ON child.parent_id=tree.id
+            WHERE child.site_id=:site AND child.deleted_at IS NULL
+        ) SELECT child.* FROM work_items child JOIN tree ON tree.id=child.id ORDER BY child.id"""),
+            {"site": site_id, "item": item_id}).mappings().all()
+    return ([{**dict(row), "done": bool(row["done"])} for row in rows] +
+            [{"id": -child["id"], "site_id": site_id, "work_item_id": item_id,
+              "title": child["title"], "done": child["status"] == "verified", "legacy": True,
+              "actor_id": child["created_by_id"], "created_at": child["created_at"],
+              "updated_at": child["updated_at"]} for child in children])
 
 
 @router.post("/{item_id}/checklist", status_code=201)
@@ -691,6 +701,33 @@ def update_checklist_item(site_id: str, item_id: int, checklist_id: int, body: C
         if not work:
             raise HTTPException(404, "work item not found")
         require_task_editor(cx, request, site_id, work)
+        if checklist_id < 0:
+            child = cx.execute(text("""WITH RECURSIVE tree(id) AS (
+                SELECT id FROM work_items WHERE site_id=:site AND parent_id=:item AND deleted_at IS NULL
+                UNION ALL SELECT descendant.id FROM work_items descendant JOIN tree ON descendant.parent_id=tree.id
+                WHERE descendant.site_id=:site AND descendant.deleted_at IS NULL
+            ) SELECT w.* FROM work_items w JOIN tree ON tree.id=w.id WHERE w.id=:child"""),
+                {"site": site_id, "item": item_id, "child": -checklist_id}).mappings().first()
+            if not child:
+                raise HTTPException(404, "checklist item not found")
+            require_task_editor(cx, request, site_id, child)
+            status = "verified" if body.done else "new"
+            cx.execute(text("""UPDATE work_items SET status=:status,progress_percent=:progress,updated_at=:at
+                WHERE id=:id AND site_id=:site"""),
+                {"status": status, "progress": 100 if body.done else 0, "at": now(),
+                 "id": child["id"], "site": site_id})
+            updated = dict(cx.execute(text("SELECT * FROM work_items WHERE id=:id"),
+                                      {"id": child["id"]}).mappings().one())
+            _record(cx, site_id, child["id"], "updated", dict(child), updated, None,
+                    getattr(request.state, "panel_user", None))
+            response = {"id": checklist_id, "site_id": site_id, "work_item_id": item_id,
+                        "title": child["title"], "done": body.done, "legacy": True,
+                        "actor_id": child["created_by_id"], "created_at": child["created_at"],
+                        "updated_at": updated["updated_at"]}
+            _record(cx, site_id, item_id, "checklist_updated", dict(child), response, None,
+                    getattr(request.state, "panel_user", None))
+            request.state.audit_fields = ["done"]
+            return response
         before = cx.execute(text("""SELECT * FROM work_checklist_items
             WHERE id=:id AND site_id=:site AND work_item_id=:item"""),
             {"id": checklist_id, "site": site_id, "item": item_id}).mappings().first()

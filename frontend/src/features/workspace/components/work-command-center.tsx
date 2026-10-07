@@ -195,7 +195,7 @@ export function WorkCommandCenter() {
       (isOverdue(a) ? -1 : isOverdue(b) ? 1 : 0) ||
       (a.due_at || '9999').localeCompare(b.due_at || '9999')), [personalItems, meId]);
   const visibleDelegations = useMemo(() => delegatedItems.filter((item) =>
-    item.created_by_id === meId && item.owner_id !== null && item.owner_id !== meId &&
+    item.owner_id !== null && item.owner_id !== meId &&
     !item.deleted_at && !closedStatuses.has(item.status) &&
     (!assignedSite || item.site_id === assignedSite) && (!assignedOwner || item.owner_id?.toString() === assignedOwner)),
     [delegatedItems, meId, assignedSite, assignedOwner]);
@@ -470,7 +470,7 @@ export function WorkCommandCenter() {
         {canDelete(editing) && <Button variant='outline' className='text-rose-600' onClick={() => void deleteTask(editing)}>حذف و انتقال به آرشیو</Button>}
         <TaskDiscussion key={editing.id} item={editing} canEdit={false}
           canComment={canEdit || Boolean(projects.find((project) => project.site_id === editing.site_id)?.my_responsibility)}
-          onOpenTask={openTask} onChanged={() => void refresh(true)} />
+          onChanged={() => void refresh(true)} />
       </div> : editing && <div className='grid gap-3 sm:grid-cols-2'>
         <label className='space-y-1 text-xs'>پروژه<NativeSelect disabled={editing !== 'new'} value={form.site_id} onChange={(e) => setForm((f) => ({ ...f, site_id: e.target.value }))}><NativeSelectOption value=''>انتخاب پروژه</NativeSelectOption>{projects.filter((project) => canLead(project.site_id) || editing !== 'new').map((project) => <NativeSelectOption key={project.site_id} value={project.site_id}>{project.name}</NativeSelectOption>)}</NativeSelect></label>
         <label className='space-y-1 text-xs'>عنوان<Input disabled={!canManageEditing} value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} /></label>
@@ -480,16 +480,15 @@ export function WorkCommandCenter() {
         <label className='space-y-1 text-xs'>موعد اختیاری<UserDateInput label='موعد کار' mode='datetime-local' disabled={!canManageEditing} value={form.due_at} onChange={(value) => setForm((f) => ({ ...f, due_at: value }))} /></label>
         {editing !== 'new' && <TaskDiscussion key={editing.id} item={editing} canEdit={canUpdate(editing)}
           canComment={canEdit || Boolean(projects.find((project) => project.site_id === editing.site_id)?.my_responsibility)}
-          onOpenTask={openTask} onChanged={() => void refresh(true)} />}
-        {editing === 'new' && <p className='text-muted-foreground text-xs sm:col-span-2'>گفت‌وگو و زیرتسک‌های اختیاری پس از ذخیرهٔ کار در همین کارت فعال می‌شوند.</p>}
-        <details className='sm:col-span-2 rounded-lg border p-3'><summary className='cursor-pointer text-sm font-medium'>جزئیات بیشتر · شرح، لینک، زمان‌بندی و زیرکار</summary><div className='mt-3 grid gap-3 sm:grid-cols-2'>
+          onChanged={() => void refresh(true)} />}
+        {editing === 'new' && <p className='text-muted-foreground text-xs sm:col-span-2'>گفت‌وگو و چک‌لیست زیرکارها پس از ذخیرهٔ کار در همین کارت فعال می‌شوند.</p>}
+        <details className='sm:col-span-2 rounded-lg border p-3'><summary className='cursor-pointer text-sm font-medium'>جزئیات بیشتر · شرح، لینک و زمان‌بندی</summary><div className='mt-3 grid gap-3 sm:grid-cols-2'>
         <label className='space-y-1 text-xs sm:col-span-2'>شرح کار<Textarea disabled={!canManageEditing} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></label>
         <label className='space-y-1 text-xs sm:col-span-2'>URL مرتبط<Input disabled={!canManageEditing} dir='ltr' value={form.url} onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))} /></label>
         <label className='space-y-1 text-xs'>تیم<NativeSelect disabled={!canManageEditing} value={form.team_id} onChange={(e) => setForm((f) => ({ ...f, team_id: e.target.value }))}><NativeSelectOption value=''>بدون تیم</NativeSelectOption>{teams.filter((team) => team.active).map((team) => <NativeSelectOption key={team.id} value={String(team.id)}>{team.name}</NativeSelectOption>)}</NativeSelect></label>
         <label className='space-y-1 text-xs'>شروع<UserDateInput label='شروع کار' mode='datetime-local' disabled={!canManageEditing} value={form.start_at} onChange={(value) => setForm((f) => ({ ...f, start_at: value }))} /></label>
         <label className='space-y-1 text-xs'>ساعت برآوردی<Input disabled={!canManageEditing} type='number' min={0} max={1000} step={.5} value={form.estimated_hours} onChange={(e) => setForm((f) => ({ ...f, estimated_hours: e.target.value }))} /></label>
         <label className='space-y-1 text-xs'>درصد پیشرفت<Input disabled={!canUpdateEditing} type='number' min={0} max={100} value={form.progress_percent} onChange={(e) => setForm((f) => ({ ...f, progress_percent: e.target.value }))} /></label>
-        <label className='space-y-1 text-xs'>زیرکارِ<NativeSelect disabled={!canManageEditing} value={form.parent_id} onChange={(e) => setForm((f) => ({ ...f, parent_id: e.target.value }))}><NativeSelectOption value=''>کار اصلی</NativeSelectOption>{(data?.items || []).filter((item) => item.site_id === form.site_id && (editing === 'new' || item.id !== editing.id)).map((item) => <NativeSelectOption key={item.id} value={String(item.id)}>{item.title}</NativeSelectOption>)}</NativeSelect></label>
         <label className='space-y-1 text-xs'>مایلستون<NativeSelect disabled={!canManageEditing} value={form.milestone_id} onChange={(e) => setForm((f) => ({ ...f, milestone_id: e.target.value }))}><NativeSelectOption value=''>بدون مایلستون</NativeSelectOption>{milestones.map((entry) => <NativeSelectOption key={entry.id} value={String(entry.id)}>{entry.title}</NativeSelectOption>)}</NativeSelect></label>
         </div></details>
         {form.status === 'blocked' && <label className='space-y-1 text-xs sm:col-span-2'>دلیل مانع<Textarea disabled={!canUpdateEditing} value={form.blocked_reason} onChange={(e) => setForm((f) => ({ ...f, blocked_reason: e.target.value }))} /></label>}

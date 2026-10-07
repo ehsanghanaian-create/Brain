@@ -449,8 +449,7 @@ export function ManagementDashboard() {
               <td>{task.start_at ? formatUserDate(task.start_at, calendar) : '—'}</td>
               <td className={overdue ? 'font-semibold text-rose-600' : ''}>{task.due_at ? formatUserDate(task.due_at, calendar) : 'بی‌موعد'}</td>
               <td><span className='font-medium'>{number.format(task.status === 'verified' ? 100 : task.progress_percent)}٪</span>
-                {task.checklist_total > 0 && <span className='text-muted-foreground block'>{number.format(task.checklist_done)}/{number.format(task.checklist_total)} چک‌لیست</span>}
-                {task.subtasks > 0 && <span className='text-muted-foreground block'>{number.format(task.subtasks)} زیرتسک</span>}</td>
+                {task.checklist_total > 0 && <span className='text-muted-foreground block'>{number.format(task.checklist_done)}/{number.format(task.checklist_total)} چک‌لیست</span>}</td>
               <td>{task.created_by_name || 'نامشخص'}</td><td className='text-muted-foreground'>{formatUserDateTime(task.updated_at, calendar)}</td>
               <td><Link href={taskUrl(task)} className='text-primary hover:underline'>باز کردن</Link></td>
             </tr>;

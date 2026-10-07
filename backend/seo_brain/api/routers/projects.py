@@ -125,7 +125,7 @@ def list_projects(request: Request, eng: Engine = Depends(engine)) -> list[dict]
             COUNT(DISTINCT CASE WHEN w.status NOT IN ('verified','rejected','deferred') AND w.due_at<:at THEN w.id END) AS overdue_tasks
             FROM sites s LEFT JOIN manual_projects mp ON mp.site_id=s.site_id
             LEFT JOIN site_assignments a ON a.site_id=s.site_id
-            LEFT JOIN work_items w ON w.site_id=s.site_id AND w.deleted_at IS NULL
+            LEFT JOIN work_items w ON w.site_id=s.site_id AND w.deleted_at IS NULL AND w.parent_id IS NULL
             GROUP BY s.site_id ORDER BY s.name"""), {"at": now()}).mappings().all()
         progress = cx.execute(text("""SELECT w.site_id,
             COALESCE(SUM(CASE WHEN w.status='verified' THEN 100 ELSE w.progress_percent END *

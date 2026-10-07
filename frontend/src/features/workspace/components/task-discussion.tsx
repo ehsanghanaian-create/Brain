@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { formatUserDateTime, useDatePreference } from '@/lib/date-preference';
-import { commandApi, type CommandWorkItem, type TaskDiscussionData } from '../api';
+import { commandApi, type CommandWorkItem, type TaskDiscussionData, type WorkChecklistItem } from '../api';
 
 const noteType: Record<string, string> = {
   created: 'توضیح هنگام ایجاد', updated: 'یادداشت تغییر', handoff: 'دلیل ارجاع',
@@ -19,15 +19,15 @@ const activityType: Record<string, string> = {
   handoff: 'ارجاع شد'
 };
 
-export function TaskDiscussion({ item, canEdit, canComment, onOpenTask, onChanged }: {
+export function TaskDiscussion({ item, canEdit, canComment, onChanged }: {
   item: CommandWorkItem; canEdit: boolean; canComment: boolean;
-  onOpenTask: (item: CommandWorkItem) => void; onChanged: () => void;
+  onChanged: () => void;
 }) {
   const { calendar } = useDatePreference();
   const input = useRef<HTMLTextAreaElement>(null);
-  const [children, setChildren] = useState<CommandWorkItem[]>([]);
+  const [checklist, setChecklist] = useState<WorkChecklistItem[]>([]);
   const [thread, setThread] = useState<TaskDiscussionData | null>(null);
-  const [childTitle, setChildTitle] = useState('');
+  const [checklistTitle, setChecklistTitle] = useState('');
   const [message, setMessage] = useState('');
   const [caret, setCaret] = useState(0);
   const [focused, setFocused] = useState(false);
@@ -36,11 +36,11 @@ export function TaskDiscussion({ item, canEdit, canComment, onOpenTask, onChange
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [childResult, threadResult] = await Promise.allSettled([
-      commandApi.subtasks(item), commandApi.discussion(item)
+    const [checklistResult, threadResult] = await Promise.allSettled([
+      commandApi.checklist(item), commandApi.discussion(item)
     ]);
-    if (childResult.status === 'fulfilled') setChildren(childResult.value);
-    else toast.error('زیرتسک‌ها دریافت نشد');
+    if (checklistResult.status === 'fulfilled') setChecklist(checklistResult.value);
+    else toast.error('چک‌لیست دریافت نشد');
     if (threadResult.status === 'fulfilled') {
       setThread(threadResult.value); setThreadError('');
     } else setThreadError(threadResult.reason instanceof Error ? threadResult.reason.message : 'گفت‌وگو دریافت نشد');
@@ -70,13 +70,25 @@ export function TaskDiscussion({ item, canEdit, canComment, onOpenTask, onChange
     requestAnimationFrame(() => { input.current?.focus(); input.current?.setSelectionRange(nextCaret, nextCaret); });
   }
 
-  async function addChild() {
-    if (childTitle.trim().length < 3) return;
+  async function addStep() {
+    if (checklistTitle.trim().length < 2) return;
     setBusy(true);
     try {
-      await commandApi.createSubtask(item, childTitle.trim());
-      setChildTitle(''); await refresh(); onChanged(); toast.success('زیرتسک ساخته شد');
-    } catch (error) { toast.error(error instanceof Error ? error.message : 'ساخت زیرتسک انجام نشد'); }
+      await commandApi.addChecklist(item, checklistTitle.trim());
+      setChecklistTitle(''); await refresh(); onChanged(); toast.success('زیرکار به چک‌لیست افزوده شد');
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'افزودن زیرکار انجام نشد'); }
+    finally { setBusy(false); }
+  }
+  async function toggleStep(step: WorkChecklistItem) {
+    setBusy(true);
+    try { await commandApi.toggleChecklist(item, step.id, !step.done); await refresh(); onChanged(); }
+    catch (error) { toast.error(error instanceof Error ? error.message : 'تغییر چک‌لیست انجام نشد'); }
+    finally { setBusy(false); }
+  }
+  async function removeStep(step: WorkChecklistItem) {
+    setBusy(true);
+    try { await commandApi.removeChecklist(item, step.id); await refresh(); onChanged(); }
+    catch (error) { toast.error(error instanceof Error ? error.message : 'حذف زیرکار انجام نشد'); }
     finally { setBusy(false); }
   }
   async function post() {
@@ -103,7 +115,7 @@ export function TaskDiscussion({ item, canEdit, canComment, onOpenTask, onChange
     <div className='overflow-hidden rounded-xl border bg-muted/10'>
       <div className='flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3'>
         <div><h3 className='text-sm font-semibold'>گفت‌وگوی کار</h3>
-          <p className='text-muted-foreground mt-1 text-xs'>پیام‌ها و یادداشت‌های این کار و همهٔ زیرتسک‌هایش در همین گفتگو دیده می‌شوند.</p></div>
+          <p className='text-muted-foreground mt-1 text-xs'>پیام‌ها و یادداشت‌های این کار در همین گفتگو دیده می‌شوند.</p></div>
         {thread && thread.root_id !== item.id && <span className='rounded-md bg-muted px-2 py-1 text-xs'>کار اصلی: {thread.root_title}</span>}
       </div>
       <div className='max-h-80 min-h-32 space-y-3 overflow-y-auto p-4' aria-live='polite'>
@@ -162,17 +174,18 @@ export function TaskDiscussion({ item, canEdit, canComment, onOpenTask, onChange
       </div>
     </div>
     <div className='space-y-2 rounded-xl border p-4'>
-      <div className='flex items-center justify-between'><h3 className='text-sm font-semibold'>زیرتسک‌ها</h3><span className='text-muted-foreground text-xs'>{children.length} مورد</span></div>
-      {!!children.length && <div className='overflow-hidden rounded-lg border'>{children.map((child) => <button key={child.id} type='button'
-        onClick={() => onOpenTask(child)} className='flex w-full items-center justify-between gap-2 border-b px-3 py-2 text-right text-sm last:border-b-0 hover:bg-muted/50'>
-        <span className='min-w-0 truncate'>{child.status === 'verified' ? '✓ ' : '○ '}{child.title}</span>
-        <span className='text-muted-foreground shrink-0 text-xs'>{child.owner_name || 'بی‌مسئول'}</span>
-      </button>)}</div>}
-      {!children.length && <p className='text-muted-foreground text-xs'>زیرتسکی ثبت نشده است. فقط در صورت نیاز اضافه کنید.</p>}
-      {canEdit && <div className='flex gap-2'><Input aria-label='عنوان زیرتسک' placeholder='افزودن زیرتسک اختیاری…' value={childTitle}
-        maxLength={200} onChange={(event) => setChildTitle(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void addChild(); }} />
-        <Button size='sm' disabled={busy || childTitle.trim().length < 3} onClick={() => void addChild()}>افزودن</Button></div>}
-      {!canEdit && <p className='text-muted-foreground text-xs'>این تسک برای شما فقط خواندنی است؛ برای هماهنگی از گفت‌وگو استفاده کنید.</p>}
+      <div className='flex items-center justify-between'><h3 className='text-sm font-semibold'>چک‌لیست زیرکارها</h3><span className='text-muted-foreground text-xs'>{checklist.filter((step) => step.done).length} از {checklist.length} انجام‌شده</span></div>
+      {!!checklist.length && <div className='overflow-hidden rounded-lg border'>{checklist.map((step) => <div key={step.id}
+        className='flex items-center justify-between gap-2 border-b px-3 py-2 text-sm last:border-b-0'>
+        <label className='flex min-w-0 flex-1 items-center gap-2'><input type='checkbox' checked={step.done} disabled={!canEdit || busy} onChange={() => void toggleStep(step)} aria-label={step.title} />
+          <span className={`min-w-0 break-words ${step.done ? 'text-muted-foreground line-through' : ''}`}>{step.title}</span></label>
+        {canEdit && !step.legacy && <Button size='sm' variant='ghost' disabled={busy} onClick={() => void removeStep(step)}>برداشتن</Button>}
+      </div>)}</div>}
+      {!checklist.length && <p className='text-muted-foreground text-xs'>هنوز زیرکاری ثبت نشده است.</p>}
+      {canEdit && <div className='flex gap-2'><Input aria-label='عنوان زیرکار' placeholder='افزودن زیرکار به چک‌لیست…' value={checklistTitle}
+        maxLength={200} onChange={(event) => setChecklistTitle(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void addStep(); }} />
+        <Button size='sm' disabled={busy || checklistTitle.trim().length < 2} onClick={() => void addStep()}>افزودن</Button></div>}
+      {!canEdit && <p className='text-muted-foreground text-xs'>چک‌لیست برای شما فقط خواندنی است؛ برای هماهنگی از گفت‌وگو استفاده کنید.</p>}
     </div>
   </section>;
 }

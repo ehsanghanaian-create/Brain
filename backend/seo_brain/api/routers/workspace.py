@@ -34,6 +34,17 @@ def _checklists_for(cx, rows) -> dict[int, list[dict]]:
     for step in steps:
         result[step["work_item_id"]].append({"id": step["id"], "title": step["title"],
                                              "done": bool(step["done"])})
+    legacy = cx.execute(text(f"""WITH RECURSIVE children(root_id,id,title,status,deleted_at) AS (
+        SELECT parent_id,id,title,status,deleted_at FROM work_items
+        WHERE parent_id IN ({placeholders})
+        UNION ALL
+        SELECT children.root_id,child.id,child.title,child.status,child.deleted_at
+        FROM work_items child JOIN children ON child.parent_id=children.id
+    ) SELECT root_id,id,title,status FROM children WHERE deleted_at IS NULL
+        ORDER BY root_id,id"""), identifiers).mappings().all()
+    for child in legacy:
+        result[child["root_id"]].append({"id": -child["id"], "title": child["title"],
+                                         "done": child["status"] == "verified", "legacy": True})
     return result
 
 
@@ -85,7 +96,7 @@ def work_report(period: Literal["week", "month"] = "week", anchor: date | None =
         open_rows = cx.execute(text("""SELECT w.owner_id,w.site_id,s.name AS site_name,
             u.full_name AS owner_name,COUNT(*) AS count FROM work_items w
             JOIN sites s ON s.site_id=w.site_id LEFT JOIN panel_users u ON u.id=w.owner_id
-            WHERE w.deleted_at IS NULL AND w.status NOT IN ('verified','rejected','deferred')
+            WHERE w.deleted_at IS NULL AND w.parent_id IS NULL AND w.status NOT IN ('verified','rejected','deferred')
               AND (:site IS NULL OR w.site_id=:site) AND (:user IS NULL OR w.owner_id=:user)
             GROUP BY w.owner_id,w.site_id"""), args).mappings().all()
         people = cx.execute(text("SELECT id,full_name FROM panel_users WHERE active=1 ORDER BY full_name")).mappings().all()
@@ -238,7 +249,7 @@ def teams(eng: Engine = Depends(engine)) -> list[dict]:
         rows = cx.execute(text("""SELECT t.*, COUNT(DISTINCT u.id) AS members,
             COUNT(DISTINCT CASE WHEN w.status NOT IN ('verified','rejected','deferred') THEN w.id END) AS open_work
             FROM panel_teams t LEFT JOIN panel_users u ON u.team_id=t.id AND u.active=1
-            LEFT JOIN work_items w ON w.team_id=t.id AND w.deleted_at IS NULL
+            LEFT JOIN work_items w ON w.team_id=t.id AND w.deleted_at IS NULL AND w.parent_id IS NULL
             GROUP BY t.id ORDER BY t.active DESC, t.name""")).mappings().all()
     return [{**dict(row), "active": bool(row["active"])} for row in rows]
 
@@ -305,7 +316,7 @@ def team_management(request: Request, user_id: int | None = None, eng: Engine = 
                 AND w.due_at<:week_end THEN 1 ELSE 0 END) AS due_week_tasks,
             SUM(CASE WHEN w.status='verified' THEN 1 ELSE 0 END) AS completed_tasks
             FROM panel_users u LEFT JOIN panel_teams t ON t.id=u.team_id
-            LEFT JOIN work_items w ON w.owner_id=u.id AND w.deleted_at IS NULL
+            LEFT JOIN work_items w ON w.owner_id=u.id AND w.deleted_at IS NULL AND w.parent_id IS NULL
             GROUP BY u.id ORDER BY u.active DESC,u.full_name"""), args).mappings().all()
         assignments = cx.execute(text("""SELECT a.user_id,a.site_id,a.responsibility,s.name
             FROM site_assignments a JOIN sites s ON s.site_id=a.site_id
@@ -320,7 +331,7 @@ def team_management(request: Request, user_id: int | None = None, eng: Engine = 
             SUM(CASE WHEN status NOT IN ('verified','rejected','deferred') AND due_at<:now THEN 1 ELSE 0 END) AS overdue_tasks,
             SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END) AS blocked_tasks,
             SUM(CASE WHEN status NOT IN ('verified','rejected','deferred') AND owner_id IS NULL THEN 1 ELSE 0 END) AS unassigned_tasks
-            FROM work_items WHERE deleted_at IS NULL"""), args).mappings().one()
+            FROM work_items WHERE deleted_at IS NULL AND parent_id IS NULL"""), args).mappings().one()
         recent = cx.execute(text("""SELECT e.id,e.actor_id,e.actor_username,e.event_type,e.created_at,
             e.work_item_id,e.site_id,w.title AS task_title,s.name AS project_name
             FROM work_item_events e JOIN work_items w ON w.id=e.work_item_id
@@ -369,7 +380,7 @@ def team_management_tasks(request: Request, site_id: str | None = None,
             "site": site_id, "owner": owner_id, "team": team_id, "priority": priority,
             "status": status,
             "lim": limit, "off": offset}
-    clauses = ["w.deleted_at IS NULL"]
+    clauses = ["w.deleted_at IS NULL", "w.parent_id IS NULL"]
     if site_id:
         clauses.append("w.site_id=:site")
     if owner_id is not None:
@@ -401,8 +412,10 @@ def team_management_tasks(request: Request, site_id: str | None = None,
             w.owner_id,u.full_name AS owner_name,w.team_id,w.created_by_id,
             creator.full_name AS created_by_name,w.parent_id,w.start_at,w.due_at,w.progress_percent,
             w.estimated_hours,w.created_at,w.updated_at,w.blocked_reason,
-            (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id) AS checklist_total,
-            (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id AND ci.done=1) AS checklist_done,
+            ((SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id) +
+             (SELECT COUNT(*) FROM work_items child WHERE child.parent_id=w.id AND child.deleted_at IS NULL)) AS checklist_total,
+            ((SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id AND ci.done=1) +
+             (SELECT COUNT(*) FROM work_items child WHERE child.parent_id=w.id AND child.deleted_at IS NULL AND child.status='verified')) AS checklist_done,
             (SELECT COUNT(*) FROM work_items child WHERE child.parent_id=w.id AND child.deleted_at IS NULL) AS subtasks
             FROM work_items w JOIN sites s ON s.site_id=w.site_id
             LEFT JOIN panel_users u ON u.id=w.owner_id
@@ -452,7 +465,7 @@ def overview(site_id: str | None = None, owner_id: int | None = None, team_id: i
              created_by_id: int | None = None,
              limit: int = Query(200, ge=1, le=500), offset: int = Query(0, ge=0),
              eng: Engine = Depends(engine)) -> dict:
-    clauses = ["w.deleted_at IS NULL"]
+    clauses = ["w.deleted_at IS NULL", "w.parent_id IS NULL"]
     args: dict = {"now": now(), "lim": limit, "off": offset}
     for key, value in (("site_id", site_id), ("owner_id", owner_id), ("team_id", team_id),
                        ("status", status), ("priority", priority)):
@@ -480,8 +493,10 @@ def overview(site_id: str | None = None, owner_id: int | None = None, team_id: i
         rows = cx.execute(text(f"""SELECT w.*, s.name AS site_name, u.full_name AS owner_name,
             creator.full_name AS created_by_name,
             t.name AS team_name, t.color AS team_color,
-            (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id) AS checklist_total,
-            (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id AND ci.done=1) AS checklist_done
+            ((SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id) +
+             (SELECT COUNT(*) FROM work_items child WHERE child.parent_id=w.id AND child.deleted_at IS NULL)) AS checklist_total,
+            ((SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id AND ci.done=1) +
+             (SELECT COUNT(*) FROM work_items child WHERE child.parent_id=w.id AND child.deleted_at IS NULL AND child.status='verified')) AS checklist_done
             FROM work_items w LEFT JOIN sites s ON s.site_id=w.site_id
             LEFT JOIN panel_users u ON u.id=w.owner_id LEFT JOIN panel_users creator ON creator.id=w.created_by_id
             LEFT JOIN panel_teams t ON t.id=w.team_id WHERE {where}
@@ -524,7 +539,9 @@ def overview(site_id: str | None = None, owner_id: int | None = None, team_id: i
                 labels_by_item[label["work_item_id"]].append({"id": label["id"], "name": label["name"], "color": label["color"]})
     return {"summary": {k: (float(v or 0) if k == "hours_open" else int(v or 0)) for k, v in summary.items()},
             "items": [{**dict(row), "labels": labels_by_item[row["id"]],
-                       "checklist": checklists_by_item[row["id"]]} for row in rows], "limit": limit, "offset": offset,
+                       "checklist": checklists_by_item[row["id"]],
+                       "checklist_total": len(checklists_by_item[row["id"]]),
+                       "checklist_done": sum(step["done"] for step in checklists_by_item[row["id"]])} for row in rows], "limit": limit, "offset": offset,
             "by_status": [dict(row) for row in by_status],
             "by_site": [{k: int(v or 0) if k in {"total", "open", "overdue", "unassigned"} else v for k, v in row.items()} for row in by_site],
             "by_owner": [{k: (float(v or 0) if k == "hours_open" else int(v or 0)) if k in {"total", "open", "overdue", "hours_open"} else v for k, v in row.items()} for row in by_owner],
@@ -541,7 +558,7 @@ def archive(kind: Literal["completed", "deleted"], site_id: str | None = None,
             creator.full_name AS created_by_name FROM work_items w
             JOIN sites s ON s.site_id=w.site_id LEFT JOIN panel_users u ON u.id=w.owner_id
             LEFT JOIN panel_users creator ON creator.id=w.created_by_id
-            WHERE {condition} AND (:site IS NULL OR w.site_id=:site)
+            WHERE {condition} AND w.parent_id IS NULL AND (:site IS NULL OR w.site_id=:site)
             ORDER BY COALESCE(w.deleted_at,w.updated_at) DESC LIMIT :limit"""),
             {"site": site_id, "limit": limit}).mappings().all()
     return [dict(row) for row in rows]
@@ -560,7 +577,7 @@ def personal_board(request: Request, after_id: int = Query(0, ge=0),
             JOIN sites s ON s.site_id=w.site_id LEFT JOIN panel_users u ON u.id=w.owner_id
             LEFT JOIN panel_users creator ON creator.id=w.created_by_id
             LEFT JOIN panel_teams t ON t.id=w.team_id
-            WHERE w.owner_id=:owner AND w.deleted_at IS NULL AND w.status NOT IN ('verified','rejected','deferred')
+            WHERE w.owner_id=:owner AND w.parent_id IS NULL AND w.deleted_at IS NULL AND w.status NOT IN ('verified','rejected','deferred')
             AND w.id>:after ORDER BY w.id LIMIT :limit"""),
             {"owner": actor["id"], "after": after_id, "limit": limit + 1}).mappings().all()
         page = rows[:limit]
@@ -578,6 +595,12 @@ def _creator_board(request: Request, after_id: int, limit: int, eng: Engine,
     if not actor:
         raise HTTPException(401, "sign in to view tasks you created")
     delegation_clause = "AND w.owner_id IS NOT NULL AND w.owner_id<>:creator" if delegated_only else ""
+    authorship_clause = """(w.created_by_id=:creator OR EXISTS (
+        SELECT 1 FROM work_item_events event WHERE event.work_item_id=w.id
+        AND event.event_type='handoff' AND event.actor_id=:creator
+        AND event.id=(SELECT MAX(latest.id) FROM work_item_events latest
+            WHERE latest.work_item_id=w.id AND latest.event_type='handoff')
+    ))""" if delegated_only else "w.created_by_id=:creator"
     with eng.connect() as cx:
         rows = cx.execute(text(f"""SELECT w.*,s.name AS site_name,u.full_name AS owner_name,
             creator.full_name AS created_by_name,t.name AS team_name,t.color AS team_color,
@@ -585,7 +608,7 @@ def _creator_board(request: Request, after_id: int, limit: int, eng: Engine,
             JOIN sites s ON s.site_id=w.site_id LEFT JOIN panel_users u ON u.id=w.owner_id
             LEFT JOIN panel_users creator ON creator.id=w.created_by_id
             LEFT JOIN panel_teams t ON t.id=w.team_id
-            WHERE w.created_by_id=:creator AND w.deleted_at IS NULL
+            WHERE {authorship_clause} AND w.parent_id IS NULL AND w.deleted_at IS NULL
             AND w.status NOT IN ('verified','rejected','deferred')
             {delegation_clause} AND w.id>:after ORDER BY w.id LIMIT :limit"""),
             {"creator": actor["id"], "after": after_id, "limit": limit + 1}).mappings().all()
@@ -623,12 +646,14 @@ def project_board(site_id: str, request: Request, after_id: int = Query(0, ge=0)
         rows = cx.execute(text("""SELECT w.*,s.name AS site_name,u.full_name AS owner_name,
             creator.full_name AS created_by_name,
             t.name AS team_name,t.color AS team_color,
-            (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id) AS checklist_total,
-            (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id AND ci.done=1) AS checklist_done
+            ((SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id) +
+             (SELECT COUNT(*) FROM work_items child WHERE child.parent_id=w.id AND child.deleted_at IS NULL)) AS checklist_total,
+            ((SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id AND ci.done=1) +
+             (SELECT COUNT(*) FROM work_items child WHERE child.parent_id=w.id AND child.deleted_at IS NULL AND child.status='verified')) AS checklist_done
             FROM work_items w JOIN sites s ON s.site_id=w.site_id
             LEFT JOIN panel_users u ON u.id=w.owner_id LEFT JOIN panel_users creator ON creator.id=w.created_by_id
             LEFT JOIN panel_teams t ON t.id=w.team_id
-            WHERE w.site_id=:site AND w.deleted_at IS NULL AND w.id>:after ORDER BY w.id LIMIT :limit"""),
+            WHERE w.site_id=:site AND w.parent_id IS NULL AND w.deleted_at IS NULL AND w.id>:after ORDER BY w.id LIMIT :limit"""),
             {"site": site_id, "after": after_id, "limit": limit + 1}).mappings().all()
         page = rows[:limit]
         checklists_by_item = _checklists_for(cx, page)
@@ -652,5 +677,7 @@ def project_board(site_id: str, request: Request, after_id: int = Query(0, ge=0)
                     "field_type": field["field_type"], "value": json.loads(field["value_json"])})
     return {"items": [{**dict(row), "labels": labels_by_item[row["id"]],
                         "checklist": checklists_by_item[row["id"]],
+                        "checklist_total": len(checklists_by_item[row["id"]]),
+                        "checklist_done": sum(step["done"] for step in checklists_by_item[row["id"]]),
                         "custom_fields": fields_by_item[row["id"]]} for row in page],
             "next_after_id": page[-1]["id"] if len(rows) > limit else None}

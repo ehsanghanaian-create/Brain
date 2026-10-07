@@ -82,7 +82,7 @@ export type ProjectMilestone = { id: number; site_id: string; title: string; des
 export type TaskDependency = { depends_on_id: number; title: string; status: WorkStatus; created_at: string };
 export type TaskTimeEntry = { id: number; user_id: number; user_name: string; minutes: number; work_date: string; note: string };
 export type WorkChecklistItem = { id: number; site_id: string; work_item_id: number; title: string;
-  done: boolean; actor_id: number | null; created_at: string; updated_at: string };
+  done: boolean; legacy?: boolean; actor_id: number | null; created_at: string; updated_at: string };
 export type CommandOverview = {
   summary: { total: number; open: number; overdue: number; unassigned: number; blocked: number; due_week: number; hours_open: number };
   items: CommandWorkItem[];

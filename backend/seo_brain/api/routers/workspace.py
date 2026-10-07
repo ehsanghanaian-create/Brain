@@ -430,9 +430,11 @@ def team_management_tasks(request: Request, site_id: str | None = None,
             SUM(CASE WHEN w.status='verified' THEN 1 ELSE 0 END) AS completed
             {base} GROUP BY w.owner_id ORDER BY open DESC,name"""), args).mappings().all()
         timeline = cx.execute(text(f"""SELECT w.owner_id AS user_id,w.site_id,
-            CAST((julianday(substr(w.due_at,1,10))-julianday(:today))/7 AS INTEGER) AS week_index,
+            CASE WHEN w.due_at IS NULL THEN -2 WHEN w.due_at<:now THEN -1
+                ELSE CAST((julianday(substr(w.due_at,1,10))-julianday(:today))/7 AS INTEGER)
+            END AS week_index,
             COUNT(*) AS count {base} AND {open_clause}
-            AND w.due_at>=:today AND w.due_at<:timeline_end
+            AND (w.due_at IS NULL OR w.due_at<:now OR w.due_at<:timeline_end)
             GROUP BY w.owner_id,w.site_id,week_index ORDER BY week_index,w.owner_id,w.site_id"""), args).mappings().all()
     return {"items": [dict(row) for row in rows], "total": int(total),
             "limit": limit, "offset": offset,

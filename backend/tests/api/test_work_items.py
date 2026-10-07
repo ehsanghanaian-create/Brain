@@ -615,6 +615,7 @@ def test_manager_dashboard_and_admin_task_override(client):
     assert ledger.json()["total"] == 2
     assert ledger.json()["schedule"]["unscheduled"] == 2
     assert ledger.json()["workload"][0]["open"] == 2
+    assert sum(row["count"] for row in ledger.json()["timeline"] if row["week_index"] == -2) == 2
     assert len(ledger.json()["items"]) == 1
     next_page = client.get(ledger_url + "?site_id=demo&owner_id=1&focus=unscheduled&limit=1&offset=1",
                            headers=manager)
@@ -644,4 +645,5 @@ def test_manager_dashboard_and_admin_task_override(client):
     assert portfolio.status_code == 200, portfolio.text
     assert portfolio.json()["schedule"]["due_week"] == 1
     assert {row["site_id"] for row in portfolio.json()["timeline"]} == {"demo"}
-    assert sum(row["count"] for row in portfolio.json()["timeline"] if row["user_id"] == 1) == 1
+    assert sum(row["count"] for row in portfolio.json()["timeline"]
+               if row["user_id"] == 1 and row["week_index"] >= 0) == 1

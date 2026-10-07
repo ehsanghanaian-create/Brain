@@ -55,12 +55,13 @@ function Timeline({ items, horizon, calendar, onHorizonChange }: {
     dayIndex(item.due_at, today) >= 0 && dayIndex(item.due_at, today) <= horizon)
     .toSorted((a, b) => (a.owner_name || 'zzz').localeCompare(b.owner_name || 'zzz') ||
       (a.due_at || '').localeCompare(b.due_at || ''));
+  const firstUnscheduled = items.find((item) => openStatuses.has(item.status) && !item.due_at);
   const markers = [0, .25, .5, .75, 1].map((fraction) => {
     const date = new Date(Date.parse(today + 'T00:00:00Z') + Math.round(horizon * fraction) * 86_400_000);
     return formatUserDate(date.toISOString(), calendar);
   });
   return <Card>
-    <CardHeader><CardTitle>خط زمانی اجرای تیم</CardTitle>
+    <CardHeader><CardTitle>جزئیات زمان‌بندی این صفحه</CardTitle>
       <CardDescription>موعد کارهای همین صفحه در {number.format(horizon)} روز آینده. نوار فقط وقتی نمایش داده می‌شود که تاریخ شروع ثبت شده باشد؛ در غیر این صورت نشانگر، موعد کار است.</CardDescription>
     </CardHeader>
     <CardContent>
@@ -95,7 +96,9 @@ function Timeline({ items, horizon, calendar, onHorizonChange }: {
             </div>;
           })}
         </div>
-      </div> : <p className='text-muted-foreground rounded-xl border border-dashed p-7 text-center text-sm'>برای کارهای این صفحه در بازهٔ انتخابی موعدی ثبت نشده است.</p>}
+      </div> : <div className='text-muted-foreground rounded-xl border border-dashed p-7 text-center text-sm'>برای کارهای این صفحه در بازهٔ انتخابی موعدی ثبت نشده است.
+        {firstUnscheduled && <Link href={taskUrl(firstUnscheduled)} className='text-primary mt-2 block hover:underline'>باز کردن «{firstUnscheduled.title}» و تعیین موعد</Link>}
+      </div>}
     </CardContent>
   </Card>;
 }
@@ -104,32 +107,37 @@ function PortfolioMatrix({ ledger, people, projects, weeks, calendar, onWeeksCha
   onPersonSelect, onProjectSelect }: {
   ledger: ManagementTaskLedger; people: ManagementOverview['people']; projects: ProjectSummary[];
   weeks: number; calendar: ReturnType<typeof useDatePreference>['calendar'];
-  onWeeksChange: (weeks: number) => void; onPersonSelect: (id: number | null) => void;
-  onProjectSelect: (siteId: string) => void;
+  onWeeksChange: (weeks: number) => void;
+  onPersonSelect: (id: number | null, focus?: 'overdue' | 'unscheduled') => void;
+  onProjectSelect: (siteId: string, focus?: 'overdue' | 'unscheduled') => void;
 }) {
   const [groupBy, setGroupBy] = useState<'person' | 'project'>('person');
   const rows = useMemo(() => {
     const grouped = new Map<string, { key: string; label: string; personId: number | null;
-      siteId: string | null; counts: number[]; total: number }>();
+      siteId: string | null; counts: number[]; overdue: number; unscheduled: number; total: number }>();
     for (const point of ledger.timeline) {
       const key = groupBy === 'person' ? `person:${point.user_id ?? 'none'}` : `project:${point.site_id}`;
       const label = groupBy === 'person'
         ? people.find((person) => person.id === point.user_id)?.full_name || 'بی‌مسئول'
         : projects.find((project) => project.site_id === point.site_id)?.name || point.site_id;
       const row = grouped.get(key) || { key, label, personId: point.user_id,
-        siteId: groupBy === 'project' ? point.site_id : null, counts: Array(13).fill(0) as number[], total: 0 };
+        siteId: groupBy === 'project' ? point.site_id : null, counts: Array(13).fill(0) as number[],
+        overdue: 0, unscheduled: 0, total: 0 };
       if (point.week_index >= 0 && point.week_index < 13) {
         row.counts[point.week_index] += point.count;
-        row.total += point.count;
-      }
+      } else if (point.week_index === -1) row.overdue += point.count;
+      else if (point.week_index === -2) row.unscheduled += point.count;
+      row.total += point.count;
       grouped.set(key, row);
     }
     return [...grouped.values()].toSorted((a, b) => b.total - a.total || a.label.localeCompare(b.label));
   }, [ledger.timeline, groupBy, people, projects]);
   const today = new Date().toISOString().slice(0, 10);
+  const choose = (row: (typeof rows)[number], focus?: 'overdue' | 'unscheduled') =>
+    groupBy === 'person' ? onPersonSelect(row.personId, focus) : onProjectSelect(row.siteId!, focus);
   return <Card><CardHeader className='flex flex-row flex-wrap items-start justify-between gap-3'>
     <div><CardTitle>نقشهٔ زمان‌بندی کل تیم</CardTitle>
-      <CardDescription className='mt-1'>همهٔ تسک‌های بازِ موعددار، مستقل از صفحه‌بندی جدول؛ هر خانه تعداد موعدهای آن هفته است.</CardDescription></div>
+      <CardDescription className='mt-1'>همهٔ تسک‌های باز، مستقل از صفحه‌بندی جدول؛ عقب‌افتاده‌ها و کارهای بی‌موعد نیز کنار هفته‌ها دیده می‌شوند.</CardDescription></div>
     <div className='flex flex-wrap gap-1.5'>
       <Button size='sm' variant={groupBy === 'person' ? 'default' : 'outline'} onClick={() => setGroupBy('person')}>بر اساس نفر</Button>
       <Button size='sm' variant={groupBy === 'project' ? 'default' : 'outline'} onClick={() => setGroupBy('project')}>بر اساس پروژه</Button>
@@ -137,36 +145,47 @@ function PortfolioMatrix({ ledger, people, projects, weeks, calendar, onWeeksCha
       <Button size='sm' variant={weeks === 13 ? 'default' : 'outline'} onClick={() => onWeeksChange(13)}>۱۳ هفته</Button>
     </div></CardHeader>
     <CardContent>{rows.length ? <div className='overflow-x-auto rounded-xl border'>
-      <div className='min-w-[820px]'>
+      <div className='min-w-[950px]'>
         <div className='grid items-center border-b bg-muted/40 text-[11px]'
-          style={{ gridTemplateColumns: `180px repeat(${weeks}, minmax(42px, 1fr)) 65px` }}>
+          style={{ gridTemplateColumns: `180px 75px repeat(${weeks}, minmax(42px, 1fr)) 75px 65px` }}>
           <span className='p-2'>مسئول / پروژه</span>
+          <span className='text-center text-rose-600'>گذشته</span>
           {Array.from({ length: weeks }, (_, index) => {
             const date = new Date(Date.parse(today + 'T00:00:00Z') + index * 7 * 86_400_000);
             return <span key={index} className='text-center'>{formatUserDate(date.toISOString(), calendar)}</span>;
           })}
+          <span className='text-center text-amber-600'>بی‌موعد</span>
           <span className='text-center'>جمع</span>
         </div>
         <div className='max-h-[420px] overflow-y-auto'>{rows.map((row) =>
           <div key={row.key} className='grid items-center border-b last:border-0 hover:bg-muted/30'
-            style={{ gridTemplateColumns: `180px repeat(${weeks}, minmax(42px, 1fr)) 65px` }}>
+            style={{ gridTemplateColumns: `180px 75px repeat(${weeks}, minmax(42px, 1fr)) 75px 65px` }}>
             <button type='button' className='truncate p-2 text-right text-xs font-medium hover:text-primary'
-              title={row.label} onClick={() => groupBy === 'person' ? onPersonSelect(row.personId) : onProjectSelect(row.siteId!)}>
+              title={row.label} onClick={() => choose(row)}>
               {row.label}
+            </button>
+            <button type='button' disabled={!row.overdue} onClick={() => choose(row, 'overdue')}
+              className='m-1 rounded-md bg-rose-500/10 py-2 text-center text-xs text-rose-600 enabled:hover:bg-rose-500/20'>
+              {row.overdue ? number.format(row.overdue) : '·'}
             </button>
             {row.counts.slice(0, weeks).map((count, index) =>
               <button key={index} type='button' disabled={!count}
                 title={`${row.label}: ${count} موعد در هفتهٔ ${index + 1}`}
-                onClick={() => groupBy === 'person' ? onPersonSelect(row.personId) : onProjectSelect(row.siteId!)}
+                onClick={() => choose(row)}
                 className={`m-1 rounded-md py-2 text-center text-xs tabular-nums transition-transform enabled:hover:scale-105
                   ${count >= 5 ? 'bg-sky-600 text-white' : count >= 3 ? 'bg-sky-500/60 text-foreground' :
                     count ? 'bg-sky-500/20 text-sky-700 dark:text-sky-200' : 'text-muted-foreground/50'}`}>
                 {count ? number.format(count) : '·'}
               </button>)}
-            <strong className='text-center text-xs'>{number.format(row.counts.slice(0, weeks).reduce((sum, value) => sum + value, 0))}</strong>
+            <button type='button' disabled={!row.unscheduled} onClick={() => choose(row, 'unscheduled')}
+              className='m-1 rounded-md bg-amber-500/10 py-2 text-center text-xs text-amber-600 enabled:hover:bg-amber-500/20'>
+              {row.unscheduled ? number.format(row.unscheduled) : '·'}
+            </button>
+            <strong className='text-center text-xs'>{number.format(row.overdue + row.unscheduled +
+              row.counts.slice(0, weeks).reduce((sum, value) => sum + value, 0))}</strong>
           </div>)}</div>
       </div>
-    </div> : <p className='text-muted-foreground rounded-xl border border-dashed p-7 text-center text-sm'>در ۱۳ هفتهٔ آینده کاری با موعد ثبت نشده است.</p>}
+    </div> : <p className='text-muted-foreground rounded-xl border border-dashed p-7 text-center text-sm'>کاری در محدودهٔ فیلترها ثبت نشده است.</p>}
     </CardContent>
   </Card>;
 }
@@ -408,9 +427,9 @@ export function ManagementDashboard() {
     {ledger && <PortfolioMatrix ledger={ledger} people={overview?.people || []} projects={projects}
       weeks={horizon === 35 ? 5 : 13} calendar={calendar}
       onWeeksChange={(value) => setHorizon(value === 5 ? 35 : 91)}
-      onPersonSelect={(id) => { if (id === null) { setFocus('unassigned'); setOwnerId(''); }
-        else { setOwnerId(String(id)); setFocus('open'); } setStatus(''); resetOffset(); }}
-      onProjectSelect={(id) => { setSiteId(id); resetOffset(); }} />}
+      onPersonSelect={(id, bucket) => { if (id === null) { setFocus('unassigned'); setOwnerId(''); }
+        else { setOwnerId(String(id)); setFocus(bucket || 'open'); } setStatus(''); resetOffset(); }}
+      onProjectSelect={(id, bucket) => { setSiteId(id); setFocus(bucket || 'open'); setStatus(''); resetOffset(); }} />}
     {ledger && <Timeline items={ledger.items} horizon={horizon} calendar={calendar} onHorizonChange={setHorizon} />}
 
     <Card><CardHeader className='flex flex-row flex-wrap items-start justify-between gap-3'><div>

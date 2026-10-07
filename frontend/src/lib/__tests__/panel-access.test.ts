@@ -15,5 +15,8 @@ describe('panel page permissions', () => {
     expect(allowedPage('analyst', '/dashboard/sites/demo')).toBe(true);
     expect(allowedPage('analyst', '/dashboard/users')).toBe(false);
     expect(allowedPage('admin', '/dashboard/users')).toBe(true);
+    expect(allowedPage('admin', '/dashboard/team-management')).toBe(false);
+    expect(allowedPage('admin', '/dashboard/team-management', true)).toBe(true);
+    expect(allowedPage('analyst', '/dashboard/team-management', true)).toBe(false);
   });
 });

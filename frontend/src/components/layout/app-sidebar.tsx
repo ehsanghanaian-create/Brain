@@ -34,13 +34,13 @@ import { Icons } from '@/components/icons';
 import { allowedPage, homeFor, type PanelRole } from '@/lib/panel-access';
 import { api } from '@/lib/api/client';
 
-export default function AppSidebar({ user }: { user: { username: string; full_name: string; role: PanelRole } }) {
+export default function AppSidebar({ user }: { user: { username: string; full_name: string; role: PanelRole; is_superadmin: boolean } }) {
   const pathname = usePathname();
   const { isOpen } = useMediaQuery();
   const router = useRouter();
   const filteredGroups = useFilteredNavGroups(navGroups);
   const visibleGroups = filteredGroups.map((group) => ({ ...group,
-    items: group.items.filter((item) => allowedPage(user.role, item.url))
+    items: group.items.filter((item) => allowedPage(user.role, item.url, user.is_superadmin))
   })).filter((group) => group.items.length > 0);
 
   React.useEffect(() => {

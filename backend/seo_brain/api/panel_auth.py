@@ -54,12 +54,12 @@ def create_session(cx, user_id: int) -> str:
 def session_user(cx, token: str) -> dict | None:
     if not token:
         return None
-    row = cx.execute(text("""SELECT u.id,u.username,u.full_name,u.email,u.role,u.active,u.date_calendar,s.expires_at
+    row = cx.execute(text("""SELECT u.id,u.username,u.full_name,u.email,u.role,u.active,u.date_calendar,u.is_superadmin,s.expires_at
         FROM panel_sessions s JOIN panel_users u ON u.id=s.user_id
         WHERE s.token_hash=:hash AND s.revoked_at IS NULL"""), {"hash": token_hash(token)}).mappings().first()
     if not row or not row["active"] or row["expires_at"] <= utcnow():
         return None
-    return dict(row)
+    return {**dict(row), "is_superadmin": bool(row["is_superadmin"])}
 
 
 def role_allowed(role: str, path: str, method: str) -> bool:

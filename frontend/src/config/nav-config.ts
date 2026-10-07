@@ -25,6 +25,8 @@ export const navGroups: NavGroup[] = [
         description: 'وضعیت کلی سایت‌ها، گراف دانش و سلامت سیستم' },
       { title: 'میز عملیات و تیم', url: '/dashboard/work', icon: 'kanban', shortcut: ['w', 'w'], items: [],
         description: 'شیت کارها، کانبان، تایم‌لاین، تیم‌ها و گراف مسئولیت همهٔ سایت‌ها' },
+      { title: 'داشبورد مدیریت', url: '/dashboard/team-management', icon: 'teams', items: [],
+        description: 'تصویر کلی کار تیم، بار هر نفر، پروژه‌ها و روند پیشرفت' },
       { title: 'شروع راه‌اندازی', url: '/dashboard/onboarding', icon: 'sparkles', items: [],
         description: 'اتصال گوگل ← انتخاب سایت‌ها ← شروع تحلیل سئو (چهار قدم، بدون تنظیم فنی)' },
       { title: 'سایت‌ها', url: '/dashboard/sites', icon: 'sites', shortcut: ['s', 's'], items: [],

@@ -1,7 +1,8 @@
 export type PanelRole = 'admin' | 'analyst' | 'call_center';
 
-export function allowedPage(role: PanelRole, pathname: string): boolean {
+export function allowedPage(role: PanelRole, pathname: string, isSuperadmin = false): boolean {
   if (pathname === '/dashboard/profile') return true;
+  if (pathname === '/dashboard/team-management') return role === 'admin' && isSuperadmin;
   if (role === 'admin') return true;
   if (role === 'call_center') return pathname === '/dashboard/call-center';
   return ['/dashboard/overview', '/dashboard/reports', '/dashboard/traffic', '/dashboard/sites',

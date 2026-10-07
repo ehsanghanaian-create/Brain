@@ -39,7 +39,7 @@ def login(body: LoginIn, request: Request, eng: Engine = Depends(engine)) -> dic
         attempts = cx.execute(text("SELECT COUNT(*) FROM panel_login_attempts WHERE username=:username"),
                               {"username": username}).scalar_one()
         if attempts < 5:
-            row = cx.execute(text("SELECT id,username,full_name,email,role,date_calendar,active,password_hash FROM panel_users WHERE username=:username"),
+            row = cx.execute(text("SELECT id,username,full_name,email,role,date_calendar,is_superadmin,active,password_hash FROM panel_users WHERE username=:username"),
                              {"username": username}).mappings().first()
             if not row or not row["active"] or not verify_password(body.password, row["password_hash"]):
                 cx.execute(text("INSERT INTO panel_login_attempts(username,attempted_at) VALUES (:username,:at)"),
@@ -56,7 +56,8 @@ def login(body: LoginIn, request: Request, eng: Engine = Depends(engine)) -> dic
         raise HTTPException(429, "تلاش‌های ورود بیش از حد مجاز است؛ ۱۵ دقیقه بعد دوباره تلاش کنید")
     if not row:
         raise HTTPException(401, "نام کاربری یا گذرواژه نادرست است")
-    return {"token": token, "user": {key: row[key] for key in ("id", "username", "full_name", "email", "role", "date_calendar")}}
+    return {"token": token, "user": {**{key: row[key] for key in ("id", "username", "full_name", "email", "role", "date_calendar")},
+                                      "is_superadmin": bool(row["is_superadmin"])}}
 
 
 
@@ -66,7 +67,7 @@ def current_user(authorization: str | None = Header(default=None), eng: Engine =
         user = session_user(cx, token)
     if not user:
         raise HTTPException(401, "نشست معتبر نیست")
-    return {key: user[key] for key in ("id", "username", "full_name", "email", "role", "date_calendar")}
+    return {key: user[key] for key in ("id", "username", "full_name", "email", "role", "date_calendar", "is_superadmin")}
 
 
 @router.get("/me")

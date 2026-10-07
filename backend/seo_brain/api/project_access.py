@@ -31,13 +31,15 @@ def require_task_editor(cx, request: Request, site_id: str, item: dict) -> None:
     """An assigned task belongs to its assignee; an unassigned draft to its creator.
 
     Project leads may recover old unowned records without a recorded creator. A
-    lead or administrator does not implicitly gain control of somebody else's
-    task simply by opening the shared project board.
+    lead does not implicitly gain control of somebody else's task simply by
+    opening the shared project board. The designated superadministrator can.
     """
     actor = getattr(request.state, "panel_user", None)
     if actor is None:  # Existing trusted local integrations have no panel session.
         return
     responsibility = project_responsibility(cx, request, site_id)
+    if actor.get("is_superadmin"):
+        return
     if responsibility == "none":
         raise HTTPException(403, "project membership is required")
     editor_id = item["owner_id"] if item["owner_id"] is not None else item["created_by_id"]
@@ -48,10 +50,12 @@ def require_task_editor(cx, request: Request, site_id: str, item: dict) -> None:
 
 
 def require_task_creator(cx, request: Request, site_id: str, item: dict) -> None:
-    """Only the signed-in author may archive or restore a task, even after assignment."""
+    """Only the author or the designated superadministrator may archive or restore a task."""
     actor = getattr(request.state, "panel_user", None)
     if not actor:
         raise HTTPException(403, "فقط سازندهٔ تسک می‌تواند آن را به آرشیو ببرد")
+    if actor.get("is_superadmin"):
+        return
     if project_responsibility(cx, request, site_id) == "none" or item["created_by_id"] != actor["id"]:
         raise HTTPException(403, "فقط سازندهٔ تسک می‌تواند آن را به آرشیو ببرد")
 

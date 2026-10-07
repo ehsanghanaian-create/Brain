@@ -316,7 +316,7 @@ def log_time(site_id: str, item_id: int, body: TimeIn, request: Request,
         item = _item(cx, site_id, item_id)
         require_task_editor(cx, request, site_id, item)
         actor = getattr(request.state, "panel_user", None)
-        if actor and body.user_id != actor["id"]:
+        if actor and body.user_id != actor["id"] and not actor.get("is_superadmin"):
             raise HTTPException(403, "time can only be logged for the signed-in user")
         if not cx.execute(text("SELECT 1 FROM panel_users WHERE id=:id AND active=1"), {"id": body.user_id}).first():
             raise HTTPException(422, "time owner must be active")

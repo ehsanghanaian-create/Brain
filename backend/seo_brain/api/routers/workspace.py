@@ -284,6 +284,65 @@ def update_team(team_id: int, body: TeamPatch, request: Request, eng: Engine = D
     return {**dict(row), "active": bool(row["active"])}
 
 
+@router.get("/team-management")
+def team_management(request: Request, user_id: int | None = None, eng: Engine = Depends(engine)) -> dict:
+    """Administrator's live roster, workload and task activity across projects."""
+    actor = getattr(request.state, "panel_user", None)
+    if not actor or actor["role"] != "admin" or not actor["is_superadmin"]:
+        raise HTTPException(403, "فقط مدیر کل به مدیریت تیم دسترسی دارد")
+    stamp = datetime.now(timezone.utc)
+    args = {"now": stamp.isoformat(timespec="seconds"),
+            "week_end": (stamp + timedelta(days=7)).isoformat(timespec="seconds"),
+            "week_start": (stamp - timedelta(days=7)).isoformat(timespec="seconds"),
+            "selected_user": user_id}
+    with eng.connect() as cx:
+        people = cx.execute(text("""SELECT u.id,u.username,u.full_name,u.role,u.active,u.team_id,
+            t.name AS team_name,COUNT(w.id) AS total_tasks,
+            SUM(CASE WHEN w.status NOT IN ('verified','rejected','deferred') THEN 1 ELSE 0 END) AS open_tasks,
+            SUM(CASE WHEN w.status NOT IN ('verified','rejected','deferred') AND w.due_at<:now THEN 1 ELSE 0 END) AS overdue_tasks,
+            SUM(CASE WHEN w.status='blocked' THEN 1 ELSE 0 END) AS blocked_tasks,
+            SUM(CASE WHEN w.status NOT IN ('verified','rejected','deferred') AND w.due_at>=:now
+                AND w.due_at<:week_end THEN 1 ELSE 0 END) AS due_week_tasks,
+            SUM(CASE WHEN w.status='verified' THEN 1 ELSE 0 END) AS completed_tasks
+            FROM panel_users u LEFT JOIN panel_teams t ON t.id=u.team_id
+            LEFT JOIN work_items w ON w.owner_id=u.id AND w.deleted_at IS NULL
+            GROUP BY u.id ORDER BY u.active DESC,u.full_name"""), args).mappings().all()
+        assignments = cx.execute(text("""SELECT a.user_id,a.site_id,a.responsibility,s.name
+            FROM site_assignments a JOIN sites s ON s.site_id=a.site_id
+            ORDER BY s.name""")).mappings().all()
+        activity = cx.execute(text("""SELECT actor_id,COUNT(*) AS events_week,MAX(created_at) AS last_task_activity_at
+            FROM work_item_events WHERE actor_id IS NOT NULL GROUP BY actor_id""")).mappings().all()
+        week_activity = cx.execute(text("""SELECT actor_id,COUNT(*) AS events_week
+            FROM work_item_events WHERE actor_id IS NOT NULL AND created_at>=:week_start
+            GROUP BY actor_id"""), args).mappings().all()
+        summary = cx.execute(text("""SELECT COUNT(*) AS total_tasks,
+            SUM(CASE WHEN status NOT IN ('verified','rejected','deferred') THEN 1 ELSE 0 END) AS open_tasks,
+            SUM(CASE WHEN status NOT IN ('verified','rejected','deferred') AND due_at<:now THEN 1 ELSE 0 END) AS overdue_tasks,
+            SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END) AS blocked_tasks,
+            SUM(CASE WHEN status NOT IN ('verified','rejected','deferred') AND owner_id IS NULL THEN 1 ELSE 0 END) AS unassigned_tasks
+            FROM work_items WHERE deleted_at IS NULL"""), args).mappings().one()
+        recent = cx.execute(text("""SELECT e.id,e.actor_id,e.actor_username,e.event_type,e.created_at,
+            e.work_item_id,e.site_id,w.title AS task_title,s.name AS project_name
+            FROM work_item_events e JOIN work_items w ON w.id=e.work_item_id
+            JOIN sites s ON s.site_id=e.site_id
+            WHERE (:selected_user IS NULL OR e.actor_id=:selected_user)
+            ORDER BY e.id DESC LIMIT 30"""), args).mappings().all()
+    projects_by_user: dict[int, list[dict]] = {}
+    for row in assignments:
+        projects_by_user.setdefault(row["user_id"], []).append({
+            "site_id": row["site_id"], "name": row["name"], "responsibility": row["responsibility"]})
+    last_by_user = {row["actor_id"]: row["last_task_activity_at"] for row in activity}
+    week_by_user = {row["actor_id"]: row["events_week"] for row in week_activity}
+    count_keys = ("total_tasks", "open_tasks", "overdue_tasks", "blocked_tasks", "due_week_tasks", "completed_tasks")
+    return {"summary": {**{key: int(summary[key] or 0) for key in summary},
+                        "active_people": sum(bool(row["active"]) for row in people)},
+            "people": [{**dict(row), **{key: int(row[key] or 0) for key in count_keys},
+                        "active": bool(row["active"]), "projects": projects_by_user.get(row["id"], []),
+                        "events_week": int(week_by_user.get(row["id"], 0)),
+                        "last_task_activity_at": last_by_user.get(row["id"])} for row in people],
+            "recent": [dict(row) for row in recent]}
+
+
 @router.get("/overview")
 def overview(site_id: str | None = None, owner_id: int | None = None, team_id: int | None = None,
              status: str | None = None, priority: str | None = None, q: str | None = None,

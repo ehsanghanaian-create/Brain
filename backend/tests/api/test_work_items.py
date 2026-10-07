@@ -237,8 +237,8 @@ def test_manual_project_assignment_priority_archive_and_profile(client):
     with client.eng.begin() as cx:
         cx.execute(text("UPDATE panel_users SET username='analyst',password_hash=:hash WHERE id=1"),
                    {"hash": hash_password("analyst-password")})
-        cx.execute(text("""INSERT INTO panel_users(username,full_name,email,role,active,password_hash,created_at,updated_at)
-            VALUES ('manager','Manager','manager@example.com','admin',1,:hash,'2026-01-01','2026-01-01')"""),
+        cx.execute(text("""INSERT INTO panel_users(username,full_name,email,role,active,is_superadmin,password_hash,created_at,updated_at)
+            VALUES ('manager','Manager','manager@example.com','admin',1,1,:hash,'2026-01-01','2026-01-01')"""),
             {"hash": hash_password("manager-password")})
     admin_login = client.post("/api/v1/auth/login", json={"username": "manager", "password": "manager-password"})
     assert admin_login.status_code == 200, admin_login.text
@@ -302,7 +302,7 @@ def test_manual_project_assignment_priority_archive_and_profile(client):
     preview = next(row for row in client.get("/api/v1/work/board/all", headers=analyst).json()["items"] if row["id"] == task_id)
     assert preview["checklist_total"] == 1 and preview["checklist"][0]["title"] == "Check page indexability"
     assert client.patch(f"{base}/{task_id}/checklist/{step.json()['id']}", headers=admin,
-                        json={"done": True}).status_code == 403
+                        json={"done": True}).status_code == 200
     assert client.patch(f"{base}/{task_id}/checklist/{step.json()['id']}", headers=analyst,
                         json={"done": True}).status_code == 200
     preview = next(row for row in client.get("/api/v1/work/board/all", headers=analyst).json()["items"] if row["id"] == task_id)
@@ -339,7 +339,7 @@ def test_task_owner_isolation_subtasks_comments_and_calendar(client):
     with client.eng.begin() as cx:
         cx.execute(text("UPDATE panel_users SET username='worker',password_hash=:hash WHERE id=1"),
                    {"hash": hash_password("worker-password")})
-        for username, role in (("lead", "admin"), ("observer", "analyst")):
+        for username, role in (("lead", "analyst"), ("observer", "analyst")):
             cx.execute(text("""INSERT INTO panel_users(username,full_name,email,role,active,password_hash,created_at,updated_at)
                 VALUES (:name,:name,:email,:role,1,:hash,'2026-01-01','2026-01-01')"""),
                 {"name": username, "email": username + "@example.com", "role": role,
@@ -349,8 +349,9 @@ def test_task_owner_isolation_subtasks_comments_and_calendar(client):
         assert response.status_code == 200, response.text
         return {"Authorization": "Bearer " + response.json()["token"]}
     lead, worker, observer = auth("lead"), auth("worker"), auth("observer")
-    assert client.put("/api/v1/work/projects/demo/members/3", headers=lead,
-                      json={"user_id": 3, "responsibility": "viewer"}).status_code == 200
+    with client.eng.begin() as cx:
+        cx.execute(text("INSERT INTO site_assignments(site_id,user_id,responsibility,created_at) VALUES ('demo',2,'lead','2026-01-01')"))
+        cx.execute(text("INSERT INTO site_assignments(site_id,user_id,responsibility,created_at) VALUES ('demo',3,'viewer','2026-01-01')"))
     root = "/api/v1/sites/demo/work"
     draft = client.post(root, headers=lead, json={"title": "Personal draft"}).json()
     assert client.patch(f"{root}/{draft['id']}", headers=worker, json={"title": "Hijacked draft"}).status_code == 403
@@ -448,7 +449,7 @@ def test_task_handoff_notification_archive_and_period_report(client):
     with client.eng.begin() as cx:
         cx.execute(text("UPDATE panel_users SET username='worker',password_hash=:hash WHERE id=1"),
                    {"hash": hash_password("worker-password")})
-        for username, role in (("lead", "admin"), ("next", "analyst")):
+        for username, role in (("lead", "analyst"), ("next", "analyst")):
             cx.execute(text("""INSERT INTO panel_users(username,full_name,email,role,active,password_hash,created_at,updated_at)
                 VALUES (:name,:name,:email,:role,1,:hash,'2026-01-01','2026-01-01')"""),
                 {"name": username, "email": username + "@example.com", "role": role,
@@ -460,6 +461,8 @@ def test_task_handoff_notification_archive_and_period_report(client):
         return {"Authorization": "Bearer " + response.json()["token"]}
 
     lead, worker, next_user = auth("lead"), auth("worker"), auth("next")
+    with client.eng.begin() as cx:
+        cx.execute(text("INSERT INTO site_assignments(site_id,user_id,responsibility,created_at) VALUES ('demo',2,'lead','2026-01-01')"))
     base = "/api/v1/sites/demo/work"
     bad = client.post(base, headers=lead, json={"title": "Invalid task", "subtasks": ["x"]})
     assert bad.status_code == 422
@@ -559,3 +562,59 @@ def test_personal_and_delegated_boards_keep_task_ownership_separate(client):
     assert client.post(f"{base}/{to_worker['id']}/restore", headers=manager).status_code == 200
     assert {row["id"] for row in client.get("/api/v1/work/board/delegated", headers=manager).json()["items"]} == {
         to_worker["id"], second_to_worker["id"]}
+
+
+def test_manager_dashboard_and_admin_task_override(client):
+    with client.eng.begin() as cx:
+        cx.execute(text("UPDATE panel_users SET username='worker',password_hash=:hash WHERE id=1"),
+                   {"hash": hash_password("worker-password")})
+        for username, role, owner in (("manager", "admin", 1), ("other-admin", "admin", 0),
+                                      ("next", "analyst", 0)):
+            cx.execute(text("""INSERT INTO panel_users(username,full_name,email,role,active,is_superadmin,
+                password_hash,created_at,updated_at)
+                VALUES (:name,:name,:email,:role,1,:owner,:hash,'2026-01-01','2026-01-01')"""),
+                {"name": username, "email": username + "@example.com", "role": role,
+                 "owner": owner, "hash": hash_password(username + "-password")})
+
+    def auth(name):
+        result = client.post("/api/v1/auth/login", json={"username": name, "password": name + "-password"})
+        assert result.status_code == 200, result.text
+        return {"Authorization": "Bearer " + result.json()["token"]}
+
+    manager, worker, other_admin, next_user = (auth(name) for name in ("manager", "worker", "other-admin", "next"))
+    assert client.get("/api/v1/auth/me", headers=manager).json()["is_superadmin"] is True
+    assert client.get("/api/v1/auth/me", headers=other_admin).json()["is_superadmin"] is False
+    assert client.get("/api/v1/work/team-management", headers=other_admin).status_code == 403
+    assert client.get("/api/v1/work/team-management", headers=worker).status_code == 403
+    assert client.patch("/api/v1/call-center/users/2", headers=other_admin,
+                        json={"full_name": "Taken over"}).status_code == 403
+    assert client.patch("/api/v1/call-center/users/2", headers=manager,
+                        json={"active": False}).status_code == 422
+    assert client.put("/api/v1/work/projects/demo/members/1", headers=manager,
+                      json={"user_id": 1, "responsibility": "lead"}).status_code == 200
+    base = "/api/v1/sites/demo/work"
+    created = client.post(base, headers=worker, json={"title": "Worker task", "owner_id": 1,
+                                                     "subtasks": ["Worker child"]})
+    assert created.status_code == 201, created.text
+    task = created.json()
+    child = client.get(f"{base}/{task['id']}/subtasks", headers=manager).json()[0]
+    dashboard = client.get("/api/v1/work/team-management?user_id=1", headers=manager)
+    assert dashboard.status_code == 200, dashboard.text
+    person = next(row for row in dashboard.json()["people"] if row["id"] == 1)
+    assert person["open_tasks"] == 2
+    assert dashboard.json()["summary"]["open_tasks"] >= 2
+    assert any(row["work_item_id"] == task["id"] for row in dashboard.json()["recent"])
+    assert client.patch(f"{base}/{task['id']}", headers=other_admin,
+                        json={"title": "Unauthorized edit"}).status_code == 403
+    assert client.delete(f"{base}/{task['id']}", headers=other_admin).status_code == 403
+    assert client.patch(f"{base}/{task['id']}", headers=manager,
+                        json={"title": "Manager reviewed", "priority": "critical", "owner_id": 4}).status_code == 200
+    assert client.patch(f"{base}/{task['id']}", headers=worker, json={"title": "Old owner edit"}).status_code == 403
+    assert client.post(f"/api/v1/work/projects/demo/tasks/{task['id']}/time", headers=manager,
+                       json={"user_id": 1, "minutes": 30, "work_date": "2026-01-01", "note": "review"}).status_code == 201
+    assert client.delete(f"{base}/{task['id']}", headers=next_user).status_code == 403
+    assert client.delete(f"{base}/{task['id']}", headers=manager).status_code == 200
+    deleted = {row["id"] for row in client.get("/api/v1/work/archive?kind=deleted", headers=manager).json()}
+    assert {task["id"], child["id"]} <= deleted
+    assert client.post(f"{base}/{task['id']}/restore", headers=manager).status_code == 200
+    assert client.get(f"{base}/{task['id']}/subtasks", headers=next_user).status_code == 200

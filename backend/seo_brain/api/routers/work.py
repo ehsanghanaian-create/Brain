@@ -445,7 +445,7 @@ def bulk_update_work(site_id: str, body: BulkWorkIn, request: Request,
             raise HTTPException(404, "one or more work items are outside this project")
         for row in rows:
             require_task_editor(cx, request, site_id, row)
-            if "owner_id" in patch and row["owner_id"] is not None:
+            if "owner_id" in patch and row["owner_id"] is not None and not (getattr(request.state, "panel_user", None) or {}).get("is_superadmin"):
                 raise HTTPException(403, "assigned work cannot be reassigned in bulk")
             _validate(cx, site_id, {**dict(row), **patch}, row["id"],
                       strict_owner=getattr(request.state, "panel_user", None) is not None and "owner_id" in patch)
@@ -480,7 +480,8 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
         if not current:
             raise HTTPException(404, "work item not found")
         require_task_editor(cx, request, site_id, current)
-        if "owner_id" in patch and current["owner_id"] is not None and patch["owner_id"] != current["owner_id"]:
+        if ("owner_id" in patch and current["owner_id"] is not None and patch["owner_id"] != current["owner_id"]
+                and not (getattr(request.state, "panel_user", None) or {}).get("is_superadmin")):
             raise HTTPException(403, "an assigned task cannot be reassigned by another user")
         before = dict(current)
         merged = {**before, **patch}
@@ -551,9 +552,10 @@ def handoff_work(site_id: str, item_id: int, body: HandoffIn, request: Request,
         if not current:
             raise HTTPException(404, "work item not found")
         require_task_editor(cx, request, site_id, current)
-        if current["owner_id"] != actor["id"] or current["status"] in ("verified", "rejected", "deferred"):
+        if (current["status"] in ("verified", "rejected", "deferred") or current["owner_id"] is None
+                or (current["owner_id"] != actor["id"] and not actor.get("is_superadmin"))):
             raise HTTPException(403, "only the active assignee can hand off this task")
-        if body.owner_id == actor["id"]:
+        if body.owner_id == current["owner_id"]:
             raise HTTPException(422, "choose a different assignee")
         _validate(cx, site_id, {**dict(current), "owner_id": body.owner_id}, item_id, strict_owner=True)
         descendants = cx.execute(text("""WITH RECURSIVE tree(id) AS (
@@ -562,7 +564,7 @@ def handoff_work(site_id: str, item_id: int, body: HandoffIn, request: Request,
             WHERE child.site_id=:site AND child.deleted_at IS NULL
         ) SELECT w.* FROM work_items w JOIN tree ON tree.id=w.id
           WHERE w.owner_id=:owner AND w.status NOT IN ('verified','rejected','deferred')
-          ORDER BY w.id"""), {"id": item_id, "site": site_id, "owner": actor["id"]}).mappings().all()
+          ORDER BY w.id"""), {"id": item_id, "site": site_id, "owner": current["owner_id"]}).mappings().all()
         stamp = now()
         for item in descendants:
             cx.execute(text("""UPDATE work_items SET owner_id=:owner,status='assigned',updated_at=:at
@@ -596,7 +598,7 @@ def delete_work(site_id: str, item_id: int, request: Request, eng: Engine = Depe
             WHERE child.site_id=:site AND child.deleted_at IS NULL
         ) SELECT w.id,w.created_by_id FROM work_items w JOIN tree ON tree.id=w.id
           WHERE w.deleted_at IS NULL"""), {"id": item_id, "site": site_id}).mappings().all()
-        if any(child["created_by_id"] != actor["id"] for child in descendants):
+        if actor and not actor.get("is_superadmin") and any(child["created_by_id"] != actor["id"] for child in descendants):
             raise HTTPException(409, "این کار زیرتسکی دارد که شخص دیگری ساخته است؛ سازندهٔ آن باید ابتدا زیرتسک را به آرشیو ببرد")
         for descendant_id in descendants:
             cx.execute(text("""UPDATE work_items SET deleted_at=:at,deleted_by_id=:actor,

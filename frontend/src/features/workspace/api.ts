@@ -30,6 +30,18 @@ export type CommandWorkItem = WorkItem & {
 export type WorkTeam = { id: number; name: string; color: string; description: string; active: boolean;
   members: number; open_work: number };
 export type WorkPerson = { id: number; full_name: string; active: boolean; team_id: number | null; role: string };
+export type ManagementPerson = WorkPerson & { username: string; team_name: string | null;
+  total_tasks: number; open_tasks: number; overdue_tasks: number; blocked_tasks: number;
+  due_week_tasks: number; completed_tasks: number; events_week: number;
+  last_task_activity_at: string | null;
+  projects: { site_id: string; name: string; responsibility: 'lead' | 'contributor' | 'viewer' }[] };
+export type ManagementOverview = {
+  summary: { total_tasks: number; open_tasks: number; overdue_tasks: number;
+    blocked_tasks: number; unassigned_tasks: number; active_people: number };
+  people: ManagementPerson[];
+  recent: { id: number; actor_id: number | null; actor_username: string | null;
+    event_type: string; created_at: string; work_item_id: number; site_id: string;
+    task_title: string; project_name: string }[] };
 export type ProjectSummary = { site_id: string; name: string; canonical_url: string; kind: 'site' | 'manual'; lead_name: string | null; lead_id: number | null; members: number; tasks: number;
   open_tasks: number; blocked_tasks: number; unassigned_tasks: number; overdue_tasks: number;
   progress_percent: number; estimated_hours: number; spent_hours: number; milestones: number;
@@ -74,7 +86,8 @@ export type WorkReport = { period: 'week' | 'month'; start_day: string; end_day:
 export type CommandFilters = { site_id?: string; owner_id?: number; team_id?: number;
   status?: string; priority?: string; q?: string; created_by_id?: number; limit?: number; offset?: number };
 export const commandApi = {
-  me: () => api<{ id: number; role: 'admin' | 'analyst' | 'call_center' }>('/auth/me'),
+  me: () => api<{ id: number; role: 'admin' | 'analyst' | 'call_center'; is_superadmin: boolean }>('/auth/me'),
+  management: (userId?: number) => api<ManagementOverview>(`/work/team-management${userId ? `?user_id=${userId}` : ''}`),
   overview: (filters: CommandFilters = {}) => {
     const query = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== '') query.set(key, String(value)); });

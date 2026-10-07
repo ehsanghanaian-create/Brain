@@ -28,10 +28,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const backend = (process.env.SEO_BRAIN_API_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
   const me = await fetch(`${backend}/api/v1/auth/me`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
   if (!me.ok) redirect('/login');
-  const user = await me.json() as { username: string; full_name: string; role: PanelRole; date_calendar: DateCalendar };
+  const user = await me.json() as { username: string; full_name: string; role: PanelRole; date_calendar: DateCalendar; is_superadmin: boolean };
   return (
     <DatePreferenceProvider initialCalendar={user.date_calendar}>
-    <KBar role={user.role}>
+    <KBar role={user.role} isSuperadmin={user.is_superadmin}>
       <SidebarProvider defaultOpen={defaultOpen}>
         <a
           href='#main-content'

@@ -13,8 +13,8 @@ export async function proxy(req: NextRequest) {
       headers: { Authorization: `Bearer ${token}` }, cache: 'no-store'
     });
     if (!res.ok) return NextResponse.redirect(new URL('/login', req.url));
-    const user = await res.json() as { role: PanelRole };
-    if (!allowedPage(user.role, path === '/api/ads-data/access-status' ? '/ads-data' : path)) {
+    const user = await res.json() as { role: PanelRole; is_superadmin: boolean };
+    if (!allowedPage(user.role, path === '/api/ads-data/access-status' ? '/ads-data' : path, user.is_superadmin)) {
       if (path.startsWith('/api/')) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
       return NextResponse.redirect(new URL(homeFor(user.role), req.url));
     }

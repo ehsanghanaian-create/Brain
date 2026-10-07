@@ -9,7 +9,7 @@ import useThemeSwitching from './use-theme-switching';
 import { useFilteredNavGroups } from '@/hooks/use-nav';
 import { allowedPage, type PanelRole } from '@/lib/panel-access';
 
-export default function KBar({ children, role }: { children: React.ReactNode; role: PanelRole }) {
+export default function KBar({ children, role, isSuperadmin }: { children: React.ReactNode; role: PanelRole; isSuperadmin: boolean }) {
   const router = useRouter();
   const filteredGroups = useFilteredNavGroups(navGroups);
 
@@ -20,7 +20,7 @@ export default function KBar({ children, role }: { children: React.ReactNode; ro
       router.push(url);
     };
 
-    const allItems = filteredGroups.flatMap((group) => group.items).filter((item) => allowedPage(role, item.url));
+    const allItems = filteredGroups.flatMap((group) => group.items).filter((item) => allowedPage(role, item.url, isSuperadmin));
 
     return allItems.flatMap((navItem) => {
       // Only include base action if the navItem has a real URL and is not just a container
@@ -52,7 +52,7 @@ export default function KBar({ children, role }: { children: React.ReactNode; ro
       // Return only valid actions (ignoring null base actions for containers)
       return baseAction ? [baseAction, ...childActions] : childActions;
     });
-  }, [router, filteredGroups, role]);
+  }, [router, filteredGroups, role, isSuperadmin]);
 
   return (
     <KBarProvider actions={actions}>

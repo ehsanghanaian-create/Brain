@@ -337,9 +337,15 @@ def update_user(user_id: int, body: UserPatch, request: Request, eng: Engine = D
     if "active" in values:
         values["active"] = int(values["active"])
     with eng.begin() as cx:
-        current_user = cx.execute(text("SELECT id,role,active FROM panel_users WHERE id=:id"), {"id": user_id}).mappings().first()
+        current_user = cx.execute(text("SELECT id,role,active,is_superadmin FROM panel_users WHERE id=:id"), {"id": user_id}).mappings().first()
         if not current_user:
             raise ApiError(404, "کاربر پیدا نشد", code="not_found")
+        actor = getattr(request.state, "panel_user", None)
+        if current_user["is_superadmin"]:
+            if not actor or actor["id"] != user_id:
+                raise ApiError(403, "حساب مدیر کل فقط توسط خودش قابل ویرایش است", code="forbidden")
+            if values.get("role", "admin") != "admin" or values.get("active", 1) == 0:
+                raise ApiError(422, "حساب مدیر کل باید فعال و دارای نقش مدیر بماند", code="validation_error")
         if current_user["role"] == "admin" and current_user["active"] and (values.get("role", "admin") != "admin" or values.get("active", 1) == 0):
             if cx.execute(text("SELECT COUNT(*) FROM panel_users WHERE role='admin' AND active=1")).scalar_one() <= 1:
                 raise ApiError(422, "آخرین مدیر فعال را نمی‌توان غیرفعال کرد", code="validation_error")

@@ -98,8 +98,6 @@ export function WorkCommandCenter() {
   const [showExecutionDetails, setShowExecutionDetails] = useState(false);
   const [form, setForm] = useState<TaskForm>(blankForm);
   const [saving, setSaving] = useState(false);
-  const [draftSubtasks, setDraftSubtasks] = useState<string[]>([]);
-  const [draftSubtask, setDraftSubtask] = useState('');
   const [handoffOpen, setHandoffOpen] = useState(false);
   const [handoffOwner, setHandoffOwner] = useState('');
   const [handoffReason, setHandoffReason] = useState('');
@@ -203,7 +201,7 @@ export function WorkCommandCenter() {
   const visibleArchiveItems = archiveLoadedKind === archiveKind ? archiveItems : [];
 
   function openTask(item: CommandWorkItem | 'new') {
-    setShowExecutionDetails(false); setEditing(item); setDraftSubtasks([]); setDraftSubtask('');
+    setShowExecutionDetails(false); setEditing(item);
     setHandoffOpen(false); setHandoffOwner(''); setHandoffReason('');
     setForm(item === 'new' ? { ...blankForm, site_id: (filters.site_id && canLead(filters.site_id) ? filters.site_id : projects.find((project) => canLead(project.site_id))?.site_id) || '' } : {
       site_id: item.site_id, title: item.title, description: item.description, url: item.url || '',
@@ -229,7 +227,7 @@ export function WorkCommandCenter() {
       blocked_reason: form.blocked_reason.trim() || null, verification_note: form.verification_note.trim() || null,
       note: form.note.trim() || null };
     try {
-      if (editing === 'new') await commandApi.createWork(form.site_id, { ...body, subtasks: draftSubtasks });
+      if (editing === 'new') await commandApi.createWork(form.site_id, body);
       else {
         const permitted = editing.owner_id === null ? body : Object.fromEntries(Object.entries(body).filter(([key]) => key !== 'owner_id'));
         const changed = Object.fromEntries(Object.entries(permitted).filter(([key, value]) => {
@@ -249,12 +247,6 @@ export function WorkCommandCenter() {
   async function completeTask(item: CommandWorkItem) {
     try { await commandApi.updateWork(item, { status: 'verified' }); setEditing(null); await refresh(true); toast.success('کار انجام شد'); }
     catch (cause) { toast.error(cause instanceof Error ? cause.message : 'تکمیل کار انجام نشد'); }
-  }
-  function addDraftSubtask() {
-    const title = draftSubtask.trim();
-    if (title.length < 3) { toast.error('عنوان زیرکار باید دست‌کم سه حرف داشته باشد'); return; }
-    if (draftSubtasks.length >= 30) { toast.error('حداکثر ۳۰ زیرکار برای هر کار مجاز است'); return; }
-    setDraftSubtasks((current) => [...current, title]); setDraftSubtask('');
   }
   async function handoffTask(item: CommandWorkItem) {
     if (!handoffOwner || handoffReason.trim().length < 3) { toast.error('مسئول جدید و دلیل ارجاع را مشخص کنید'); return; }
@@ -454,7 +446,9 @@ export function WorkCommandCenter() {
         <div className='min-h-20 whitespace-pre-wrap rounded-lg border bg-muted/20 p-3 text-sm leading-7'>{editing.description || 'توضیحی برای این تسک ثبت نشده است.'}</div>
         {editing.url && <a className='text-primary block break-all text-sm underline' href={editing.url} target='_blank' rel='noreferrer'>{editing.url}</a>}
         {canDelete(editing) && <Button variant='outline' className='text-rose-600' onClick={() => void deleteTask(editing)}>حذف و انتقال به آرشیو</Button>}
-        <TaskDiscussion key={editing.id} item={editing} canEdit={false} onOpenTask={openTask} onChanged={() => void refresh(true)} />
+        <TaskDiscussion key={editing.id} item={editing} canEdit={false}
+          canComment={canEdit || Boolean(projects.find((project) => project.site_id === editing.site_id)?.my_responsibility)}
+          onOpenTask={openTask} onChanged={() => void refresh(true)} />
       </div> : editing && <div className='grid gap-3 sm:grid-cols-2'>
         <label className='space-y-1 text-xs'>پروژه<NativeSelect disabled={editing !== 'new'} value={form.site_id} onChange={(e) => setForm((f) => ({ ...f, site_id: e.target.value }))}><NativeSelectOption value=''>انتخاب پروژه</NativeSelectOption>{projects.filter((project) => canLead(project.site_id) || editing !== 'new').map((project) => <NativeSelectOption key={project.site_id} value={project.site_id}>{project.name}</NativeSelectOption>)}</NativeSelect></label>
         <label className='space-y-1 text-xs'>عنوان<Input disabled={!canManageEditing} value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} /></label>
@@ -462,7 +456,10 @@ export function WorkCommandCenter() {
         <label className='space-y-1 text-xs'>وضعیت<NativeSelect disabled={!canUpdateEditing} value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value as WorkStatus }))}>{(Object.keys(statusLabel) as WorkStatus[]).filter((status) => canManageEditing || !['verified', 'rejected', 'deferred', 'approved', 'assigned'].includes(status)).map((status) => <NativeSelectOption key={status} value={status}>{statusLabel[status]}</NativeSelectOption>)}</NativeSelect></label>
         <label className='space-y-1 text-xs'>اولویت<NativeSelect disabled={!canManageEditing} value={form.priority} onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value as WorkPriority }))}>{(Object.keys(priorityLabel) as WorkPriority[]).map((priority) => <NativeSelectOption key={priority} value={priority}>{priorityLabel[priority]}</NativeSelectOption>)}</NativeSelect></label>
         <label className='space-y-1 text-xs'>موعد اختیاری<UserDateInput label='موعد کار' mode='datetime-local' disabled={!canManageEditing} value={form.due_at} onChange={(value) => setForm((f) => ({ ...f, due_at: value }))} /></label>
-        {editing === 'new' && <div className='space-y-2 rounded-lg border p-3 sm:col-span-2'><strong className='text-sm'>زیرکارها</strong><p className='text-muted-foreground text-xs'>زیرکارها همراه همین تسک ساخته می‌شوند و مسئول و اولویت آن را می‌گیرند.</p><div className='flex gap-2'><Input aria-label='عنوان زیرکار جدید' value={draftSubtask} onChange={(event) => setDraftSubtask(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addDraftSubtask(); } }} placeholder='مثلاً بررسی صفحات اصلی' /><Button type='button' variant='outline' onClick={addDraftSubtask}>افزودن</Button></div>{draftSubtasks.map((title, index) => <div key={`${title}-${index}`} className='flex items-center justify-between rounded-md bg-muted/50 px-2 py-1 text-xs'><span>{index + 1}. {title}</span><button type='button' className='text-rose-600 hover:underline' onClick={() => setDraftSubtasks((current) => current.filter((_, position) => position !== index))}>حذف</button></div>)}</div>}
+        {editing !== 'new' && <TaskDiscussion key={editing.id} item={editing} canEdit={canUpdate(editing)}
+          canComment={canEdit || Boolean(projects.find((project) => project.site_id === editing.site_id)?.my_responsibility)}
+          onOpenTask={openTask} onChanged={() => void refresh(true)} />}
+        {editing === 'new' && <p className='text-muted-foreground text-xs sm:col-span-2'>گفت‌وگو و زیرتسک‌های اختیاری پس از ذخیرهٔ کار در همین کارت فعال می‌شوند.</p>}
         <details className='sm:col-span-2 rounded-lg border p-3'><summary className='cursor-pointer text-sm font-medium'>جزئیات بیشتر · شرح، لینک، زمان‌بندی و زیرکار</summary><div className='mt-3 grid gap-3 sm:grid-cols-2'>
         <label className='space-y-1 text-xs sm:col-span-2'>شرح کار<Textarea disabled={!canManageEditing} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} /></label>
         <label className='space-y-1 text-xs sm:col-span-2'>URL مرتبط<Input disabled={!canManageEditing} dir='ltr' value={form.url} onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))} /></label>
@@ -475,10 +472,9 @@ export function WorkCommandCenter() {
         </div></details>
         {form.status === 'blocked' && <label className='space-y-1 text-xs sm:col-span-2'>دلیل مانع<Textarea disabled={!canUpdateEditing} value={form.blocked_reason} onChange={(e) => setForm((f) => ({ ...f, blocked_reason: e.target.value }))} /></label>}
         {form.status === 'verified' && <label className='space-y-1 text-xs sm:col-span-2'>نتیجهٔ سنجش<Textarea disabled={!canManageEditing} value={form.verification_note} onChange={(e) => setForm((f) => ({ ...f, verification_note: e.target.value }))} /></label>}
-        {canUpdateEditing && <label className='space-y-1 text-xs sm:col-span-2'>یادداشت این تغییر<Input value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder='پیشرفت، مانع یا تصمیم انجام‌شده را ثبت کنید' /></label>}
+        {canUpdateEditing && <label htmlFor='task-change-note' className='space-y-1 text-xs sm:col-span-2'>یادداشت این تغییر<Textarea id='task-change-note' rows={4} maxLength={2000} value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder='پیشرفت، مانع یا تصمیم انجام‌شده را ثبت کنید' /><span className='text-muted-foreground block'>این یادداشت در گفت‌وگوی مشترک کار هم نمایش داده می‌شود.</span></label>}
         <div className='flex flex-wrap gap-2 sm:col-span-2'>{canUpdateEditing && <Button onClick={saveTask} disabled={saving}>{saving ? 'در حال ذخیره…' : 'ذخیرهٔ کار'}</Button>}{editing !== 'new' && canUpdate(editing) && editing.status !== 'verified' && <Button variant='outline' onClick={() => void completeTask(editing)}>✓ انجام شد</Button>}{editing !== 'new' && canDelete(editing) && <Button variant='outline' className='text-rose-600' onClick={() => void deleteTask(editing)}>حذف و انتقال به آرشیو</Button>}</div>
         {editing !== 'new' && editing.owner_id === meId && !closedStatuses.has(editing.status) && <div className='sm:col-span-2'><Button type='button' variant='outline' onClick={() => setHandoffOpen((current) => !current)}>{handoffOpen ? 'بستن ارجاع' : 'نمی‌توانم انجام دهم · ارجاع به همکار'}</Button>{handoffOpen && <div className='mt-2 grid gap-2 rounded-lg border border-amber-500/30 p-3 sm:grid-cols-2'><label className='space-y-1 text-xs'>مسئول جدید<NativeSelect value={handoffOwner} onChange={(event) => setHandoffOwner(event.target.value)}><NativeSelectOption value=''>انتخاب همکار</NativeSelectOption>{people.filter((person) => person.active && person.role !== 'call_center' && person.id !== meId).map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect></label><label className='space-y-1 text-xs sm:col-span-2'>دلیل ارجاع<Textarea value={handoffReason} onChange={(event) => setHandoffReason(event.target.value)} placeholder='چرا این کار را نمی‌توانید ادامه دهید و همکار بعدی باید چه بداند؟' /></label><Button type='button' disabled={saving} onClick={() => void handoffTask(editing)}>ثبت ارجاع و اطلاع به مسئول جدید</Button></div>}</div>}
-        {editing !== 'new' && <TaskDiscussion key={editing.id} item={editing} canEdit={canUpdate(editing)} onOpenTask={openTask} onChanged={() => void refresh(true)} />}
         {editing !== 'new' && <details key={editing.id} onToggle={(event) => setShowExecutionDetails(event.currentTarget.open)} className='sm:col-span-2 rounded-lg border p-3'><summary className='cursor-pointer text-sm font-medium'>جزئیات اجرایی · چک‌لیست، وابستگی و زمان</summary>{showExecutionDetails && <div className='mt-3'><TaskExecutionDetails item={editing} items={data?.items || []} people={people} canEdit={canManageEditing} canLogTime={canUpdate(editing)} canLogOthers={false} meId={meId} onChanged={() => void refresh(true)} /></div>}</details>}
       </div>}
     </DialogContent></Dialog>

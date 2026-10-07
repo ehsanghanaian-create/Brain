@@ -63,7 +63,7 @@ class WorkIn(BaseModel):
     due_at: datetime | None = None
     blocked_reason: str | None = Field(default=None, max_length=1000)
     verification_note: str | None = Field(default=None, max_length=3000)
-    note: str | None = Field(default=None, max_length=1000)
+    note: str | None = Field(default=None, max_length=2000)
     subtasks: list[str] = Field(default_factory=list, max_length=30)
 
 
@@ -84,7 +84,7 @@ class WorkPatch(BaseModel):
     due_at: datetime | None = None
     blocked_reason: str | None = Field(default=None, max_length=1000)
     verification_note: str | None = Field(default=None, max_length=3000)
-    note: str | None = Field(default=None, max_length=1000)
+    note: str | None = Field(default=None, max_length=2000)
     board_order: float | None = Field(default=None, ge=-1000000000, le=1000000000)
 
 
@@ -169,14 +169,86 @@ def add_comment(site_id: str, item_id: int, body: CommentIn, request: Request,
         actor = getattr(request.state, "panel_user", None)
         _record(cx, site_id, item_id, "comment", dict(item), dict(item), message, actor)
         if actor:
-            for recipient in {item["owner_id"], item["created_by_id"]} - {None, actor["id"]}:
-                _notify(cx, recipient, item_id, "comment", "discussion", item["title"],
+            root_id = _discussion_root(cx, site_id, item_id)
+            root = cx.execute(text("SELECT id,title,owner_id,created_by_id FROM work_items WHERE id=:id"),
+                              {"id": root_id}).mappings().one()
+            mentioned = _mentioned_users(cx, site_id, message) - {actor["id"]}
+            for recipient in ({item["owner_id"], item["created_by_id"],
+                               root["owner_id"], root["created_by_id"]} - {None, actor["id"]} - mentioned):
+                _notify(cx, recipient, root_id, "comment", "discussion", root["title"],
                         f"{actor['full_name']} در این کار پیام گذاشت")
         row = cx.execute(text("""SELECT id,event_type,note,actor_id,actor_username,created_at
             FROM work_item_events WHERE work_item_id=:id ORDER BY id DESC LIMIT 1"""),
             {"id": item_id}).mappings().one()
     request.state.audit_fields = ["comment"]
     return dict(row)
+
+
+def _discussion_root(cx, site_id: str, item_id: int) -> int:
+    """Resolve the current hierarchy without trusting a client supplied root."""
+    current = item_id
+    seen: set[int] = set()
+    while current not in seen:
+        seen.add(current)
+        row = cx.execute(text("SELECT parent_id FROM work_items WHERE site_id=:site AND id=:id"),
+                         {"site": site_id, "id": current}).mappings().first()
+        if not row:
+            raise HTTPException(404, "work item not found")
+        if row["parent_id"] is None:
+            return current
+        current = row["parent_id"]
+    raise HTTPException(409, "work hierarchy contains a cycle")
+
+
+def _mentioned_users(cx, site_id: str, message: str) -> set[int]:
+    usernames = {name.lower().rstrip(".-") for name in re.findall(r"(?<![\w@])@([A-Za-z0-9_.-]{3,40})\b", message)}
+    if not usernames:
+        return set()
+    rows = cx.execute(text("""SELECT u.id,u.username FROM panel_users u
+        WHERE u.active=1 AND (u.role='admin' OR EXISTS
+          (SELECT 1 FROM site_assignments a WHERE a.site_id=:site AND a.user_id=u.id))"""),
+        {"site": site_id}).mappings().all()
+    return {row["id"] for row in rows if row["username"] and row["username"].lower() in usernames}
+
+
+@router.get("/{item_id}/discussion")
+def discussion(site_id: str, item_id: int, eng: Engine = Depends(engine)) -> dict:
+    """One conversation for a task tree, including earlier notes and child comments."""
+    with eng.connect() as cx:
+        root_id = _discussion_root(cx, site_id, item_id)
+        root = cx.execute(text("SELECT title FROM work_items WHERE id=:id"), {"id": root_id}).scalar_one()
+        rows = cx.execute(text("""WITH RECURSIVE tree(id) AS (
+            SELECT id FROM work_items WHERE site_id=:site AND id=:root
+            UNION ALL
+            SELECT child.id FROM work_items child JOIN tree ON child.parent_id=tree.id
+            WHERE child.site_id=:site
+        )
+        SELECT e.id,e.event_type,e.note,e.actor_id,e.actor_username,e.created_at,
+               e.work_item_id,w.title AS task_title,u.full_name AS actor_name
+        FROM work_item_events e JOIN tree ON tree.id=e.work_item_id
+        JOIN work_items w ON w.id=e.work_item_id
+        LEFT JOIN panel_users u ON u.id=e.actor_id
+        WHERE e.site_id=:site AND e.note IS NOT NULL AND TRIM(e.note)<>''
+        ORDER BY e.id DESC LIMIT 300"""), {"site": site_id, "root": root_id}).mappings().all()
+        activity = cx.execute(text("""WITH RECURSIVE tree(id) AS (
+            SELECT id FROM work_items WHERE site_id=:site AND id=:root
+            UNION ALL
+            SELECT child.id FROM work_items child JOIN tree ON child.parent_id=tree.id
+            WHERE child.site_id=:site
+        )
+        SELECT e.id,e.event_type,e.actor_username,e.created_at,e.work_item_id,w.title AS task_title
+        FROM work_item_events e JOIN tree ON tree.id=e.work_item_id
+        JOIN work_items w ON w.id=e.work_item_id
+        WHERE e.site_id=:site AND e.event_type<>'comment'
+        ORDER BY e.id DESC LIMIT 80"""), {"site": site_id, "root": root_id}).mappings().all()
+        participants = cx.execute(text("""SELECT u.id,u.username,u.full_name FROM panel_users u
+            WHERE u.active=1 AND u.username IS NOT NULL AND (u.role='admin' OR EXISTS
+              (SELECT 1 FROM site_assignments a WHERE a.site_id=:site AND a.user_id=u.id))
+            ORDER BY u.full_name"""), {"site": site_id}).mappings().all()
+    return {"root_id": root_id, "root_title": root,
+            "messages": [dict(row) for row in reversed(rows)],
+            "activity": [dict(row) for row in activity],
+            "participants": [dict(row) for row in participants]}
 
 
 class LabelIn(BaseModel):
@@ -215,6 +287,12 @@ def _record(cx, site_id: str, item_id: int, event_type: str, before: dict | None
          "after": json.dumps(after, ensure_ascii=False), "note": note,
          "actor_id": actor["id"] if actor else None, "actor_username": actor["username"] if actor else None,
          "at": now()})
+    if note and actor:
+        root_id = _discussion_root(cx, site_id, item_id)
+        root_title = cx.execute(text("SELECT title FROM work_items WHERE id=:id"), {"id": root_id}).scalar_one()
+        for recipient in _mentioned_users(cx, site_id, note) - {actor["id"]}:
+            _notify(cx, recipient, root_id, "mention", "discussion", root_title,
+                    f"{actor['full_name']} شما را در گفت‌وگوی این کار منشن کرد")
 
 
 def _validate(cx, site_id: str, values: dict, item_id: int | None = None,

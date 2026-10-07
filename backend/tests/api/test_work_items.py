@@ -370,6 +370,60 @@ def test_task_owner_isolation_subtasks_comments_and_calendar(client):
     assert client.get("/api/v1/auth/me", headers=lead).json()["date_calendar"] == "jalali"
 
 
+def test_shared_discussion_and_project_mentions(client):
+    with client.eng.begin() as cx:
+        cx.execute(text("UPDATE panel_users SET username='worker',password_hash=:hash WHERE id=1"),
+                   {"hash": hash_password("worker-password")})
+        for username, role in (("manager", "admin"), ("colleague", "analyst"), ("outsider", "analyst")):
+            cx.execute(text("""INSERT INTO panel_users(username,full_name,email,role,active,password_hash,created_at,updated_at)
+                VALUES (:name,:name,:email,:role,1,:hash,'2026-01-01','2026-01-01')"""),
+                {"name": username, "email": username + "@example.com", "role": role,
+                 "hash": hash_password(username + "-password")})
+
+    def auth(name):
+        response = client.post("/api/v1/auth/login", json={"username": name, "password": name + "-password"})
+        assert response.status_code == 200, response.text
+        return {"Authorization": "Bearer " + response.json()["token"]}
+
+    manager, worker, colleague, outsider = (auth(name) for name in ("manager", "worker", "colleague", "outsider"))
+    assert client.put("/api/v1/work/projects/demo/members/3", headers=manager,
+                      json={"user_id": 3, "responsibility": "viewer"}).status_code == 200
+    base = "/api/v1/sites/demo/work"
+    root = client.post(base, headers=manager, json={"title": "Main task", "owner_id": 1,
+        "note": "Initial explanation\nwith details"}).json()
+    assert client.get(f"{base}/{root['id']}/subtasks", headers=manager).json() == []
+    child = client.post(f"{base}/{root['id']}/subtasks", headers=worker,
+                        json={"title": "Optional child"}).json()
+    grandchild = client.post(f"{base}/{child['id']}/subtasks", headers=worker,
+                             json={"title": "Nested child"}).json()
+    assert client.post(f"{base}/{grandchild['id']}/comments", headers=colleague,
+                       json={"text": "Please review @worker and @manager; not @outsider"}).status_code == 201
+    assert client.patch(f"{base}/{child['id']}", headers=worker,
+                        json={"note": "Progress\n@colleague please check"}).status_code == 200
+    thread_urls = [f"{base}/{task_id}/discussion" for task_id in (root["id"], child["id"], grandchild["id"])]
+    threads = [client.get(url, headers=worker) for url in thread_urls]
+    assert all(response.status_code == 200 for response in threads)
+    assert all(response.json()["root_id"] == root["id"] for response in threads)
+    assert all(response.json()["messages"] == threads[0].json()["messages"] for response in threads)
+    messages = threads[0].json()["messages"]
+    assert [row["note"] for row in messages] == ["Initial explanation\nwith details",
+        "Please review @worker and @manager; not @outsider", "Progress\n@colleague please check"]
+    assert messages[1]["work_item_id"] == grandchild["id"]
+    assert any(row["event_type"] == "subtask_added" for row in threads[0].json()["activity"])
+    participants = {row["username"] for row in threads[0].json()["participants"]}
+    assert {"worker", "manager", "colleague"} <= participants and "outsider" not in participants
+    worker_notices = client.get("/api/v1/auth/notifications?audience=discussion", headers=worker).json()["items"]
+    manager_notices = client.get("/api/v1/auth/notifications?audience=discussion", headers=manager).json()["items"]
+    outsider_notices = client.get("/api/v1/auth/notifications?audience=discussion", headers=outsider).json()["items"]
+    colleague_notices = client.get("/api/v1/auth/notifications?audience=discussion", headers=colleague).json()["items"]
+    assert any(row["kind"] == "mention" and row["work_item_id"] == root["id"] for row in worker_notices)
+    assert any(row["kind"] == "mention" and row["work_item_id"] == root["id"] for row in manager_notices)
+    assert any(row["kind"] == "mention" and row["work_item_id"] == root["id"] for row in colleague_notices)
+    assert not outsider_notices
+    assert client.post(f"{base}/{root['id']}/comments", headers=outsider,
+                       json={"text": "Unauthorized"}).status_code == 403
+
+
 def test_task_handoff_notification_archive_and_period_report(client):
     from datetime import datetime, timedelta, timezone
 

@@ -36,6 +36,13 @@ export type ProjectSummary = { site_id: string; name: string; canonical_url: str
   my_responsibility: 'admin' | 'lead' | 'contributor' | 'viewer' | null };
 export type ProjectMember = { site_id: string; user_id: number; responsibility: 'lead' | 'contributor' | 'viewer';
   full_name: string; username: string; role: string; active: boolean; created_at: string };
+export type TaskDiscussionData = { root_id: number; root_title: string;
+  messages: { id: number; event_type: string; note: string; actor_id: number | null;
+    actor_username: string | null; actor_name: string | null; created_at: string;
+    work_item_id: number; task_title: string }[];
+  activity: { id: number; event_type: string; actor_username: string | null;
+    created_at: string; work_item_id: number; task_title: string }[];
+  participants: { id: number; username: string; full_name: string }[] };
 export type ProjectMilestone = { id: number; site_id: string; title: string; description: string;
   due_at: string | null; tasks: number; verified_tasks: number; created_at: string };
 export type TaskDependency = { depends_on_id: number; title: string; status: WorkStatus; created_at: string };
@@ -131,6 +138,8 @@ export const commandApi = {
   events: (item: CommandWorkItem) =>
     api<{ id: number; event_type: string; before_json: string | null; after_json: string; note: string | null; actor_username: string | null; created_at: string }[]>(
       `/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/events`),
+  discussion: (item: CommandWorkItem) =>
+    api<TaskDiscussionData>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/discussion`),
   addComment: (item: CommandWorkItem, text: string) =>
     api(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/comments`, { method: 'POST', json: { text } }),
   subtasks: (item: CommandWorkItem) =>

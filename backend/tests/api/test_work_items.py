@@ -1,4 +1,6 @@
 """Work items stay within their project and keep an event trail."""
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -604,6 +606,22 @@ def test_manager_dashboard_and_admin_task_override(client):
     assert person["open_tasks"] == 2
     assert dashboard.json()["summary"]["open_tasks"] >= 2
     assert any(row["work_item_id"] == task["id"] for row in dashboard.json()["recent"])
+    ledger_url = "/api/v1/work/team-management/tasks"
+    assert client.get(ledger_url, headers=other_admin).status_code == 403
+    assert client.get(ledger_url, headers=worker).status_code == 403
+    ledger = client.get(ledger_url + "?site_id=demo&owner_id=1&focus=unscheduled&limit=1",
+                        headers=manager)
+    assert ledger.status_code == 200, ledger.text
+    assert ledger.json()["total"] == 2
+    assert ledger.json()["schedule"]["unscheduled"] == 2
+    assert ledger.json()["workload"][0]["open"] == 2
+    assert len(ledger.json()["items"]) == 1
+    next_page = client.get(ledger_url + "?site_id=demo&owner_id=1&focus=unscheduled&limit=1&offset=1",
+                           headers=manager)
+    assert next_page.status_code == 200
+    assert {ledger.json()["items"][0]["id"], next_page.json()["items"][0]["id"]} == {task["id"], child["id"]}
+    assert client.get(ledger_url + "?status=made_up", headers=manager).status_code == 422
+    assert client.get(ledger_url + "?q=Worker%20task", headers=manager).json()["total"] == 1
     assert client.patch(f"{base}/{task['id']}", headers=other_admin,
                         json={"title": "Unauthorized edit"}).status_code == 403
     assert client.delete(f"{base}/{task['id']}", headers=other_admin).status_code == 403
@@ -618,3 +636,12 @@ def test_manager_dashboard_and_admin_task_override(client):
     assert {task["id"], child["id"]} <= deleted
     assert client.post(f"{base}/{task['id']}/restore", headers=manager).status_code == 200
     assert client.get(f"{base}/{task['id']}/subtasks", headers=next_user).status_code == 200
+    due = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+    scheduled = client.post(base, headers=manager,
+                            json={"title": "Scheduled team task", "owner_id": 1, "due_at": due})
+    assert scheduled.status_code == 201, scheduled.text
+    portfolio = client.get(ledger_url + "?site_id=demo&owner_id=1&limit=1", headers=manager)
+    assert portfolio.status_code == 200, portfolio.text
+    assert portfolio.json()["schedule"]["due_week"] == 1
+    assert {row["site_id"] for row in portfolio.json()["timeline"]} == {"demo"}
+    assert sum(row["count"] for row in portfolio.json()["timeline"] if row["user_id"] == 1) == 1

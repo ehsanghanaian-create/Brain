@@ -343,6 +343,107 @@ def team_management(request: Request, user_id: int | None = None, eng: Engine = 
             "recent": [dict(row) for row in recent]}
 
 
+@router.get("/team-management/tasks")
+def team_management_tasks(request: Request, site_id: str | None = None,
+                          owner_id: int | None = None, team_id: int | None = None,
+                          priority: Literal["critical", "high", "normal", "low"] | None = None,
+                          status: str | None = None,
+                          focus: Literal["open", "all", "overdue", "due_week", "blocked",
+                                         "unassigned", "unscheduled", "completed"] = "open",
+                          q: str | None = None, limit: int = Query(50, ge=1, le=100),
+                          offset: int = Query(0, ge=0), eng: Engine = Depends(engine)) -> dict:
+    """One filtered, paginated task ledger and matching portfolio aggregates for the manager."""
+    actor = getattr(request.state, "panel_user", None)
+    if not actor or actor["role"] != "admin" or not actor["is_superadmin"]:
+        raise HTTPException(403, "فقط مدیر کل به مدیریت تیم دسترسی دارد")
+    if status and status not in {"new", "triaged", "approved", "assigned", "in_progress",
+                                 "review", "published", "measurement_pending", "verified",
+                                 "blocked", "rejected", "deferred"}:
+        raise HTTPException(422, "invalid work status")
+    stamp = datetime.now(timezone.utc)
+    args = {"now": stamp.isoformat(timespec="seconds"),
+            "week_end": (stamp + timedelta(days=7)).isoformat(timespec="seconds"),
+            "month_end": (stamp + timedelta(days=30)).isoformat(timespec="seconds"),
+            "today": stamp.date().isoformat(),
+            "timeline_end": (stamp.date() + timedelta(days=91)).isoformat(),
+            "site": site_id, "owner": owner_id, "team": team_id, "priority": priority,
+            "status": status,
+            "lim": limit, "off": offset}
+    clauses = ["w.deleted_at IS NULL"]
+    if site_id:
+        clauses.append("w.site_id=:site")
+    if owner_id is not None:
+        clauses.append("w.owner_id=:owner")
+    if team_id is not None:
+        clauses.append("w.team_id=:team")
+    if priority:
+        clauses.append("w.priority=:priority")
+    if status:
+        clauses.append("w.status=:status")
+    if q and q.strip():
+        clauses.append("(w.title LIKE :q OR w.description LIKE :q OR s.name LIKE :q OR u.full_name LIKE :q)")
+        args["q"] = "%" + q.strip()[:100] + "%"
+    base = " FROM work_items w JOIN sites s ON s.site_id=w.site_id " \
+           "LEFT JOIN panel_users u ON u.id=w.owner_id WHERE " + " AND ".join(clauses)
+    open_clause = "w.status NOT IN ('verified','rejected','deferred')"
+    focus_clause = {
+        "open": open_clause, "all": "1=1",
+        "overdue": f"{open_clause} AND w.due_at<:now",
+        "due_week": f"{open_clause} AND w.due_at>=:now AND w.due_at<:week_end",
+        "blocked": "w.status='blocked'", "unassigned": f"{open_clause} AND w.owner_id IS NULL",
+        "unscheduled": f"{open_clause} AND w.due_at IS NULL",
+        "completed": "w.status='verified'",
+    }[focus]
+    focused = base + " AND " + focus_clause
+    with eng.connect() as cx:
+        total = cx.execute(text("SELECT COUNT(*)" + focused), args).scalar_one()
+        rows = cx.execute(text("""SELECT w.id,w.site_id,s.name AS site_name,w.title,w.status,w.priority,
+            w.owner_id,u.full_name AS owner_name,w.team_id,w.created_by_id,
+            creator.full_name AS created_by_name,w.parent_id,w.start_at,w.due_at,w.progress_percent,
+            w.estimated_hours,w.created_at,w.updated_at,w.blocked_reason,
+            (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id) AS checklist_total,
+            (SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id AND ci.done=1) AS checklist_done,
+            (SELECT COUNT(*) FROM work_items child WHERE child.parent_id=w.id AND child.deleted_at IS NULL) AS subtasks
+            FROM work_items w JOIN sites s ON s.site_id=w.site_id
+            LEFT JOIN panel_users u ON u.id=w.owner_id
+            LEFT JOIN panel_users creator ON creator.id=w.created_by_id
+            WHERE """ + " AND ".join(clauses) + " AND " + focus_clause + """
+            ORDER BY CASE WHEN w.status NOT IN ('verified','rejected','deferred') AND w.due_at<:now THEN 0
+                          WHEN w.status='blocked' THEN 1 WHEN w.due_at IS NULL THEN 3 ELSE 2 END,
+                     CASE w.priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
+                     w.due_at, w.id DESC LIMIT :lim OFFSET :off"""), args).mappings().all()
+        stages = cx.execute(text("SELECT w.status AS key,COUNT(*) AS count" + base +
+                                 " GROUP BY w.status"), args).mappings().all()
+        schedule = cx.execute(text(f"""SELECT
+            SUM(CASE WHEN {open_clause} AND w.due_at<:now THEN 1 ELSE 0 END) AS overdue,
+            SUM(CASE WHEN {open_clause} AND w.due_at>=:now AND w.due_at<:week_end THEN 1 ELSE 0 END) AS due_week,
+            SUM(CASE WHEN {open_clause} AND w.due_at>=:week_end AND w.due_at<:month_end THEN 1 ELSE 0 END) AS due_month,
+            SUM(CASE WHEN {open_clause} AND w.due_at>=:month_end THEN 1 ELSE 0 END) AS later,
+            SUM(CASE WHEN {open_clause} AND w.due_at IS NULL THEN 1 ELSE 0 END) AS unscheduled
+            {base}"""), args).mappings().one()
+        workload = cx.execute(text(f"""SELECT w.owner_id AS user_id,COALESCE(u.full_name,'بی‌مسئول') AS name,
+            COUNT(*) AS total,
+            SUM(CASE WHEN {open_clause} THEN 1 ELSE 0 END) AS open,
+            SUM(CASE WHEN {open_clause} AND w.due_at<:now THEN 1 ELSE 0 END) AS overdue,
+            SUM(CASE WHEN w.status='blocked' THEN 1 ELSE 0 END) AS blocked,
+            SUM(CASE WHEN {open_clause} AND w.due_at IS NULL THEN 1 ELSE 0 END) AS unscheduled,
+            SUM(CASE WHEN w.status='verified' THEN 1 ELSE 0 END) AS completed
+            {base} GROUP BY w.owner_id ORDER BY open DESC,name"""), args).mappings().all()
+        timeline = cx.execute(text(f"""SELECT w.owner_id AS user_id,w.site_id,
+            CAST((julianday(substr(w.due_at,1,10))-julianday(:today))/7 AS INTEGER) AS week_index,
+            COUNT(*) AS count {base} AND {open_clause}
+            AND w.due_at>=:today AND w.due_at<:timeline_end
+            GROUP BY w.owner_id,w.site_id,week_index ORDER BY week_index,w.owner_id,w.site_id"""), args).mappings().all()
+    return {"items": [dict(row) for row in rows], "total": int(total),
+            "limit": limit, "offset": offset,
+            "stages": [dict(row) for row in stages],
+            "schedule": {key: int(value or 0) for key, value in schedule.items()},
+            "timeline": [dict(row) for row in timeline],
+            "workload": [{**dict(row), **{key: int(row[key] or 0) for key in
+                ("total", "open", "overdue", "blocked", "unscheduled", "completed")}}
+                for row in workload]}
+
+
 @router.get("/overview")
 def overview(site_id: str | None = None, owner_id: int | None = None, team_id: int | None = None,
              status: str | None = None, priority: str | None = None, q: str | None = None,

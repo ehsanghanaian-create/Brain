@@ -42,6 +42,28 @@ export type ManagementOverview = {
   recent: { id: number; actor_id: number | null; actor_username: string | null;
     event_type: string; created_at: string; work_item_id: number; site_id: string;
     task_title: string; project_name: string }[] };
+export type ManagementTask = {
+  id: number; site_id: string; site_name: string; title: string; status: WorkStatus;
+  priority: WorkPriority; owner_id: number | null; owner_name: string | null;
+  team_id: number | null; created_by_id: number | null; created_by_name: string | null;
+  parent_id: number | null; start_at: string | null; due_at: string | null;
+  progress_percent: number; estimated_hours: number | null; created_at: string;
+  updated_at: string; blocked_reason: string | null; checklist_total: number;
+  checklist_done: number; subtasks: number;
+};
+export type ManagementTaskLedger = {
+  items: ManagementTask[]; total: number; limit: number; offset: number;
+  stages: { key: WorkStatus; count: number }[];
+  schedule: { overdue: number; due_week: number; due_month: number;
+    later: number; unscheduled: number };
+  timeline: { user_id: number | null; site_id: string; week_index: number; count: number }[];
+  workload: { user_id: number | null; name: string; total: number; open: number;
+    overdue: number; blocked: number; unscheduled: number; completed: number }[];
+};
+export type ManagementTaskFilters = { site_id?: string; owner_id?: number; team_id?: number;
+  priority?: WorkPriority; status?: WorkStatus; focus?: 'open' | 'all' | 'overdue' |
+  'due_week' | 'blocked' | 'unassigned' | 'unscheduled' | 'completed';
+  q?: string; limit?: number; offset?: number };
 export type ProjectSummary = { site_id: string; name: string; canonical_url: string; kind: 'site' | 'manual'; lead_name: string | null; lead_id: number | null; members: number; tasks: number;
   open_tasks: number; blocked_tasks: number; unassigned_tasks: number; overdue_tasks: number;
   progress_percent: number; estimated_hours: number; spent_hours: number; milestones: number;
@@ -88,6 +110,11 @@ export type CommandFilters = { site_id?: string; owner_id?: number; team_id?: nu
 export const commandApi = {
   me: () => api<{ id: number; role: 'admin' | 'analyst' | 'call_center'; is_superadmin: boolean }>('/auth/me'),
   management: (userId?: number) => api<ManagementOverview>(`/work/team-management${userId ? `?user_id=${userId}` : ''}`),
+  managementTasks: (filters: ManagementTaskFilters = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== '') query.set(key, String(value)); });
+    return api<ManagementTaskLedger>(`/work/team-management/tasks?${query.toString()}`);
+  },
   overview: (filters: CommandFilters = {}) => {
     const query = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== '') query.set(key, String(value)); });

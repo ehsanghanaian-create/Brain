@@ -215,11 +215,12 @@ def edit_comment(site_id: str, item_id: int, comment_id: int, body: CommentIn,
             WHERE site_id=:site AND work_item_id=:item AND event_type='comment_edited'
             ORDER BY id DESC"""),
             {"site": site_id, "item": original["work_item_id"]}).mappings().all()
-        current = next((edit["text"] for row in revisions
-                        if (edit := json.loads(row["after_json"])).get("comment_id") == comment_id),
-                       original["note"])
+        latest_edit = next((edit for row in revisions
+                            if (edit := json.loads(row["after_json"])).get("comment_id") == comment_id),
+                           None)
+        current = latest_edit["text"] if latest_edit else original["note"]
         if current == message:
-            return {"id": comment_id, "note": message, "edited": bool(revisions)}
+            return {"id": comment_id, "note": message, "edited": latest_edit is not None}
         _record(cx, site_id, original["work_item_id"], "comment_edited",
                 {"comment_id": comment_id, "text": current},
                 {"comment_id": comment_id, "text": message}, None, actor)

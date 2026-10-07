@@ -17,8 +17,9 @@ import { commandApi, type CommandWorkItem, type ProjectMember, type ProjectMiles
 const number = new Intl.NumberFormat('fa-IR');
 const active = (item: CommandWorkItem) => !['verified', 'rejected', 'deferred'].includes(item.status);
 
-export function ProjectExecution({ items, people, canEdit, preferredSiteId, onTask }: {
-  items: CommandWorkItem[]; people: WorkPerson[]; canEdit: boolean; preferredSiteId?: string; onTask: (item: CommandWorkItem) => void;
+export function ProjectExecution({ items, people, canEdit, preferredSiteId, onTask, onProjectsChanged }: {
+  items: CommandWorkItem[]; people: WorkPerson[]; canEdit: boolean; preferredSiteId?: string;
+  onTask: (item: CommandWorkItem) => void; onProjectsChanged: () => void;
 }) {
   const { calendar } = useDatePreference();
   const dateLabel = (value: string | null) => value ? formatUserDate(value, calendar, { month: 'short', day: 'numeric' }) : 'بی‌موعد';
@@ -33,6 +34,8 @@ export function ProjectExecution({ items, people, canEdit, preferredSiteId, onTa
   const [editingMilestone, setEditingMilestone] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
+  const [editingProject, setEditingProject] = useState(false);
+  const [projectName, setProjectName] = useState('');
 
   const refreshProjects = useCallback(async () => {
     try { const rows = await commandApi.projects(); setProjects(rows); setSiteId((current) => current || rows[0]?.site_id || ''); }
@@ -45,7 +48,7 @@ export function ProjectExecution({ items, people, canEdit, preferredSiteId, onTa
     catch (cause) { toast.error(cause instanceof Error ? cause.message : 'جزئیات پروژه دریافت نشد'); }
   }, [siteId]);
   useEffect(() => { void refreshProjects(); }, [refreshProjects, items]);
-  useEffect(() => { if (preferredSiteId) setSiteId(preferredSiteId); }, [preferredSiteId]);
+  useEffect(() => { if (preferredSiteId) { setSiteId(preferredSiteId); setEditingProject(false); } }, [preferredSiteId]);
   useEffect(() => { void refreshDetail(); }, [refreshDetail]);
 
   const project = projects.find((row) => row.site_id === siteId);
@@ -73,6 +76,19 @@ export function ProjectExecution({ items, people, canEdit, preferredSiteId, onTa
       setNewProjectName(''); await refreshProjects(); setSiteId(created.site_id);
       toast.success('پروژهٔ مستقل ساخته شد'); }
     catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ایجاد پروژه انجام نشد'); }
+    finally { setBusy(false); }
+  }
+  async function saveProject() {
+    if (!project || !canPlan || busy) return;
+    const name = projectName.trim();
+    if (name.length < 2 || name.length > 100) { toast.error('نام پروژه باید بین ۲ تا ۱۰۰ نویسه باشد'); return; }
+    if (name === project.name) { setEditingProject(false); return; }
+    setBusy(true);
+    try {
+      await commandApi.updateProject(project.site_id, name);
+      setProjects((current) => current.map((row) => row.site_id === project.site_id ? { ...row, name } : row));
+      setEditingProject(false); onProjectsChanged(); toast.success('نام پروژه به‌روز شد');
+    } catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ویرایش پروژه انجام نشد'); }
     finally { setBusy(false); }
   }
   async function remove(userId: number) {
@@ -107,7 +123,7 @@ export function ProjectExecution({ items, people, canEdit, preferredSiteId, onTa
       <Button size='sm' disabled={busy || newProjectName.trim().length < 2} onClick={() => void createProject()}>＋ افزودن پروژه</Button>
     </div>
     <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>
-      {projects.map((row) => <button key={row.site_id} onClick={() => setSiteId(row.site_id)}
+      {projects.map((row) => <button key={row.site_id} onClick={() => { setSiteId(row.site_id); setEditingProject(false); }}
         className={`rounded-xl border bg-card p-4 text-right transition-all hover:-translate-y-0.5 hover:shadow-md ${siteId === row.site_id ? 'border-emerald-500/70 ring-1 ring-emerald-500/20' : ''}`}>
         <span className='flex items-center justify-between gap-2'><strong>{row.name}</strong><Badge variant='outline'>{number.format(row.members)} عضو</Badge></span>
         <span className='text-muted-foreground mt-1 block truncate text-xs' dir={row.kind === 'site' ? 'ltr' : 'rtl'}>{row.kind === 'manual' ? 'پروژهٔ داخلی · مستقل از سایت' : row.canonical_url}</span>
@@ -119,9 +135,23 @@ export function ProjectExecution({ items, people, canEdit, preferredSiteId, onTa
       {!projects.length && <p className='text-muted-foreground rounded-xl border border-dashed p-8 text-sm'>یک پروژهٔ مستقل بسازید یا سایت اضافه کنید.</p>}
     </div>
     {project && <>
-      <div className='flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-muted/30 p-4'><div><h3 className='font-bold'>پروژهٔ {project.name}</h3>
-        <p className='text-muted-foreground mt-1 text-xs'>پیشرفت از کارهای نهایی و درصد تکمیل زیرکارها محاسبه می‌شود.</p></div>
-        {project.kind === 'site' && <Link href={`/dashboard/reports?site=${encodeURIComponent(siteId)}`} className='text-primary text-xs hover:underline'>مشاهدهٔ گزارش سئوی این سایت ←</Link>}</div>
+      <div className='flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-muted/30 p-4'>
+        <div className='min-w-0 flex-1'><h3 className='font-bold'>پروژهٔ {project.name}</h3>
+          <p className='text-muted-foreground mt-1 text-xs'>پیشرفت از کارهای نهایی و درصد تکمیل زیرکارها محاسبه می‌شود.</p></div>
+        <div className='flex items-center gap-2'>
+          {canPlan && <Button size='sm' variant='outline' onClick={() => { setProjectName(project.name); setEditingProject(true); }}>ویرایش پروژه</Button>}
+          {project.kind === 'site' && <Link href={`/dashboard/reports?site=${encodeURIComponent(siteId)}`} className='text-primary text-xs hover:underline'>مشاهدهٔ گزارش سئوی این سایت ←</Link>}
+        </div>
+        {editingProject && canPlan && <div className='flex w-full flex-wrap items-end gap-2 border-t pt-3'>
+          <label htmlFor='project-edit-name' className='min-w-48 flex-1 space-y-1 text-xs'>نام نمایشی پروژه
+            <Input id='project-edit-name' value={projectName} maxLength={100} onChange={(event) => setProjectName(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') void saveProject(); }} />
+          </label>
+          <Button size='sm' disabled={busy || projectName.trim().length < 2} onClick={() => void saveProject()}>{busy ? 'در حال ذخیره…' : 'ذخیره'}</Button>
+          <Button size='sm' variant='ghost' disabled={busy} onClick={() => setEditingProject(false)}>انصراف</Button>
+          <p className='text-muted-foreground w-full text-xs'>شناسهٔ پروژه و کارهای مرتبط تغییر نمی‌کنند.</p>
+        </div>}
+      </div>
       <div className='grid gap-4 xl:grid-cols-[1.4fr_1fr]'>
         <Card><CardHeader><CardTitle>ساختار کار و زیرکار</CardTitle><CardDescription>با باز کردن هر کار می‌توانید آن را ریزتر کنید، زمان‌بندی بدهید و وابستگی تعریف کنید.</CardDescription></CardHeader><CardContent className='space-y-2'>
           {parents.map((parent) => { const children = siteTasks.filter((row) => row.parent_id === parent.id);

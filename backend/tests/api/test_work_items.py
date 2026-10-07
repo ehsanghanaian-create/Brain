@@ -253,8 +253,18 @@ def test_manual_project_assignment_priority_archive_and_profile(client):
     assert project not in {site["site_id"] for site in client.get("/api/v1/sites", headers=admin).json()}
     assert next(row for row in client.get("/api/v1/work/projects", headers=admin).json()
                 if row["site_id"] == project)["kind"] == "manual"
+    assert client.patch(f"/api/v1/work/projects/{project}", headers=analyst,
+                        json={"name": "Changed by outsider"}).status_code == 403
+    assert client.patch(f"/api/v1/work/projects/{project}", headers=admin,
+                        json={"name": "  "}).status_code == 422
+    assert client.patch("/api/v1/work/projects/missing", headers=admin,
+                        json={"name": "Missing project"}).status_code == 404
     assert client.put("/api/v1/work/projects/demo/members/1", headers=admin,
                       json={"user_id": 1, "responsibility": "lead"}).status_code == 200
+    renamed_site = client.patch("/api/v1/work/projects/demo", headers=analyst,
+                                json={"name": "  Demo workflow  "})
+    assert renamed_site.status_code == 200 and renamed_site.json()["name"] == "Demo workflow"
+    assert renamed_site.json()["kind"] == "site" and renamed_site.json()["site_id"] == "demo"
     assert client.put("/api/v1/work/projects/demo/members/2", headers=admin,
                       json={"user_id": 2, "responsibility": "lead"}).status_code == 200
     demo_project = next(row for row in client.get("/api/v1/work/projects", headers=admin).json()
@@ -271,6 +281,14 @@ def test_manual_project_assignment_priority_archive_and_profile(client):
                 if row["user_id"] == 1)["responsibility"] == "contributor"
     ordinary = client.post(base, headers=admin, json={"title": "Next task", "priority": "normal", "owner_id": 1})
     assert ordinary.status_code == 201, ordinary.text
+    renamed_manual = client.patch(f"/api/v1/work/projects/{project}", headers=admin,
+                                  json={"name": "  SEO Brain Operations  "})
+    assert renamed_manual.status_code == 200 and renamed_manual.json()["name"] == "SEO Brain Operations"
+    assert renamed_manual.json()["kind"] == "manual" and renamed_manual.json()["site_id"] == project
+    assert client.get(f"/api/v1/sites/{project}", headers=admin).json()["name"] == "SEO Brain Operations"
+    assert next(row for row in client.get("/api/v1/work/projects", headers=analyst).json()
+                if row["site_id"] == project)["name"] == "SEO Brain Operations"
+    assert {task["id"] for task in client.get(base, headers=admin).json()["items"]} == {task_id, ordinary.json()["id"]}
     board = client.get("/api/v1/work/board/all", headers=analyst)
     assert board.status_code == 200, board.text
     assert {row["priority"] for row in board.json()["items"]} == {"critical", "normal"}

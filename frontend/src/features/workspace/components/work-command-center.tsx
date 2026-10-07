@@ -391,7 +391,7 @@ export function WorkCommandCenter() {
         {!visibleArchiveItems.length && archiveLoadedKind === archiveKind && !archiveLoading && !archiveError && <p className='text-muted-foreground py-8 text-center text-sm'>در این بخش کاری نیست.</p>}
       </CardContent></Card>}
 
-      {view === 'projects' && <ProjectExecution items={data.items} people={people} canEdit={canEdit} preferredSiteId={filters.site_id} onTask={openTask} />}
+      {view === 'projects' && <ProjectExecution items={data.items} people={people} canEdit={canEdit} preferredSiteId={filters.site_id} onTask={openTask} onProjectsChanged={() => void refresh(true)} />}
       {view === 'report' && <WorkReportPanel projects={projects} />}
 
       {view === 'planner' && <TeamPlanner items={items} people={people} onTask={openTask} />}

@@ -99,6 +99,9 @@ export const commandApi = {
   teams: () => api<WorkTeam[]>('/work/teams'),
   projects: () => api<ProjectSummary[]>('/work/projects'),
   createProject: (name: string) => api<ProjectSummary>('/work/projects', { method: 'POST', json: { name } }),
+  updateProject: (siteId: string, name: string) =>
+    api<Pick<ProjectSummary, 'site_id' | 'name' | 'canonical_url' | 'kind'>>(
+      `/work/projects/${encodeURIComponent(siteId)}`, { method: 'PATCH', json: { name } }),
   projectMembers: (siteId: string) => api<ProjectMember[]>(`/work/projects/${encodeURIComponent(siteId)}/members`),
   assignProjectMember: (siteId: string, userId: number, responsibility: ProjectMember['responsibility']) =>
     api(`/work/projects/${encodeURIComponent(siteId)}/members/${userId}`, { method: 'PUT', json: { user_id: userId, responsibility } }),

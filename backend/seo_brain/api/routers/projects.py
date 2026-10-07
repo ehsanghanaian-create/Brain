@@ -39,6 +39,10 @@ class ManualProjectIn(BaseModel):
     name: str = Field(min_length=2, max_length=100)
 
 
+class ProjectPatch(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+
+
 @router.post("", status_code=201)
 def create_manual_project(body: ManualProjectIn, request: Request, eng: Engine = Depends(engine)) -> dict:
     name = body.name.strip()
@@ -58,6 +62,26 @@ def create_manual_project(body: ManualProjectIn, request: Request, eng: Engine =
             VALUES (:id,:actor,'lead',:at)"""), {"id": site_id, "actor": actor["id"], "at": now()})
     request.state.audit_fields = ["name"]
     return {"site_id": site_id, "name": name, "kind": "manual", "my_responsibility": "lead"}
+
+
+@router.patch("/{site_id}")
+def update_project(site_id: str, body: ProjectPatch, request: Request,
+                   eng: Engine = Depends(engine)) -> dict:
+    """Rename a project without changing its stable site key or linked work."""
+    name = body.name.strip()
+    if len(name) < 2:
+        raise HTTPException(422, "project name is too short")
+    with eng.begin() as cx:
+        _site(cx, site_id)
+        require_lead(cx, request, site_id)
+        cx.execute(text("UPDATE sites SET name=:name,updated_at=:at WHERE site_id=:site"),
+                   {"name": name, "at": now(), "site": site_id})
+        row = cx.execute(text("""SELECT s.site_id,s.name,s.canonical_url,
+            CASE WHEN mp.site_id IS NULL THEN 'site' ELSE 'manual' END AS kind
+            FROM sites s LEFT JOIN manual_projects mp ON mp.site_id=s.site_id
+            WHERE s.site_id=:site"""), {"site": site_id}).mappings().one()
+    request.state.audit_fields = ["name"]
+    return dict(row)
 
 
 class MilestoneIn(BaseModel):

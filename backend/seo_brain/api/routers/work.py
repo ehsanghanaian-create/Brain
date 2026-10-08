@@ -68,6 +68,7 @@ class WorkIn(BaseModel):
 
 
 class WorkPatch(BaseModel):
+    expected_status: Status | None = None
     title: str | None = Field(default=None, min_length=3, max_length=200)
     description: str | None = Field(default=None, max_length=5000)
     url: str | None = Field(default=None, max_length=2048)
@@ -533,7 +534,7 @@ def bulk_update_work(site_id: str, body: BulkWorkIn, request: Request,
 
 @router.patch("/{item_id}")
 def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, eng: Engine = Depends(engine)) -> dict:
-    patch = body.model_dump(exclude_unset=True, exclude={"note"})
+    patch = body.model_dump(exclude_unset=True, exclude={"note", "expected_status"})
     if any(key in patch and patch[key] is None for key in ("title", "description", "status", "priority", "progress_percent", "board_order")):
         raise HTTPException(422, "required work fields cannot be null")
     if "due_at" in patch:
@@ -547,7 +548,13 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
                              {"s": site_id, "id": item_id}).mappings().first()
         if not current:
             raise HTTPException(404, "work item not found")
+        if body.expected_status and current["status"] != body.expected_status:
+            raise HTTPException(409, "work status changed; refresh before reviewing")
         require_task_editor(cx, request, site_id, current)
+        actor = getattr(request.state, "panel_user", None)
+        if (current["status"] == "review" and patch.get("status") == "verified"
+                and not (actor or {}).get("is_superadmin")):
+            raise HTTPException(403, "only the general manager can approve work in review")
         if ("owner_id" in patch and current["owner_id"] is not None and patch["owner_id"] != current["owner_id"]
                 and not (getattr(request.state, "panel_user", None) or {}).get("is_superadmin")):
             raise HTTPException(403, "an assigned task cannot be reassigned by another user")
@@ -582,9 +589,15 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
         after = dict(cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id"),
                                 {"s": site_id, "id": item_id}).mappings().one())
         _record(cx, site_id, item_id, "updated", before, after, body.note, getattr(request.state, "panel_user", None))
-        actor = getattr(request.state, "panel_user", None)
         if after["owner_id"] and after["owner_id"] != before["owner_id"] and actor and after["owner_id"] != actor["id"]:
             _notify_assignment(cx, after["owner_id"], item_id, after["title"], actor)
+        if (actor and actor.get("is_superadmin") and before["status"] == "review"
+                and after["status"] in {"verified", "in_progress"} and after["owner_id"]
+                and after["owner_id"] != actor["id"]):
+            approved = after["status"] == "verified"
+            _notify(cx, after["owner_id"], item_id,
+                    "review_approved" if approved else "review_changes", "assigned", after["title"],
+                    f"{actor['full_name']} نتیجهٔ کار را {'تأیید کرد' if approved else 'برای اصلاح بازگرداند'}")
         if actor and after["status"] == "verified" and before["status"] != "verified" and after["created_by_id"] not in (None, actor["id"]):
             _notify(cx, after["created_by_id"], item_id, "completed", "delegated", after["title"],
                     f"{actor['full_name']} این کار را انجام داد")

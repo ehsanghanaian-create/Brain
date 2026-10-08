@@ -698,3 +698,31 @@ def test_manager_dashboard_and_admin_task_override(client):
     assert {row["site_id"] for row in portfolio.json()["timeline"]} == {"demo"}
     assert sum(row["count"] for row in portfolio.json()["timeline"]
                if row["user_id"] == 1 and row["week_index"] >= 0) == 1
+    with client.eng.begin() as cx:
+        team_id = cx.execute(text("""INSERT INTO panel_teams(name,color,description,active,created_at,updated_at)
+            VALUES ('Delivery','#1abb9c','',1,'2026-01-01','2026-01-01')""")).lastrowid
+        cx.execute(text("UPDATE panel_users SET team_id=:team WHERE id=1"), {"team": team_id})
+    team_work = client.get(f"{ledger_url}?team_id={team_id}&owner_id=1&focus=open", headers=manager)
+    assert {row["id"] for row in team_work.json()["items"]} >= {scheduled.json()["id"]}
+
+    review_url = f"{base}/{scheduled.json()['id']}"
+    assert client.patch(review_url, headers=worker, json={"status": "review"}).status_code == 200
+    manager_view = client.get("/api/v1/work/team-management", headers=manager).json()
+    assert manager_view["summary"]["review_tasks"] >= 1
+    assert next(row for row in manager_view["people"] if row["id"] == 1)["review_tasks"] >= 1
+    assert scheduled.json()["id"] in {row["id"] for row in client.get(
+        ledger_url + "?focus=review", headers=manager).json()["items"]}
+    assert client.patch(review_url, headers=worker, json={"status": "verified"}).status_code == 403
+    assert client.patch(review_url, headers=manager,
+                        json={"expected_status": "new", "status": "verified"}).status_code == 409
+    returned = client.patch(review_url, headers=manager,
+                            json={"expected_status": "review", "status": "in_progress",
+                                  "note": "Please revise the result"})
+    assert returned.status_code == 200 and returned.json()["status"] == "in_progress"
+    assert client.patch(review_url, headers=worker, json={"status": "review"}).status_code == 200
+    accepted = client.patch(review_url, headers=manager,
+                            json={"expected_status": "review", "status": "verified",
+                                  "note": "Evidence checked", "verification_note": "Evidence checked"})
+    assert accepted.status_code == 200 and accepted.json()["status"] == "verified"
+    notices = client.get("/api/v1/auth/notifications?audience=assigned", headers=worker).json()["items"]
+    assert {row["kind"] for row in notices} >= {"review_changes", "review_approved"}

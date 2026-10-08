@@ -31,19 +31,20 @@ export type WorkTeam = { id: number; name: string; color: string; description: s
   members: number; open_work: number };
 export type WorkPerson = { id: number; full_name: string; active: boolean; team_id: number | null; role: string };
 export type ManagementPerson = WorkPerson & { username: string; team_name: string | null;
-  total_tasks: number; open_tasks: number; overdue_tasks: number; blocked_tasks: number;
+  total_tasks: number; open_tasks: number; overdue_tasks: number; blocked_tasks: number; review_tasks: number;
   due_week_tasks: number; completed_tasks: number; events_week: number;
   last_task_activity_at: string | null;
   projects: { site_id: string; name: string; responsibility: 'lead' | 'contributor' | 'viewer' }[] };
 export type ManagementOverview = {
   summary: { total_tasks: number; open_tasks: number; overdue_tasks: number;
-    blocked_tasks: number; unassigned_tasks: number; active_people: number };
+    blocked_tasks: number; review_tasks: number; unassigned_tasks: number; active_people: number };
   people: ManagementPerson[];
   recent: { id: number; actor_id: number | null; actor_username: string | null;
     event_type: string; created_at: string; work_item_id: number; site_id: string;
     task_title: string; project_name: string }[] };
 export type ManagementTask = {
-  id: number; site_id: string; site_name: string; title: string; status: WorkStatus;
+  id: number; site_id: string; site_name: string; title: string; description: string;
+  verification_note: string | null; status: WorkStatus;
   priority: WorkPriority; owner_id: number | null; owner_name: string | null;
   team_id: number | null; created_by_id: number | null; created_by_name: string | null;
   parent_id: number | null; start_at: string | null; due_at: string | null;
@@ -61,7 +62,7 @@ export type ManagementTaskLedger = {
     overdue: number; blocked: number; unscheduled: number; completed: number }[];
 };
 export type ManagementTaskFilters = { site_id?: string; owner_id?: number; team_id?: number;
-  priority?: WorkPriority; status?: WorkStatus; focus?: 'open' | 'all' | 'overdue' |
+  priority?: WorkPriority; status?: WorkStatus; focus?: 'open' | 'all' | 'review' | 'overdue' |
   'due_week' | 'blocked' | 'unassigned' | 'unscheduled' | 'completed';
   q?: string; limit?: number; offset?: number };
 export type ProjectSummary = { site_id: string; name: string; canonical_url: string; kind: 'site' | 'manual'; lead_name: string | null; lead_id: number | null; members: number; tasks: number;
@@ -115,6 +116,16 @@ export const commandApi = {
     Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== '') query.set(key, String(value)); });
     return api<ManagementTaskLedger>(`/work/team-management/tasks?${query.toString()}`);
   },
+  reviewTask: (item: Pick<ManagementTask, 'id' | 'site_id'>,
+               decision: 'approve' | 'changes_requested', note: string) =>
+    api<CommandWorkItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}`, {
+      method: 'PATCH', json: {
+        expected_status: 'review',
+        status: decision === 'approve' ? 'verified' : 'in_progress',
+        note: note.trim() || null,
+        ...(decision === 'approve' && note.trim() ? { verification_note: note.trim() } : {})
+      }
+    }),
   overview: (filters: CommandFilters = {}) => {
     const query = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== '') query.set(key, String(value)); });

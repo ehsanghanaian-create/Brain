@@ -312,6 +312,7 @@ def team_management(request: Request, user_id: int | None = None, eng: Engine = 
             SUM(CASE WHEN w.status NOT IN ('verified','rejected','deferred') THEN 1 ELSE 0 END) AS open_tasks,
             SUM(CASE WHEN w.status NOT IN ('verified','rejected','deferred') AND w.due_at<:now THEN 1 ELSE 0 END) AS overdue_tasks,
             SUM(CASE WHEN w.status='blocked' THEN 1 ELSE 0 END) AS blocked_tasks,
+            SUM(CASE WHEN w.status='review' THEN 1 ELSE 0 END) AS review_tasks,
             SUM(CASE WHEN w.status NOT IN ('verified','rejected','deferred') AND w.due_at>=:now
                 AND w.due_at<:week_end THEN 1 ELSE 0 END) AS due_week_tasks,
             SUM(CASE WHEN w.status='verified' THEN 1 ELSE 0 END) AS completed_tasks
@@ -330,6 +331,7 @@ def team_management(request: Request, user_id: int | None = None, eng: Engine = 
             SUM(CASE WHEN status NOT IN ('verified','rejected','deferred') THEN 1 ELSE 0 END) AS open_tasks,
             SUM(CASE WHEN status NOT IN ('verified','rejected','deferred') AND due_at<:now THEN 1 ELSE 0 END) AS overdue_tasks,
             SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END) AS blocked_tasks,
+            SUM(CASE WHEN status='review' THEN 1 ELSE 0 END) AS review_tasks,
             SUM(CASE WHEN status NOT IN ('verified','rejected','deferred') AND owner_id IS NULL THEN 1 ELSE 0 END) AS unassigned_tasks
             FROM work_items WHERE deleted_at IS NULL AND parent_id IS NULL"""), args).mappings().one()
         recent = cx.execute(text("""SELECT e.id,e.actor_id,e.actor_username,e.event_type,e.created_at,
@@ -344,7 +346,7 @@ def team_management(request: Request, user_id: int | None = None, eng: Engine = 
             "site_id": row["site_id"], "name": row["name"], "responsibility": row["responsibility"]})
     last_by_user = {row["actor_id"]: row["last_task_activity_at"] for row in activity}
     week_by_user = {row["actor_id"]: row["events_week"] for row in week_activity}
-    count_keys = ("total_tasks", "open_tasks", "overdue_tasks", "blocked_tasks", "due_week_tasks", "completed_tasks")
+    count_keys = ("total_tasks", "open_tasks", "overdue_tasks", "blocked_tasks", "review_tasks", "due_week_tasks", "completed_tasks")
     return {"summary": {**{key: int(summary[key] or 0) for key in summary},
                         "active_people": sum(bool(row["active"]) for row in people)},
             "people": [{**dict(row), **{key: int(row[key] or 0) for key in count_keys},
@@ -359,7 +361,7 @@ def team_management_tasks(request: Request, site_id: str | None = None,
                           owner_id: int | None = None, team_id: int | None = None,
                           priority: Literal["critical", "high", "normal", "low"] | None = None,
                           status: str | None = None,
-                          focus: Literal["open", "all", "overdue", "due_week", "blocked",
+                          focus: Literal["open", "all", "review", "overdue", "due_week", "blocked",
                                          "unassigned", "unscheduled", "completed"] = "open",
                           q: str | None = None, limit: int = Query(50, ge=1, le=100),
                           offset: int = Query(0, ge=0), eng: Engine = Depends(engine)) -> dict:
@@ -386,7 +388,7 @@ def team_management_tasks(request: Request, site_id: str | None = None,
     if owner_id is not None:
         clauses.append("w.owner_id=:owner")
     if team_id is not None:
-        clauses.append("w.team_id=:team")
+        clauses.append("COALESCE(w.team_id,u.team_id)=:team")
     if priority:
         clauses.append("w.priority=:priority")
     if status:
@@ -398,7 +400,7 @@ def team_management_tasks(request: Request, site_id: str | None = None,
            "LEFT JOIN panel_users u ON u.id=w.owner_id WHERE " + " AND ".join(clauses)
     open_clause = "w.status NOT IN ('verified','rejected','deferred')"
     focus_clause = {
-        "open": open_clause, "all": "1=1",
+        "open": open_clause, "all": "1=1", "review": "w.status='review'",
         "overdue": f"{open_clause} AND w.due_at<:now",
         "due_week": f"{open_clause} AND w.due_at>=:now AND w.due_at<:week_end",
         "blocked": "w.status='blocked'", "unassigned": f"{open_clause} AND w.owner_id IS NULL",
@@ -408,7 +410,8 @@ def team_management_tasks(request: Request, site_id: str | None = None,
     focused = base + " AND " + focus_clause
     with eng.connect() as cx:
         total = cx.execute(text("SELECT COUNT(*)" + focused), args).scalar_one()
-        rows = cx.execute(text("""SELECT w.id,w.site_id,s.name AS site_name,w.title,w.status,w.priority,
+        rows = cx.execute(text("""SELECT w.id,w.site_id,s.name AS site_name,w.title,w.description,w.verification_note,
+            w.status,w.priority,
             w.owner_id,u.full_name AS owner_name,w.team_id,w.created_by_id,
             creator.full_name AS created_by_name,w.parent_id,w.start_at,w.due_at,w.progress_percent,
             w.estimated_hours,w.created_at,w.updated_at,w.blocked_reason,

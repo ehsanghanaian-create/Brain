@@ -16,6 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { formatUserDate, formatUserDateTime, useDatePreference } from '@/lib/date-preference';
 import { commandApi, type ManagementOverview, type ManagementTask, type ManagementTaskFilters,
   type ManagementTaskLedger, type ProjectSummary, type WorkReport } from '../api';
+import { TaskDiscussion } from './task-discussion';
 
 const number = new Intl.NumberFormat('fa-IR');
 type Section = 'today' | 'reviews' | 'team' | 'projects' | 'gantt' | 'tasks' | 'reports';
@@ -71,9 +72,10 @@ function Initials({ name, tone = 'sky' }: { name: string; tone?: 'sky' | 'amber'
   </span>;
 }
 
-function ManagerGantt({ items, total, calendar }: {
+function ManagerGantt({ items, total, calendar, onTask }: {
   items: ManagementTask[]; total: number;
   calendar: ReturnType<typeof useDatePreference>['calendar'];
+  onTask: (task: ManagementTask) => void;
 }) {
   const [horizon, setHorizon] = useState(30);
   const today = new Date().toISOString().slice(0, 10);
@@ -110,8 +112,8 @@ function ManagerGantt({ items, total, calendar }: {
           const width = Math.max(1.5, right - left);
           const color = task.status === 'review' ? 'bg-amber-500' : task.status === 'blocked' ? 'bg-rose-500' : 'bg-sky-500';
           return <div key={task.id} className='grid grid-cols-[260px_minmax(560px,1fr)] border-b last:border-0 hover:bg-muted/30'>
-            <Link href={taskUrl(task)} className='min-w-0 p-2.5 text-xs hover:text-primary'><strong className='block truncate'>{task.title}</strong>
-              <span className='text-muted-foreground block truncate'>{task.owner_name || 'بی‌مسئول'} · {task.site_name}</span></Link>
+            <button type='button' onClick={() => onTask(task)} className='min-w-0 p-2.5 text-right text-xs hover:text-primary'><strong className='block truncate'>{task.title}</strong>
+              <span className='text-muted-foreground block truncate'>{task.owner_name || 'بی‌مسئول'} · {task.site_name}</span></button>
             <div className='relative mx-3 my-3 h-7 rounded-md bg-muted/40' dir='ltr' style={{ backgroundImage: 'linear-gradient(to right, transparent 49.8%, var(--border) 50%, transparent 50.2%)' }}>
               <span className='absolute inset-y-0 border-r-2 border-dashed border-foreground/30' style={{ left: `${position(dateNumber(today))}%` }} title='امروز' />
               <span className={`absolute top-2 h-3 rounded-full ${color}`} style={{ left: `${left}%`, width: `${width}%` }}
@@ -121,10 +123,10 @@ function ManagerGantt({ items, total, calendar }: {
     </CardContent></Card>
     <Card><CardHeader><CardTitle>کارهای منتظر تعیین موعد</CardTitle>
       <CardDescription>این کارها انجام می‌شوند اما هنوز موعد ندارند؛ با بازکردن کارت می‌توانید تاریخ واقعی ثبت کنید.</CardDescription></CardHeader>
-      <CardContent className='grid gap-2 md:grid-cols-2 xl:grid-cols-3'>{undated.map((task) => <Link key={task.id} href={taskUrl(task)}
-        className='rounded-lg border p-3 text-xs transition-colors hover:border-primary/50 hover:bg-muted/30'><strong className='block truncate text-sm'>{task.title}</strong>
+      <CardContent className='grid gap-2 md:grid-cols-2 xl:grid-cols-3'>{undated.map((task) => <button key={task.id} type='button' onClick={() => onTask(task)}
+        className='rounded-lg border p-3 text-right text-xs transition-colors hover:border-primary/50 hover:bg-muted/30'><strong className='block truncate text-sm'>{task.title}</strong>
         <span className='text-muted-foreground mt-1 block truncate'>{task.owner_name || 'بی‌مسئول'} · {task.site_name}</span>
-        <Badge variant='outline' className='mt-2'>{statusText[task.status]}</Badge></Link>)}
+        <Badge variant='outline' className='mt-2'>{statusText[task.status]}</Badge></button>)}
         {!undated.length && <p className='text-sm text-muted-foreground'>همهٔ کارهای باز حداقل یک تاریخ دارند.</p>}
       </CardContent></Card>
   </div>;
@@ -150,7 +152,9 @@ export function ManagementDashboard() {
   const [query, setQuery] = useState('');
   const [offset, setOffset] = useState(0);
   const [personId, setPersonId] = useState<number | null>(null);
-  const [decision, setDecision] = useState<{ task: ManagementTask; value: 'approve' | 'changes_requested' } | null>(null);
+  const [panelTaskId, setPanelTaskId] = useState<number | null>(null);
+  const [panelTask, setPanelTask] = useState<ManagementTask | null>(null);
+  const [panelLoading, setPanelLoading] = useState(false);
   const [decisionNote, setDecisionNote] = useState('');
   const [decisionBusy, setDecisionBusy] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -189,6 +193,19 @@ export function ManagementDashboard() {
       .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'گزارش بارگیری نشد'); });
     return () => { active = false; };
   }, [section, period, revision]);
+  useEffect(() => {
+    if (panelTaskId === null) return;
+    let active = true; setPanelLoading(true);
+    void commandApi.managementTask(panelTaskId)
+      .then((task) => { if (active) setPanelTask(task); })
+      .catch((cause) => {
+        if (active) {
+          toast.error(cause instanceof Error ? cause.message : 'جزئیات کار دریافت نشد');
+          setPanelTaskId(null); setPanelTask(null);
+        }
+      }).finally(() => { if (active) setPanelLoading(false); });
+    return () => { active = false; };
+  }, [panelTaskId, revision]);
 
   const people = useMemo(() => [...(overview?.people || [])].filter((person) => person.active)
     .toSorted((a, b) => b.review_tasks - a.review_tasks || b.open_tasks - a.open_tasks || a.full_name.localeCompare(b.full_name)), [overview]);
@@ -210,20 +227,26 @@ export function ManagementDashboard() {
     setSiteId(filters.site || ''); setOwnerId(filters.owner ? String(filters.owner) : '');
     setTeamId(''); setFocus(filters.focus || 'open'); setStatusFilter(filters.status); setSearch(''); setQuery(''); setOffset(0); setSection('tasks');
   };
-  const openDecision = (task: ManagementTask, value: 'approve' | 'changes_requested') => {
-    setDecision({ task, value }); setDecisionNote('');
+  const openTaskPanel = (task: ManagementTask | number) => {
+    const id = typeof task === 'number' ? task : task.id;
+    setPanelTask(typeof task === 'number' ? null : task);
+    setPanelTaskId(id); setDecisionNote('');
   };
-  const saveDecision = async () => {
-    if (!decision || decisionBusy) return;
-    if (decision.value === 'changes_requested' && decisionNote.trim().length < 3) {
+  const closeTaskPanel = () => { if (!decisionBusy) { setPanelTaskId(null); setPanelTask(null); setDecisionNote(''); } };
+  const saveDecision = async (value: 'approve' | 'changes_requested') => {
+    if (!panelTask || panelTask.status !== 'review' || decisionBusy || panelLoading) return;
+    if (value === 'changes_requested' && decisionNote.trim().length < 3) {
       toast.error('دلیل اصلاح را برای مسئول کار بنویسید'); return;
     }
     setDecisionBusy(true);
     try {
-      await commandApi.reviewTask(decision.task, decision.value, decisionNote);
-      toast.success(decision.value === 'approve' ? 'نتیجهٔ کار تأیید شد' : 'کار با توضیح برای اصلاح برگشت');
-      setDecision(null); setDecisionNote(''); setRevision((value) => value + 1);
-    } catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ثبت تصمیم انجام نشد؛ داده‌ها را تازه کنید'); }
+      await commandApi.reviewTask(panelTask, value, decisionNote);
+      toast.success(value === 'approve' ? 'نتیجهٔ کار تأیید شد' : 'کار با توضیح برای اصلاح برگشت');
+      setPanelTaskId(null); setPanelTask(null); setDecisionNote(''); setRevision((current) => current + 1);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : 'ثبت تصمیم انجام نشد؛ داده‌ها را تازه کنید');
+      setRevision((current) => current + 1);
+    }
     finally { setDecisionBusy(false); }
   };
   const reviewCard = (task: ManagementTask) => <article key={task.id}
@@ -232,7 +255,7 @@ export function ManagementDashboard() {
       <div className='flex min-w-0 items-start gap-3'>
         <Initials name={task.owner_name || task.site_name} tone='amber' />
         <div className='min-w-0'><span className='text-muted-foreground text-xs'>{task.site_name} <span aria-hidden='true'>/</span> {task.owner_name || 'بی‌مسئول'}</span>
-          <Link href={taskUrl(task)} className='mt-1 block text-sm font-bold leading-6 transition-colors hover:text-primary sm:text-base'>{task.title}</Link>
+          <button type='button' onClick={() => openTaskPanel(task)} className='mt-1 block text-right text-sm font-bold leading-6 transition-colors hover:text-primary sm:text-base'>{task.title}</button>
           {task.description && <p className='text-muted-foreground mt-1 line-clamp-2 max-w-2xl text-xs leading-5'>{task.description}</p>}
         </div>
       </div>
@@ -244,9 +267,8 @@ export function ManagementDashboard() {
       <span>آخرین تغییر {formatUserDateTime(task.updated_at, calendar)}</span>
     </div>
     <div className='mt-4 flex flex-wrap items-center gap-2'>
-      <Button size='sm' onClick={() => openDecision(task, 'approve')}>تأیید نتیجه</Button>
-      <Button size='sm' variant='outline' onClick={() => openDecision(task, 'changes_requested')}>درخواست اصلاح</Button>
-      <Link href={taskUrl(task)} className='mr-auto inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium text-primary hover:bg-primary/5'>کارت و گفت‌وگو <IconArrowLeft size={15} /></Link>
+      <Button size='sm' onClick={() => openTaskPanel(task)}>بازبینی و گفت‌وگو <IconArrowLeft size={15} /></Button>
+      <span className='text-muted-foreground text-xs'>تصمیم و پیام، هر دو در همین پنجره</span>
     </div>
   </article>;
 
@@ -331,14 +353,14 @@ export function ManagementDashboard() {
           <CardHeader><div className='flex items-center gap-2'><span className='rounded-xl bg-violet-100 p-2 text-violet-700 dark:bg-violet-500/20 dark:text-violet-200'><IconActivity size={21} /></span>
             <div><CardTitle className='text-lg'>آخرین حرکت‌های تیم</CardTitle><CardDescription className='mt-1'>تغییرات ثبت‌شده روی کارها</CardDescription></div></div></CardHeader>
           <CardContent className='space-y-1'>
-            {overview?.recent.slice(0, 6).map((event) => <Link key={event.id} aria-label={`باز کردن ${event.task_title}`}
-              href={`/dashboard/work?site=${encodeURIComponent(event.site_id)}&task=${event.work_item_id}`}
-              className='group flex gap-3 rounded-xl p-2.5 transition-colors hover:bg-muted/50'>
+            {overview?.recent.slice(0, 6).map((event) => <button key={event.id} type='button' aria-label={`باز کردن ${event.task_title}`}
+              onClick={() => openTaskPanel(event.work_item_id)}
+              className='group flex w-full gap-3 rounded-xl p-2.5 text-right transition-colors hover:bg-muted/50'>
               <span className='relative mt-1.5 flex size-2 shrink-0 rounded-full bg-violet-500 ring-4 ring-violet-500/10' />
               <span className='min-w-0 flex-1'><span className='block text-xs leading-5'><strong>{event.actor_username || 'سیستم'}</strong> {activityText[event.event_type] || 'کاری را به‌روز کرد'}</span>
                 <span className='mt-0.5 block truncate text-xs font-medium text-foreground group-hover:text-primary'>{event.task_title}</span>
                 <span className='text-muted-foreground mt-0.5 block truncate text-[11px]'>{event.project_name} · {formatUserDateTime(event.created_at, calendar)}</span></span>
-            </Link>)}
+            </button>)}
             {!overview?.recent.length && <p className='text-muted-foreground rounded-xl border border-dashed p-5 text-center text-xs'>هنوز فعالیتی روی کارها ثبت نشده است.</p>}
             {!!summary?.unassigned_tasks && <button type='button' onClick={() => showTasks({ focus: 'unassigned' })}
               className='mt-2 flex w-full items-center gap-2 rounded-xl border border-amber-300/60 bg-amber-50/70 p-3 text-right text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-100 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200'>
@@ -418,13 +440,13 @@ export function ManagementDashboard() {
             <button key={project.site_id} type='button' onClick={() => showTasks({ site: project.site_id, owner: selectedPersonId })}
               className='rounded-full border border-border/70 px-3 py-1.5 text-xs transition-colors hover:border-primary/40 hover:bg-muted'>{project.name} · {project.responsibility === 'lead' ? 'راهبر' : project.responsibility === 'contributor' ? 'مجری' : 'ناظر'}</button>)}
           </div>
-          <div><h3 className='mb-2 text-sm font-semibold'>کارهای باز این نفر</h3><div className='max-h-[520px] space-y-2 overflow-y-auto'>{personTasks.map((task) => <Link key={task.id} href={taskUrl(task)}
-            className='group flex items-center gap-3 rounded-xl border border-border/70 p-3 transition-colors hover:border-primary/40 hover:bg-muted/30'>
+          <div><h3 className='mb-2 text-sm font-semibold'>کارهای باز این نفر</h3><div className='max-h-[520px] space-y-2 overflow-y-auto'>{personTasks.map((task) => <button key={task.id} type='button' onClick={() => openTaskPanel(task)}
+            className='group flex w-full items-center gap-3 rounded-xl border border-border/70 p-3 text-right transition-colors hover:border-primary/40 hover:bg-muted/30'>
             <span className={`size-2 shrink-0 rounded-full ${task.status === 'review' ? 'bg-amber-500' : task.status === 'blocked' ? 'bg-rose-500' : 'bg-sky-500'}`} />
             <span className='min-w-0 flex-1'><strong className='block truncate text-sm'>{task.title}</strong>
               <span className='text-muted-foreground mt-1 block truncate text-xs'>{task.site_name} · {task.due_at ? `موعد ${formatUserDate(task.due_at, calendar)}` : 'بی‌موعد'} · چک‌لیست {number.format(task.checklist_done)}/{number.format(task.checklist_total)}</span></span>
             <Badge variant='outline'>{statusText[task.status]}</Badge><IconArrowLeft size={16} className='text-muted-foreground opacity-0 group-hover:opacity-100' />
-          </Link>)}{!personTasks.length && <p className='text-muted-foreground rounded-xl border border-dashed p-5 text-sm'>کار بازی برای این نفر ثبت نشده است.</p>}</div></div>
+          </button>)}{!personTasks.length && <p className='text-muted-foreground rounded-xl border border-dashed p-5 text-sm'>کار بازی برای این نفر ثبت نشده است.</p>}</div></div>
         </>}</CardContent></Card>
     </div>}
 
@@ -444,7 +466,7 @@ export function ManagementDashboard() {
       </article>)}{!projectRows.length && <p className='text-muted-foreground text-sm'>پروژه‌ای ثبت نشده است.</p>}
       </CardContent></Card>}
 
-    {section === 'gantt' && openWork && <ManagerGantt items={openWork.items} total={openWork.total} calendar={calendar} />}
+    {section === 'gantt' && openWork && <ManagerGantt items={openWork.items} total={openWork.total} calendar={calendar} onTask={openTaskPanel} />}
 
     {section === 'tasks' && <Card><CardHeader><CardTitle>فهرست کامل تسک‌ها</CardTitle>
       <CardDescription>نتیجه‌ها صفحه‌بندی می‌شوند؛ فیلترها فقط روی این فهرست اعمال می‌شوند و شاخص‌های بالای صفحه همچنان کل تیم را نشان می‌دهند.</CardDescription></CardHeader>
@@ -470,7 +492,7 @@ export function ManagementDashboard() {
         <td>{task.owner_name || 'بی‌مسئول'}</td><td><Badge variant='outline'>{statusText[task.status]}</Badge></td><td>{priorityText[task.priority]}</td>
         <td>{task.due_at ? formatUserDate(task.due_at, calendar) : 'بی‌موعد'}</td>
         <td>{number.format(task.status === 'verified' ? 100 : task.progress_percent)}٪ · {number.format(task.checklist_done)}/{number.format(task.checklist_total)}</td>
-        <td><Link href={taskUrl(task)} className='text-primary hover:underline'>بازکردن</Link></td>
+        <td><button type='button' onClick={() => openTaskPanel(task)} className='text-primary hover:underline'>بازبینی</button></td>
       </tr>)}</tbody></table>{!ledgerLoading && !ledger?.items.length && <p className='text-muted-foreground p-6 text-center text-sm'>تسکی با این فیلترها پیدا نشد.</p>}</div>
       <div className='flex items-center justify-between text-xs'><span>{number.format(offset + (ledger?.items.length || 0))} از {number.format(ledger?.total || 0)}</span>
         <div className='flex gap-2'><Button size='sm' variant='outline' disabled={offset === 0 || ledgerLoading} onClick={() => setOffset(Math.max(0, offset - 50))}>قبلی</Button>
@@ -499,16 +521,46 @@ export function ManagementDashboard() {
         </div></CardContent></Card>
     </div>}
 
-    <Dialog open={decision !== null} onOpenChange={(open) => { if (!open && !decisionBusy) setDecision(null); }}>
-      <DialogContent dir='rtl'><DialogHeader><DialogTitle>{decision?.value === 'approve' ? 'تأیید نتیجهٔ کار' : 'بازگرداندن برای اصلاح'}</DialogTitle>
-        <DialogDescription>{decision?.task.title} · {decision?.task.owner_name || 'بی‌مسئول'} · {decision?.task.site_name}</DialogDescription></DialogHeader>
-        {decision && <div className='space-y-3'><p className='text-muted-foreground text-xs'>پیش از تصمیم، <Link href={taskUrl(decision.task)} target='_blank' className='text-primary underline'>کارت، چک‌لیست و گفت‌وگو</Link> را بررسی کنید.</p>
-          {decision.task.verification_note && <p className='rounded-lg border p-3 text-xs'>مدرک ثبت‌شده: {decision.task.verification_note}</p>}
-          <Textarea aria-label='توضیح تصمیم' rows={4} maxLength={2000} value={decisionNote} onChange={(event) => setDecisionNote(event.target.value)}
-            placeholder={decision.value === 'approve' ? 'یادداشت تأیید (اختیاری)' : 'چه چیزی باید اصلاح شود؟ این توضیح در تاریخچه می‌ماند.'} />
-          <div className='flex gap-2'><Button disabled={decisionBusy || (decision.value === 'changes_requested' && decisionNote.trim().length < 3)} onClick={() => void saveDecision()}>
-            {decisionBusy ? 'در حال ثبت…' : decision.value === 'approve' ? 'ثبت تأیید' : 'بازگرداندن به اجرا'}</Button>
-            <Button variant='outline' disabled={decisionBusy} onClick={() => setDecision(null)}>انصراف</Button></div>
+    <Dialog open={panelTaskId !== null} onOpenChange={(open) => { if (!open) closeTaskPanel(); }}>
+      <DialogContent className='max-h-[94vh] overflow-y-auto sm:max-w-6xl' dir='rtl'>
+        <DialogHeader className='border-b border-border/60 pb-4 pr-10'>
+          <DialogTitle className='text-lg font-bold leading-7'>{panelTask?.title || 'در حال دریافت جزئیات کار…'}</DialogTitle>
+          <DialogDescription>{panelTask ? `${panelTask.site_name} · مسئول: ${panelTask.owner_name || 'بی‌مسئول'} · سازنده: ${panelTask.created_by_name || 'سیستم'}` : 'اطلاعات کار در همین صفحه باز می‌شود.'}</DialogDescription>
+        </DialogHeader>
+        {panelTask ? <div className='grid gap-4 md:grid-cols-[minmax(0,0.88fr)_minmax(0,1.12fr)]'>
+          <section className='space-y-4 md:max-h-[65vh] md:overflow-y-auto md:pl-1' aria-label='جزئیات کار'>
+            <div className='flex flex-wrap gap-2'><Badge variant='outline' className={panelTask.status === 'review' ? 'border-amber-400 bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-200' : ''}>{statusText[panelTask.status] || panelTask.status}</Badge>
+              <Badge variant='outline'>اولویت: {priorityText[panelTask.priority]}</Badge>
+              <Badge variant='secondary'>پیشرفت {number.format(panelTask.progress_percent)}٪</Badge></div>
+            <div className='rounded-2xl border border-border/70 bg-muted/20 p-4'><h3 className='text-sm font-semibold'>شرح و نتیجهٔ مورد انتظار</h3>
+              <p className='mt-2 whitespace-pre-wrap break-words text-sm leading-7'>{panelTask.description || 'توضیحی برای این کار ثبت نشده است.'}</p></div>
+            <div className='grid gap-2 sm:grid-cols-2'>{([
+              ['موعد', panelTask.due_at ? formatUserDateTime(panelTask.due_at, calendar) : 'ثبت نشده'],
+              ['شروع', panelTask.start_at ? formatUserDateTime(panelTask.start_at, calendar) : 'ثبت نشده'],
+              ['چک‌لیست', `${number.format(panelTask.checklist_done)} از ${number.format(panelTask.checklist_total)} انجام‌شده`],
+              ['آخرین تغییر', formatUserDateTime(panelTask.updated_at, calendar)]
+            ] as const).map(([label, value]) => <div key={label} className='rounded-xl border border-border/70 p-3 text-xs'>
+              <span className='text-muted-foreground block'>{label}</span><strong className='mt-1 block font-medium'>{value}</strong></div>)}</div>
+            {panelTask.verification_note && <div className='rounded-xl border border-teal-500/30 bg-teal-500/5 p-3 text-sm'><strong className='block text-xs'>مدرک یا نتیجهٔ ثبت‌شده</strong>
+              <p className='mt-1 whitespace-pre-wrap break-words leading-6'>{panelTask.verification_note}</p></div>}
+            {panelTask.blocked_reason && <div className='rounded-xl border border-rose-500/30 bg-rose-500/5 p-3 text-sm'><strong className='block text-xs'>دلیل مانع</strong>
+              <p className='mt-1 whitespace-pre-wrap break-words leading-6'>{panelTask.blocked_reason}</p></div>}
+            <Link href={taskUrl(panelTask)} className='text-muted-foreground inline-flex items-center gap-1 text-xs underline-offset-4 hover:text-primary hover:underline'>باز کردن ویرایشگر کامل تسک <IconArrowLeft size={14} /></Link>
+          </section>
+          <div className='md:max-h-[65vh] md:overflow-y-auto md:pl-1'>
+            <TaskDiscussion key={panelTask.id} item={panelTask} embedded canEdit={false} canComment canModerate meId={null}
+              onChanged={() => setRevision((current) => current + 1)} />
+          </div>
+        </div> : <div className='rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground'>در حال دریافت جزئیات و گفت‌وگو…</div>}
+        {panelTask?.status === 'review' && <div className='sticky -bottom-4 -mx-4 -mb-4 space-y-3 border-t bg-popover/95 p-4 shadow-[0_-8px_24px_rgba(0,0,0,.06)] backdrop-blur'>
+          <div className='flex flex-wrap items-center justify-between gap-2'><strong className='text-sm'>تصمیم بازبینی</strong>
+            <span className='text-muted-foreground text-xs'>برای گفت‌وگو با مسئول، از کادر پیام بالا استفاده کنید.</span></div>
+          <Textarea aria-label='یادداشت تصمیم بازبینی' rows={2} maxLength={2000} value={decisionNote} onChange={(event) => setDecisionNote(event.target.value)}
+            placeholder='یادداشت تأیید اختیاری است؛ برای درخواست اصلاح، دلیل را همین‌جا بنویسید.' />
+          <div className='flex flex-wrap items-center gap-2'><Button disabled={decisionBusy || panelLoading} onClick={() => void saveDecision('approve')}>
+            {decisionBusy ? 'در حال ثبت…' : 'تأیید نتیجه'}</Button>
+            <Button variant='outline' disabled={decisionBusy || panelLoading || decisionNote.trim().length < 3} onClick={() => void saveDecision('changes_requested')}>درخواست اصلاح با دلیل</Button>
+            <span className='text-muted-foreground text-xs'>تصمیم و توضیح آن برای مسئول ثبت و اعلان می‌شود.</span></div>
         </div>}
       </DialogContent>
     </Dialog>

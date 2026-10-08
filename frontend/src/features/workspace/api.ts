@@ -27,6 +27,7 @@ export type CommandWorkItem = WorkItem & {
   labels: WorkLabel[];
   custom_fields?: { id: number; name: string; field_type: WorkCustomField['field_type']; value: string | number }[];
 };
+export type WorkItemRef = Pick<CommandWorkItem, 'id' | 'site_id'>;
 export type WorkTeam = { id: number; name: string; color: string; description: string; active: boolean;
   members: number; open_work: number };
 export type WorkPerson = { id: number; full_name: string; active: boolean; team_id: number | null; role: string };
@@ -116,6 +117,7 @@ export const commandApi = {
     Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== '') query.set(key, String(value)); });
     return api<ManagementTaskLedger>(`/work/team-management/tasks?${query.toString()}`);
   },
+  managementTask: (id: number) => api<ManagementTask>(`/work/team-management/tasks/${id}`),
   reviewTask: (item: Pick<ManagementTask, 'id' | 'site_id'>,
                decision: 'approve' | 'changes_requested', note: string) =>
     api<CommandWorkItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}`, {
@@ -192,21 +194,21 @@ export const commandApi = {
   events: (item: CommandWorkItem) =>
     api<{ id: number; event_type: string; before_json: string | null; after_json: string; note: string | null; actor_username: string | null; created_at: string }[]>(
       `/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/events`),
-  discussion: (item: CommandWorkItem) =>
+  discussion: (item: WorkItemRef) =>
     api<TaskDiscussionData>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/discussion`),
-  addComment: (item: CommandWorkItem, text: string) =>
+  addComment: (item: WorkItemRef, text: string) =>
     api(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/comments`, { method: 'POST', json: { text } }),
-  editComment: (item: CommandWorkItem, commentId: number, text: string) =>
+  editComment: (item: WorkItemRef, commentId: number, text: string) =>
     api(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/comments/${commentId}`,
       { method: 'PATCH', json: { text } }),
   subtasks: (item: CommandWorkItem) =>
     api<CommandWorkItem[]>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/subtasks`),
   createSubtask: (item: CommandWorkItem, title: string) =>
     api<CommandWorkItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/subtasks`, { method: 'POST', json: { title } }),
-  checklist: (item: CommandWorkItem) => api<WorkChecklistItem[]>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist`),
-  addChecklist: (item: CommandWorkItem, title: string) => api<WorkChecklistItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist`, { method: 'POST', json: { title } }),
-  toggleChecklist: (item: CommandWorkItem, checklistId: number, done: boolean) => api<WorkChecklistItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist/${checklistId}`, { method: 'PATCH', json: { done } }),
-  removeChecklist: (item: CommandWorkItem, checklistId: number) => api(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist/${checklistId}`, { method: 'DELETE' }),
+  checklist: (item: WorkItemRef) => api<WorkChecklistItem[]>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist`),
+  addChecklist: (item: WorkItemRef, title: string) => api<WorkChecklistItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist`, { method: 'POST', json: { title } }),
+  toggleChecklist: (item: WorkItemRef, checklistId: number, done: boolean) => api<WorkChecklistItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist/${checklistId}`, { method: 'PATCH', json: { done } }),
+  removeChecklist: (item: WorkItemRef, checklistId: number) => api(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist/${checklistId}`, { method: 'DELETE' }),
   labels: (siteId: string) => api<WorkLabel[]>(`/sites/${encodeURIComponent(siteId)}/work/labels`),
   itemLabels: (item: CommandWorkItem) => api<WorkLabel[]>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/labels`),
   createLabel: (siteId: string, body: { name: string; color: string }) =>

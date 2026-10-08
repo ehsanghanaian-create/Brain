@@ -670,6 +670,16 @@ def test_manager_dashboard_and_admin_task_override(client):
     assert len(ledger.json()["items"]) == 1
     assert ledger.json()["items"][0]["id"] == task["id"]
     assert ledger.json()["items"][0]["checklist_total"] == 1
+    detail_url = f"{ledger_url}/{task['id']}"
+    assert client.get(detail_url, headers=worker).status_code == 403
+    assert client.get(detail_url, headers=other_admin).status_code == 403
+    detail = client.get(detail_url, headers=manager)
+    assert detail.status_code == 200 and detail.json()["id"] == task["id"]
+    assert detail.json()["owner_name"] and detail.json()["checklist_total"] == 1
+    assert client.post(f"{base}/{task['id']}/comments", headers=manager,
+                       json={"text": "Manager feedback inside task"}).status_code == 201
+    discussion = client.get(f"{base}/{task['id']}/discussion", headers=manager).json()
+    assert any(row["note"] == "Manager feedback inside task" for row in discussion["messages"])
     assert client.get(ledger_url + "?site_id=demo&owner_id=1&focus=unscheduled&limit=1&offset=1",
                       headers=manager).json()["items"] == []
     assert client.get(ledger_url + "?status=made_up", headers=manager).status_code == 422

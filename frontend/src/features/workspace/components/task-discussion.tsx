@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { formatUserDateTime, useDatePreference } from '@/lib/date-preference';
-import { commandApi, type CommandWorkItem, type TaskDiscussionData, type WorkChecklistItem } from '../api';
+import { commandApi, type TaskDiscussionData, type WorkChecklistItem, type WorkItemRef } from '../api';
 
 const noteType: Record<string, string> = {
   created: 'توضیح هنگام ایجاد', updated: 'یادداشت تغییر', handoff: 'دلیل ارجاع',
@@ -20,10 +20,10 @@ const activityType: Record<string, string> = {
   handoff: 'ارجاع شد'
 };
 
-export function TaskDiscussion({ item, canEdit, canComment, meId, canModerate, onChanged }: {
-  item: CommandWorkItem; canEdit: boolean; canComment: boolean;
+export function TaskDiscussion({ item, canEdit, canComment, meId, canModerate, onChanged, embedded = false }: {
+  item: WorkItemRef; canEdit: boolean; canComment: boolean;
   meId: number | null; canModerate: boolean;
-  onChanged: () => void;
+  onChanged: () => void; embedded?: boolean;
 }) {
   const { calendar } = useDatePreference();
   const input = useRef<HTMLTextAreaElement>(null);
@@ -125,7 +125,7 @@ export function TaskDiscussion({ item, canEdit, canComment, meId, canModerate, o
     });
   }
 
-  return <section className='space-y-4 border-t pt-4 sm:col-span-2'>
+  return <section className={embedded ? 'space-y-4' : 'space-y-4 border-t pt-4 sm:col-span-2'}>
     <div className='overflow-hidden rounded-xl border bg-muted/10'>
       <div className='flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3'>
         <div><h3 className='text-sm font-semibold'>گفت‌وگوی کار</h3>

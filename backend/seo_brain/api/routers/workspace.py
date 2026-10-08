@@ -462,6 +462,32 @@ def team_management_tasks(request: Request, site_id: str | None = None,
                 for row in workload]}
 
 
+@router.get("/team-management/tasks/{item_id}")
+def team_management_task(item_id: int, request: Request, eng: Engine = Depends(engine)) -> dict:
+    """Fresh task details for the manager's in-place review and discussion panel."""
+    actor = getattr(request.state, "panel_user", None)
+    if not actor or actor["role"] != "admin" or not actor["is_superadmin"]:
+        raise HTTPException(403, "فقط مدیر کل به مدیریت تیم دسترسی دارد")
+    with eng.connect() as cx:
+        row = cx.execute(text("""SELECT w.id,w.site_id,s.name AS site_name,w.title,w.description,
+            w.verification_note,w.status,w.priority,w.owner_id,u.full_name AS owner_name,
+            w.team_id,w.created_by_id,creator.full_name AS created_by_name,w.parent_id,
+            w.start_at,w.due_at,w.progress_percent,w.estimated_hours,w.created_at,w.updated_at,
+            w.blocked_reason,
+            ((SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id) +
+             (SELECT COUNT(*) FROM work_items child WHERE child.parent_id=w.id AND child.deleted_at IS NULL)) AS checklist_total,
+            ((SELECT COUNT(*) FROM work_checklist_items ci WHERE ci.work_item_id=w.id AND ci.done=1) +
+             (SELECT COUNT(*) FROM work_items child WHERE child.parent_id=w.id AND child.deleted_at IS NULL AND child.status='verified')) AS checklist_done,
+            (SELECT COUNT(*) FROM work_items child WHERE child.parent_id=w.id AND child.deleted_at IS NULL) AS subtasks
+            FROM work_items w JOIN sites s ON s.site_id=w.site_id
+            LEFT JOIN panel_users u ON u.id=w.owner_id
+            LEFT JOIN panel_users creator ON creator.id=w.created_by_id
+            WHERE w.id=:id AND w.deleted_at IS NULL"""), {"id": item_id}).mappings().first()
+    if not row:
+        raise HTTPException(404, "work item not found")
+    return dict(row)
+
+
 @router.get("/overview")
 def overview(site_id: str | None = None, owner_id: int | None = None, team_id: int | None = None,
              status: str | None = None, priority: str | None = None, q: str | None = None,

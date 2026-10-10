@@ -210,13 +210,30 @@ def _crawl_coverage(cx, site_id: str) -> dict[str, Any]:
     if not isinstance(notes, dict):
         notes = {}
     sitemap_urls = max(0, int(notes.get("sitemap_urls") or 0))
+    if not sitemap_urls:
+        # An active crawl has no final notes yet. Keep the last observed sitemap
+        # size visible instead of reporting a misleading "0 of N" coverage.
+        prior = _rows(cx, """SELECT notes FROM crawl_runs WHERE site_id=:s AND notes IS NOT NULL
+            ORDER BY started_at DESC LIMIT 20""", s=site_id)
+        for row in prior:
+            try:
+                previous_notes = json.loads(row.get("notes") or "{}")
+                sitemap_urls = max(0, int(previous_notes.get("sitemap_urls") or 0))
+            except (ValueError, TypeError, AttributeError):
+                continue
+            if sitemap_urls:
+                break
     cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
     recent = (_one(cx, """SELECT COUNT(*) AS n FROM pages WHERE site_id=:s AND in_sitemap=1
         AND crawl_status='ok' AND last_crawled>=:cutoff""", s=site_id, cutoff=cutoff) or {}).get("n", 0)
     complete = latest["status"] == "completed" and sitemap_urls > 0 and recent >= sitemap_urls
+    latest_crawled = int(latest.get("urls_crawled") or 0)
+    if latest["status"] in ("queued", "running"):
+        latest_crawled = int((_one(cx, "SELECT COUNT(*) AS n FROM pages WHERE site_id=:s AND crawl_run_id=:r",
+                                   s=site_id, r=latest["run_id"]) or {}).get("n", 0))
     return {"status": latest["status"], "coverage_status": "complete" if complete else "partial",
             "sitemap_urls": sitemap_urls, "recent_crawled": int(recent), "window_days": 30,
-            "latest_crawled": int(latest.get("urls_crawled") or 0), "max_urls": latest.get("max_urls"),
+            "latest_crawled": latest_crawled, "max_urls": latest.get("max_urls"),
             "started_at": latest.get("started_at"), "run_id": latest.get("run_id")}
 
 

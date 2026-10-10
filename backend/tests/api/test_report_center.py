@@ -95,6 +95,24 @@ def test_summary_counts_only_indexable_sitemap_pages(client):
     assert summary["counts"]["indexable_pages"] == 1
 
 
+def test_summary_uses_prior_sitemap_size_during_running_crawl(client):
+    _seed(client)
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO crawl_runs(run_id,site_id,started_at,max_urls,urls_crawled,status,notes)
+            VALUES('prior','demo','2026-01-01T00:00:00Z',20,20,'completed_capped',:notes)"""),
+                   {"notes": json.dumps({"sitemap_urls": 30})})
+        cx.execute(text("""INSERT INTO crawl_runs(run_id,site_id,started_at,max_urls,urls_crawled,status)
+            VALUES('current','demo',:at,60,0,'running')"""), {"at": stamp})
+        cx.execute(text("""INSERT INTO pages(site_id,url,in_sitemap,crawl_status,last_crawled,crawl_run_id)
+            VALUES('demo','https://demo.example/a/',1,'ok',:at,'current')"""), {"at": stamp})
+    summary = client.get("/api/v1/sites/demo/report/summary").json()
+    assert summary["crawl_coverage"]["sitemap_urls"] == 30
+    assert summary["crawl_coverage"]["latest_crawled"] == 1
+    assert summary["crawl_coverage"]["coverage_status"] == "partial"
+    assert summary["score"] is None
+
+
 def test_main_keyword_set_and_weighted_position(client):
     _seed(client)
     _seed_gsc(client)

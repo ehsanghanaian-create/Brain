@@ -207,8 +207,12 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
                 <div className='rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200'>
                   {summary.crawl_coverage.coverage_status === 'not_started' ? (
                     'هنوز خزشی برای این سایت ثبت نشده است؛ امتیاز و شمار مشکلات، تصویر کامل SEO سایت نیست.'
+                  ) : summary.crawl_coverage.status === 'running' || summary.crawl_coverage.status === 'queued' ? (
+                    <>خزش تازه در حال اجراست: {fa.format(summary.crawl_coverage.latest_crawled)} URL بررسی شده است. آخرین موجودی سایت‌مپ {fa.format(summary.crawl_coverage.sitemap_urls)} URL دارد. گزارش تا پایان خزش موقت است و امتیاز نمایش داده نمی‌شود.</>
+                  ) : summary.crawl_coverage.status === 'completed_capped' ? (
+                    <>خزش پس از {fa.format(summary.crawl_coverage.latest_crawled)} URL به سقف {fa.format(summary.crawl_coverage.max_urls ?? 0)} رسید. با اینکه {fa.format(summary.crawl_coverage.recent_crawled)} URL سایت‌مپ در {fa.format(summary.crawl_coverage.window_days)} روز اخیر بررسی شده‌اند، گراف لینک‌ها هنوز کامل نیست؛ امتیاز و هشدارهای وابسته به لینک ورودی نمایش داده نمی‌شوند.</>
                   ) : (
-                    <>پوشش خزش محدود است: {fa.format(summary.crawl_coverage.recent_crawled)} URL در {fa.format(summary.crawl_coverage.window_days)} روز اخیر از {fa.format(summary.crawl_coverage.sitemap_urls)} URL سایت‌مپ بررسی شده‌اند. تا کامل شدن خزش، کمبود لینک ورودی به عنوان مشکل ثبت نمی‌شود. امتیاز و شمار مشکلات را نتیجهٔ قطعی کل سایت ندانید.</>
+                    <>پوشش خزش هنوز کامل نیست: {fa.format(summary.crawl_coverage.recent_crawled)} URL سایت‌مپ در {fa.format(summary.crawl_coverage.window_days)} روز اخیر از {fa.format(summary.crawl_coverage.sitemap_urls)} URL شناخته‌شده بررسی شده‌اند. امتیاز و شمار مشکلات را نتیجهٔ قطعی کل سایت ندانید.</>
                   )}
                 </div>
               </CardContent>

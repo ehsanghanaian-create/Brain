@@ -198,7 +198,7 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
               <div className='text-center'>
                 <div className='text-3xl font-bold tabular-nums'>{summary.score == null ? '—' : fa.format(summary.score)}<span className='text-muted-foreground text-base'>/۱۰۰</span></div>
                 <div className='text-muted-foreground text-xs' title={`جریمه مشکلات: ${summary.score_breakdown.problems_penalty} · جریمه اتصال‌ها: ${summary.score_breakdown.connections_penalty}`}>
-                  {summary.crawl_coverage.coverage_status === 'complete' ? 'امتیاز سلامت سئو' : 'امتیاز پس از تکمیل خزش نمایش داده می‌شود'}
+                  {summary.crawl_coverage.coverage_status === 'complete' ? 'امتیاز قواعد فنی بررسی‌شده؛ شامل رتبه و کیفیت محتوا نیست' : 'امتیاز پس از تکمیل خزش نمایش داده می‌شود'}
                 </div>
               </div>
             </CardHeader>

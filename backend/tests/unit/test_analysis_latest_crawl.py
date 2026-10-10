@@ -50,6 +50,9 @@ def test_partial_sitemap_does_not_invent_missing_inbound_links(tmp_path):
             indexable,word_count,images_missing_alt,in_sitemap,last_crawled)
             VALUES('demo','https://demo.example/b/','ok',200,'B','["B"]',1,1,500,0,1,?)""", (now,))
         run_analysis(conn, site)
+        assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='orphan'").fetchone()[0] == 0
+        conn.execute("UPDATE crawl_runs SET status='completed' WHERE run_id='crawl-current'")
+        run_analysis(conn, site)
         assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='orphan'").fetchone()[0] == 2
 
 

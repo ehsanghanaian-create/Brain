@@ -103,6 +103,7 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
     # crawl covers only a rotating slice, so combine pages seen within the
     # last 30 days instead of analysing just its most recent 20 URLs.
     full_crawl = None
+    full_crawl_complete = False
     sitemap_urls = 0
     for crawl in rows(conn, "SELECT started_at,status,notes FROM crawl_runs WHERE site_id=? AND status IN ('completed','completed_capped') ORDER BY started_at DESC LIMIT 100", (sid,)):
         try:
@@ -110,13 +111,14 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
         except (ValueError, TypeError):
             notes = {}
         if not isinstance(notes, dict) or notes.get("scope") != "targeted":
+            full_crawl_complete = crawl["status"] == "completed"
             sitemap_urls = max(0, int(notes.get("sitemap_urls") or 0)) if isinstance(notes, dict) else 0
             full_crawl = ((datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
                           if crawl["status"] == "completed_capped" else crawl["started_at"])
             break
     # Missing inbound links cannot be inferred from a graph built from only a
     # rotating slice of the sitemap. Positive per-page observations remain valid.
-    link_graph_complete = True
+    link_graph_complete = full_crawl_complete
     fresh_sitemap_pages = 0
     if sitemap_urls:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
@@ -124,7 +126,7 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
             "SELECT COUNT(*) FROM pages WHERE site_id=? AND in_sitemap=1 AND crawl_status='ok' "
             "AND h1_count IS NOT NULL AND last_crawled>=?", (sid, cutoff)
         ).fetchone()[0]
-        link_graph_complete = fresh_sitemap_pages >= sitemap_urls
+        link_graph_complete = full_crawl_complete and fresh_sitemap_pages >= sitemap_urls
     page_sql = "SELECT * FROM pages WHERE site_id=? AND crawl_status='ok' AND h1_count IS NOT NULL"
     crawled_pages = rows(conn, page_sql + (" AND last_crawled>=?" if full_crawl else ""),
                          (sid, full_crawl) if full_crawl else (sid,))

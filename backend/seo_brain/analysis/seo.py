@@ -223,8 +223,18 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
                                                                         "gsc_impressions": gsc_impressions.get(u, 0)}, run_id=run_id); counts["problems"] += 1
         if p["indexable"] == 1 and (p["word_count"] or 0) < THIN_WORDS and "/category/" not in u and "/page/" not in u:
             _problem(conn, sid, "thin_content", "medium", u, {"word_count": p["word_count"], "threshold": THIN_WORDS}, run_id=run_id); counts["problems"] += 1
-        if (p["images_missing_alt"] or 0) > 0:
-            _problem(conn, sid, "images_missing_alt", "low", u, {"images_missing_alt": p["images_missing_alt"]}, run_id=run_id); counts["problems"] += 1
+        # Re-evaluate stored image markup so old crawls that counted explicit
+        # alt="" as missing do not keep producing false findings.
+        if p["images"] is not None:
+            try:
+                images = json.loads(p["images"] or "[]")
+            except (ValueError, TypeError):
+                images = []
+            missing_alt = sum(1 for image in images if image.get("alt") is None and not image.get("decorative"))
+        else:
+            missing_alt = p["images_missing_alt"] or 0
+        if missing_alt > 0:
+            _problem(conn, sid, "images_missing_alt", "low", u, {"images_missing_alt": missing_alt}, run_id=run_id); counts["problems"] += 1
         if p["title"]:
             titles[p["title"].strip()].append(u)
         if h1:

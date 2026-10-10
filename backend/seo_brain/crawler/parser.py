@@ -17,7 +17,9 @@ def _clean(s: str | None) -> str:
 
 
 def image_is_decorative(img) -> bool:
-    """Respect explicit accessibility markup on an image or its container."""
+    """Respect an explicit empty alt or presentational accessibility markup."""
+    if img.has_attr("alt") and not _clean(img.get("alt")):
+        return True
     return any(
         node.get("aria-hidden", "").lower() == "true" or node.get("role", "").lower() in {"presentation", "none"}
         for node in (img, *img.parents)

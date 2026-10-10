@@ -49,7 +49,7 @@ def test_schema_and_images_and_hash():
 def test_explicitly_decorative_image_does_not_need_alt():
     html = '<main><a href="/cars/"><figure aria-hidden="true"><img src="/decorative.webp" alt=""></figure><h3>خودرو</h3></a><img src="/content.jpg" alt=""><img src="/missing.jpg"></main>'
     p = parse_html(html, "https://example.com/")
-    assert [img["decorative"] for img in p.images] == [True, False, False]
+    assert [img["decorative"] for img in p.images] == [True, True, False]
     from bs4 import BeautifulSoup
     images = BeautifulSoup(html, "html.parser").find_all("img")
-    assert [image_needs_alt(img) for img in images] == [False, True, True]
+    assert [image_needs_alt(img) for img in images] == [False, False, True]

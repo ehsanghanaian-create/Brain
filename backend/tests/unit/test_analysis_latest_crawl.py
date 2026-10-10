@@ -98,6 +98,28 @@ def test_tracking_variants_do_not_become_separate_problem_pages(tmp_path):
         assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='images_missing_alt'").fetchone()[0] == 0
 
 
+def test_explicit_empty_alt_is_not_a_missing_alt_finding_in_old_snapshot(tmp_path):
+    site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    images = [{"src": "https://demo.example/decorative.webp", "alt": "", "decorative": False},
+              {"src": "https://demo.example/missing.webp", "alt": None, "decorative": False}]
+    with db(tmp_path / "seo.db") as conn:
+        ensure_site(conn, site)
+        conn.execute("""INSERT INTO crawl_runs(run_id,site_id,started_at,status,notes)
+            VALUES('crawl-current','demo',?,'completed','{"scope":"site","sitemap_urls":1}')""", (now,))
+        conn.execute("""INSERT INTO pages(site_id,url,crawl_status,status_code,title,h1,h1_count,
+            indexable,word_count,images,images_missing_alt,in_sitemap,last_crawled)
+            VALUES('demo','https://demo.example/','ok',200,'Home','["Home"]',1,1,500,?,2,1,?)""",
+            (json.dumps(images), now))
+        run_analysis(conn, site)
+        row = conn.execute("SELECT detail FROM seo_problems WHERE problem_type='images_missing_alt'").fetchone()
+        assert json.loads(row[0])["images_missing_alt"] == 1
+        images.pop()
+        conn.execute("UPDATE pages SET images=? WHERE site_id='demo'", (json.dumps(images),))
+        run_analysis(conn, site)
+        assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='images_missing_alt'").fetchone()[0] == 0
+
+
 def test_parser_counts_main_outside_malformed_body():
     html = "<html><body></body><main><h1>Current page</h1><p>Useful text for readers</p></main></html>"
     parsed = parse_html(html, "https://demo.example/")

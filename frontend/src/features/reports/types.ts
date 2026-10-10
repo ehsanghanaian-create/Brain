@@ -18,6 +18,17 @@ export interface ReportSummary {
   days: number;
   score: number;
   score_breakdown: { problems_penalty: number; connections_penalty: number };
+  crawl_coverage: {
+    status: string;
+    coverage_status: 'complete' | 'partial' | 'not_started';
+    sitemap_urls: number;
+    recent_crawled: number;
+    window_days: number;
+    latest_crawled: number;
+    max_urls: number | null;
+    started_at: string | null;
+    run_id?: string;
+  };
   gsc: {
     available: boolean;
     date_from?: string;

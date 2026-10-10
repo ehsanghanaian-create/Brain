@@ -1,6 +1,7 @@
 """Site Report Center tests: summary, main keyword, keyword performance (weighted position),
 problems/opportunities exposure, backlink & reportage CRUD + verification, site isolation."""
 import json
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -56,6 +57,29 @@ def test_summary_empty_site_is_honest(client):
     assert body["main_keyword"]["keyword"] is None
     assert body["counts"]["backlinks"] == 0 and body["counts"]["reportages"] == 0
     assert 0 <= body["score"] <= 100  # penalised for missing connections, still real
+    assert body["crawl_coverage"]["coverage_status"] == "not_started"
+
+
+def test_summary_discloses_capped_crawl_coverage(client):
+    _seed(client)
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO crawl_runs(run_id,site_id,started_at,max_urls,urls_crawled,status,notes)
+            VALUES('crawl-1','demo',:at,20,2,'completed_capped',:notes)"""),
+                   {"at": stamp, "notes": json.dumps({"sitemap_urls": 100})})
+        for path in ("a", "b"):
+            cx.execute(text("""INSERT INTO pages(site_id,url,in_sitemap,crawl_status,last_crawled)
+                VALUES('demo',:url,1,'ok',:at)"""),
+                       {"url": f"https://demo.example/{path}/", "at": stamp})
+    coverage = client.get("/api/v1/sites/demo/report/summary").json()["crawl_coverage"]
+    assert coverage["coverage_status"] == "partial"
+    assert coverage["sitemap_urls"] == 100
+    assert coverage["recent_crawled"] == 2
+    assert coverage["latest_crawled"] == 2
+    with client.eng.begin() as cx:
+        cx.execute(text("UPDATE crawl_runs SET notes=:notes WHERE run_id='crawl-1'"),
+                   {"notes": json.dumps({"sitemap_urls": 2})})
+    assert client.get("/api/v1/sites/demo/report/summary").json()["crawl_coverage"]["coverage_status"] == "complete"
 
 
 def test_main_keyword_set_and_weighted_position(client):

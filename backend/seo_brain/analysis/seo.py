@@ -13,6 +13,7 @@ import logging
 import re
 import sqlite3
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote, urlsplit
 
 from rapidfuzz import fuzz
@@ -42,6 +43,15 @@ def _h1_comparison_url(url: str) -> str:
     parts = urlsplit(url)
     path = re.sub(r"/page/(?:[2-9]|[1-9]\d+)/?$", "/", unquote(parts.path))
     return f"{parts.scheme}://{parts.netloc}{path.rstrip('/')}/"
+
+
+def _redirects_to_other_document(page: sqlite3.Row) -> bool:
+    """A redirect's final HTML belongs to its destination, not its source URL."""
+    if not page["redirect_chain"] or page["redirect_chain"] == "[]" or not page["final_url"]:
+        return False
+    source = unquote(urlsplit(page["url"]).path).rstrip("/").casefold()
+    destination = unquote(urlsplit(page["final_url"]).path).rstrip("/").casefold()
+    return source != destination
 
 
 def _distinct_document_urls(urls: list[str], by_url: dict, *, collapse_pagination: bool = True) -> list[str]:
@@ -89,21 +99,23 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
                  (run_id, sid, "analysis", utcnow(), "running"))
     _clear(conn, sid, run_id)
     # Pages are retained across crawls for history and targeted verification.
-    # A full crawl must not keep reporting pages that disappeared from the
-    # sitemap/link graph or now redirect elsewhere. Targeted recrawls performed
-    # after the full crawl remain eligible through their last_crawled timestamp.
+    # An uncapped full crawl replaces the previous snapshot. A capped daily
+    # crawl covers only a rotating slice, so combine pages seen within the
+    # last 30 days instead of analysing just its most recent 20 URLs.
     full_crawl = None
-    for crawl in rows(conn, "SELECT started_at,notes FROM crawl_runs WHERE site_id=? AND status IN ('completed','completed_capped') ORDER BY started_at DESC LIMIT 100", (sid,)):
+    for crawl in rows(conn, "SELECT started_at,status,notes FROM crawl_runs WHERE site_id=? AND status IN ('completed','completed_capped') ORDER BY started_at DESC LIMIT 100", (sid,)):
         try:
             notes = json.loads(crawl["notes"] or "{}")
         except (ValueError, TypeError):
             notes = {}
         if not isinstance(notes, dict) or notes.get("scope") != "targeted":
-            full_crawl = crawl["started_at"]
+            full_crawl = ((datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
+                          if crawl["status"] == "completed_capped" else crawl["started_at"])
             break
     page_sql = "SELECT * FROM pages WHERE site_id=? AND crawl_status='ok' AND h1_count IS NOT NULL"
-    pages = rows(conn, page_sql + (" AND last_crawled>=?" if full_crawl else ""),
-                 (sid, full_crawl) if full_crawl else (sid,))
+    crawled_pages = rows(conn, page_sql + (" AND last_crawled>=?" if full_crawl else ""),
+                         (sid, full_crawl) if full_crawl else (sid,))
+    pages = [page for page in crawled_pages if not _redirects_to_other_document(page)]
     by_url = {p["url"]: p for p in pages}
     home = site.canonical_url
     # inbound/outbound from real crawled links (distinct source pages, self-links excluded)
@@ -120,6 +132,14 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
     gsc_impressions = {r["page"]: r["impressions"] for r in rows(
         conn, "SELECT page, SUM(impressions) AS impressions FROM gsc_query_page WHERE site_id=? GROUP BY page", (sid,))}
     counts = {"problems": 0, "opportunities": 0}
+
+    # Report a stale sitemap entry at its source URL, but never attribute the
+    # destination's headings, images or links to that redirected URL.
+    for p in crawled_pages:
+        if p["redirect_chain"] and json.loads(p["redirect_chain"]) and p["in_sitemap"]:
+            _problem(conn, sid, "redirect_in_sitemap", "medium", p["url"],
+                     {"chain": json.loads(p["redirect_chain"]), "final_url": p["final_url"]}, run_id=run_id)
+            counts["problems"] += 1
 
     # --- link structure ---------------------------------------------------------
     for p in pages:
@@ -172,8 +192,6 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
             _problem(conn, sid, "thin_content", "medium", u, {"word_count": p["word_count"], "threshold": THIN_WORDS}, run_id=run_id); counts["problems"] += 1
         if (p["images_missing_alt"] or 0) > 0:
             _problem(conn, sid, "images_missing_alt", "low", u, {"images_missing_alt": p["images_missing_alt"]}, run_id=run_id); counts["problems"] += 1
-        if p["redirect_chain"] and json.loads(p["redirect_chain"]) and p["in_sitemap"]:
-            _problem(conn, sid, "redirect_in_sitemap", "medium", u, {"chain": json.loads(p["redirect_chain"]), "final_url": p["final_url"]}, run_id=run_id); counts["problems"] += 1
         if p["title"]:
             titles[p["title"].strip()].append(u)
         if h1:

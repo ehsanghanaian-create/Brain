@@ -1,9 +1,12 @@
 """API tests against an isolated temporary database (no dependency on data/seo.db)."""
 import json
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from openpyxl import Workbook
 
 from seo_brain.api import deps
 from seo_brain.api.main import create_app
@@ -50,6 +53,229 @@ def test_health_reports_migrations(client):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok" and "0002" in body["migrations"]["applied"] and body["migrations"]["pending"] == []
+
+
+def test_call_attribution_uses_actual_call_time_and_preserves_manual_choice(client):
+    _seed(client)
+    at = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(days=1)
+    ts = at.isoformat()
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO track_sessions(session_id,site_id,visitor_id,day,started_at,last_seen_at,channel)
+            VALUES ('organic-session','demo','visitor',:day,:ts,:ts,'organic')"""), {"day": ts[:10], "ts": ts})
+        cx.execute(text("""INSERT INTO track_events(site_id,session_id,day,ts,type,label)
+            VALUES ('demo','organic-session',:day,:ts,'tel_click','02100000000')"""), {"day": ts[:10], "ts": ts})
+    created = client.post('/api/v1/call-center/calls', json={"site_id": "demo", "occurred_at": ts,
+        "customer_name": "Test Caller", "phone": "09120000000"})
+    assert created.status_code == 201, created.text
+    row = created.json()
+    assert row["source"] == "seo" and row["source_confidence"] == "probable" and row["auto_attributed"] == 1
+    assert row["attribution_event"].startswith("track:")
+    second = client.post('/api/v1/call-center/calls', json={"site_id": "demo", "occurred_at": ts,
+        "customer_name": "Another Caller", "phone": "09120000002"})
+    assert second.status_code == 201 and second.json()["source"] == "unknown"
+    # A second possible caller click makes the identity ambiguous on recheck.
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO track_events(site_id,session_id,day,ts,type,label)
+            VALUES ('demo','organic-session',:day,:ts,'tel_click','02100000000')"""), {"day": ts[:10], "ts": ts})
+    reconciled = client.post('/api/v1/call-center/reconcile', params={"site_id": "demo"})
+    assert reconciled.status_code == 200 and reconciled.json()["changed"] == 1
+    row = client.get('/api/v1/call-center/calls', params={"site_id": "demo"}).json()["items"][0]
+    assert row["source"] == "unknown" and row["auto_attributed"] == 0
+    manual = client.patch(f'/api/v1/call-center/calls/{row["id"]}', json={"source": "ads", "source_basis": "manual"})
+    assert manual.status_code == 200 and manual.json()["auto_attributed"] == 0
+    client.post('/api/v1/call-center/reconcile', params={"site_id": "demo"})
+    assert client.get('/api/v1/call-center/calls', params={"site_id": "demo"}).json()["items"][0]["source"] == "ads"
+
+
+def test_phone_required_for_manual_calls_and_edits(client):
+    path = '/api/v1/call-center/calls'
+    assert client.post(path, json={"customer_name": "Test Caller"}).status_code == 422
+    assert client.post(path, json={"customer_name": "Test Caller", "phone": " + "}).status_code == 422
+    created = client.post(path, json={"customer_name": "Test Caller", "phone": "۰۹۱۲۳۴۵۶۷۸۹"})
+    assert created.status_code == 201 and created.json()["phone"] == "09123456789"
+    assert client.patch(f'{path}/{created.json()["id"]}', json={"phone": ""}).status_code == 422
+
+
+def test_panel_login_role_access_and_audit(client):
+    from seo_brain.api.panel_auth import hash_password
+    _seed(client)
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO panel_users(full_name,email,username,password_hash,role,active,created_at,updated_at)
+            VALUES ('Admin','admin@example.test','admin',:hash,'admin',1,:at,:at)"""),
+            {"hash": hash_password("correct-test-password"), "at": datetime.now(timezone.utc).isoformat()})
+    assert client.get('/api/v1/sites').status_code == 401
+    bad = client.post('/api/v1/auth/login', json={"username": "admin", "password": "bad-password"})
+    assert bad.status_code == 401
+    login = client.post('/api/v1/auth/login', json={"username": "admin", "password": "correct-test-password"})
+    assert login.status_code == 200 and login.json()["user"]["role"] == "admin"
+    admin_headers = {"Authorization": "Bearer " + login.json()["token"]}
+    created = client.post('/api/v1/call-center/users', headers=admin_headers, json={
+        "full_name": "Call Operator", "email": "operator@example.test", "username": "operator",
+        "password": "operator-test-password", "role": "call_center"})
+    assert created.status_code == 201 and "password_hash" not in created.json()
+    operator_login = client.post('/api/v1/auth/login', json={"username": "operator", "password": "operator-test-password"})
+    op_headers = {"Authorization": "Bearer " + operator_login.json()["token"]}
+    assert client.get('/api/v1/sites', headers=op_headers).status_code == 200
+    assert client.get('/api/v1/portfolio/overview', headers=op_headers).status_code == 403
+    assert client.post('/api/v1/call-center/users', headers=op_headers, json={
+        "full_name": "Forbidden", "email": "forbidden@example.test", "username": "forbidden",
+        "password": "forbidden-password", "role": "admin"}).status_code == 403
+    call = client.post('/api/v1/call-center/calls', headers=op_headers, json={"phone": "09120000003"})
+    assert call.status_code == 201
+    audit = client.get('/api/v1/auth/audit', headers=admin_headers)
+    assert audit.status_code == 200
+    assert any(row["actor_username"] == "operator" and row["path"] == "/api/v1/call-center/calls" for row in audit.json()["items"])
+    assert client.get('/api/v1/auth/audit', headers=op_headers).status_code == 403
+    analyst = client.post('/api/v1/call-center/users', headers=admin_headers, json={
+        "full_name": "Analyst", "email": "analyst@example.test", "username": "analyst",
+        "password": "analyst-test-password", "role": "analyst"})
+    assert analyst.status_code == 201
+    analyst_login = client.post('/api/v1/auth/login', json={"username": "analyst", "password": "analyst-test-password"})
+    analyst_headers = {"Authorization": "Bearer " + analyst_login.json()["token"]}
+    assert client.get('/api/v1/portfolio/overview', headers=analyst_headers).status_code == 200
+    team = client.post('/api/v1/work/teams', headers=admin_headers, json={"name": "SEO execution"})
+    assert team.status_code == 201
+    work = client.post('/api/v1/sites/demo/work', headers=admin_headers, json={"title": "Review SEO issue", "team_id": team.json()["id"]})
+    assert work.status_code == 201
+    events = client.get(f'/api/v1/sites/demo/work/{work.json()["id"]}/events', headers=admin_headers).json()
+    assert events[0]["actor_username"] == "admin"
+    assert client.get('/api/v1/work/overview', headers=analyst_headers).status_code == 200
+    assert client.get('/api/v1/work/projects', headers=analyst_headers).status_code == 200
+    assert client.get('/api/v1/work/projects/demo/members', headers=analyst_headers).status_code == 200
+    assert client.put(f'/api/v1/work/projects/demo/members/{analyst.json()["id"]}', headers=analyst_headers,
+                      json={"user_id": analyst.json()["id"]}).status_code == 403
+    assert client.get('/api/v1/work/projects', headers=op_headers).status_code == 403
+    assert client.post('/api/v1/work/teams', headers=analyst_headers, json={"name": "Forbidden"}).status_code == 403
+    assert client.get('/api/v1/work/overview', headers=op_headers).status_code == 403
+    assert client.get('/api/v1/call-center/users', headers=analyst_headers).status_code == 403
+    assert client.post('/api/v1/call-center/calls', headers=analyst_headers, json={"phone": "09120000004"}).status_code == 403
+    reset = client.patch(f'/api/v1/call-center/users/{analyst.json()["id"]}', headers=admin_headers,
+                         json={"password": "new-analyst-password"})
+    assert reset.status_code == 200 and "password_hash" not in reset.json()
+    assert client.get('/api/v1/portfolio/overview', headers=analyst_headers).status_code == 401
+    assert client.patch(f'/api/v1/call-center/users/{login.json()["user"]["id"]}', headers=admin_headers,
+                        json={"role": "analyst"}).status_code == 422
+    assert client.patch(f'/api/v1/call-center/users/{created.json()["id"]}', headers=admin_headers,
+                        json={"role": "analyst"}).status_code == 200
+    assert client.get('/api/v1/call-center/calls', headers=op_headers).status_code == 401
+    client.post('/api/v1/auth/logout', headers=op_headers)
+    assert client.get('/api/v1/call-center/calls', headers=op_headers).status_code == 401
+
+
+def test_project_membership_controls_collaboration(client):
+    from seo_brain.api.panel_auth import hash_password
+    _seed(client)
+    with client.eng.begin() as cx:
+        for username, role in [('admin', 'admin'), ('lead', 'analyst'), ('worker', 'analyst'), ('outsider', 'analyst')]:
+            cx.execute(text("""INSERT INTO panel_users(full_name,email,username,password_hash,role,active,created_at,updated_at)
+                VALUES (:name,:email,:name,:hash,:role,1,:at,:at)"""), {
+                'name': username, 'email': f'{username}@example.test', 'hash': hash_password('test-password-123'),
+                'role': role, 'at': datetime.now(timezone.utc).isoformat()})
+        ids = {row.username: row.id for row in cx.execute(text('SELECT id,username FROM panel_users')).all()}
+    def headers(username):
+        token = client.post('/api/v1/auth/login', json={'username': username, 'password': 'test-password-123'}).json()['token']
+        return {'Authorization': 'Bearer ' + token}
+    admin, lead, worker, outsider = [headers(name) for name in ('admin', 'lead', 'worker', 'outsider')]
+    path = '/api/v1/sites/demo/work'
+    assert client.post(path, headers=outsider, json={'title': 'Outside task'}).status_code == 403
+    for name, responsibility in [('lead', 'lead'), ('worker', 'contributor')]:
+        assert client.put(f'/api/v1/work/projects/demo/members/{ids[name]}', headers=admin,
+                          json={'user_id': ids[name], 'responsibility': responsibility}).status_code == 200
+    assert next(row for row in client.get('/api/v1/work/projects', headers=lead).json()
+                if row['site_id'] == 'demo')['my_responsibility'] == 'lead'
+    assert client.post(path, headers=worker, json={'title': 'Unapproved task'}).status_code == 403
+    due = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    created = client.post(path, headers=lead, json={'title': 'Assigned SEO task', 'owner_id': ids['worker'],
+        'due_at': due, 'status': 'assigned'}).json()
+    assert client.post('/api/v1/work/projects/demo/milestones', headers=worker,
+                       json={'title': 'Worker milestone'}).status_code == 403
+    milestone = client.post('/api/v1/work/projects/demo/milestones', headers=lead,
+                            json={'title': 'Technical audit complete'})
+    assert milestone.status_code == 201
+    assert client.patch(f'/api/v1/work/projects/demo/milestones/{milestone.json()["id"]}', headers=lead,
+                        json={'description': 'Ready for review'}).status_code == 200
+    item_path = f'{path}/{created["id"]}'
+    assert client.patch(item_path, headers=outsider, json={'status': 'in_progress'}).status_code == 403
+    assert client.patch(item_path, headers=worker, json={'priority': 'critical'}).status_code == 200
+    assert client.patch(item_path, headers=lead, json={'priority': 'low'}).status_code == 403
+    progressed = client.patch(item_path, headers=worker, json={'status': 'in_progress', 'progress_percent': 50,
+        'note': 'Initial technical audit complete'})
+    assert progressed.status_code == 200 and progressed.json()['progress_percent'] == 50
+    assert client.patch(item_path, headers=worker, json={'board_order': 128}).status_code == 200
+    check_path = f'{item_path}/checklist'
+    assert client.post(check_path, headers=outsider, json={'title': 'Forbidden step'}).status_code == 403
+    step = client.post(check_path, headers=worker, json={'title': 'Validate crawl coverage'})
+    assert step.status_code == 201
+    assert client.patch(f'{check_path}/{step.json()["id"]}', headers=worker, json={'done': True}).status_code == 200
+    assert client.delete(f'{check_path}/{step.json()["id"]}', headers=lead).status_code == 403
+    assert client.delete(f'{check_path}/{step.json()["id"]}', headers=worker).status_code == 204
+    label = client.post(f'{path}/labels', headers=lead, json={'name': 'Content', 'color': '#16a34a'})
+    assert label.status_code == 201
+    assert client.get(f'{path}/labels', headers=outsider).status_code == 403
+    assert client.get(f'{path}/labels', headers=worker).status_code == 200
+    label_path = f'{item_path}/labels/{label.json()["id"]}'
+    assert client.put(label_path, headers=outsider).status_code == 403
+    assert client.put(label_path, headers=worker).status_code == 200
+    assert client.delete(label_path, headers=worker).status_code == 204
+    field = client.post(f'{path}/fields', headers=lead,
+        json={'name': 'SEO channel', 'field_type': 'select', 'options': ['Organic', 'Ads']})
+    assert field.status_code == 201
+    assert client.get(f'{path}/fields', headers=outsider).status_code == 403
+    assert client.get(f'{path}/fields', headers=worker).status_code == 200
+    field_path = f'{item_path}/fields/{field.json()["id"]}'
+    assert client.put(field_path, headers=outsider, json={'value': 'Organic'}).status_code == 403
+    assert client.put(field_path, headers=worker, json={'value': 'Organic'}).status_code == 200
+    assert client.post(f'{path}/fields', headers=worker, json={'name': 'Nope', 'field_type': 'text'}).status_code == 403
+    assert client.delete(f'{path}/fields/{field.json()["id"]}', headers=worker).status_code == 403
+    assert client.post(f'{path}/bulk', headers=worker, json={'item_ids': [created['id']],
+        'patch': {'priority': 'high'}}).status_code == 200
+    assert client.post(f'{path}/bulk', headers=lead, json={'item_ids': [created['id']],
+        'patch': {'priority': 'low'}}).status_code == 403
+    view_path = '/api/v1/work/views/demo'
+    assert client.get('/api/v1/work/board/demo', headers=outsider).status_code == 403
+    assert client.get('/api/v1/work/board/demo', headers=worker).status_code == 200
+    view_body = {'name': 'My critical work', 'config': {'priority_filter': 'critical', 'mine': True, 'group_by': 'owner'}}
+    assert client.post(view_path, headers=outsider, json=view_body).status_code == 403
+    saved = client.post(view_path, headers=worker, json=view_body)
+    assert saved.status_code == 201 and saved.json()['config']['group_by'] == 'owner'
+    assert len(client.get(view_path, headers=worker).json()) == 1
+    assert client.get(view_path, headers=lead).json() == []
+    assert client.delete(f'{view_path}/{saved.json()["id"]}', headers=lead).status_code == 404
+    assert client.delete(f'{view_path}/{saved.json()["id"]}', headers=worker).status_code == 204
+    commented = client.patch(item_path, headers=worker, json={'note': 'Waiting for crawl output'})
+    assert commented.status_code == 200
+    events = client.get(f'{item_path}/events', headers=admin).json()
+    assert events[-1]['event_type'] == 'comment' and events[-1]['actor_username'] == 'worker'
+    time_path = f'/api/v1/work/projects/demo/tasks/{created["id"]}/time'
+    time_body = {'user_id': ids['worker'], 'minutes': 45, 'work_date': datetime.now(timezone.utc).date().isoformat(), 'note': 'Crawl review'}
+    assert client.post(time_path, headers=outsider, json=time_body).status_code == 403
+    assert client.post(time_path, headers=worker, json={**time_body, 'user_id': ids['lead']}).status_code == 403
+    logged = client.post(time_path, headers=worker, json=time_body)
+    assert logged.status_code == 201 and logged.json()['minutes'] == 45
+    assert client.patch(item_path, headers=worker, json={'status': 'verified'}).status_code == 200
+    assert client.patch(item_path, headers=lead, json={'status': 'verified', 'verification_note': 'Search Console checked'}).status_code == 403
+
+
+def test_panel_login_locks_after_repeated_failures(client):
+    for _ in range(5):
+        response = client.post('/api/v1/auth/login', json={"username": "unknown", "password": "incorrect"})
+        assert response.status_code == 401
+    assert client.post('/api/v1/auth/login', json={"username": "unknown", "password": "incorrect"}).status_code == 429
+
+
+def test_late_click_reconciliation_marks_ads_probable(client):
+    _seed(client)
+    at = (datetime.now(timezone.utc) - timedelta(hours=4)).replace(microsecond=0).isoformat()
+    created = client.post('/api/v1/call-center/calls', json={"site_id": "demo", "occurred_at": at,
+        "phone": "09120000001"})
+    assert created.status_code == 201 and created.json()["source"] == "unknown"
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO ads_click_events(event_uuid,site_id,event_type,received_at,ip_address,ip_hash,gclid)
+            VALUES ('test-late-click','demo','tel_click',:at,'127.0.0.1','test-hash','test-gclid')"""), {"at": at})
+    result = client.post('/api/v1/call-center/reconcile', params={"site_id": "demo"})
+    assert result.status_code == 200 and result.json()["changed"] == 1
+    row = client.get('/api/v1/call-center/calls', params={"site_id": "demo"}).json()["items"][0]
+    assert row["source"] == "ads" and row["source_confidence"] == "probable"
 
 
 def test_sites_crud_and_workspace(client):
@@ -115,6 +341,86 @@ def test_portfolio_overview_is_one_consistent_snapshot(client):
     assert body["sites"][0]["issues"][0]["severity"] == "blocking"
 
 
+def test_portfolio_exposes_source_coverage_and_work_backlog(client):
+    _seed(client)
+    today = datetime.now(timezone.utc).date().isoformat()
+    past = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO gsc_property_daily
+            (site_id,date,search_type,property,clicks,impressions,position,sync_run_id,observed_at)
+            VALUES ('demo',:d,'web','sc-domain:demo.example',2,20,4,'g1',:t)"""), {"d": today, "t": past})
+        cx.execute(text("""INSERT INTO work_items
+            (site_id,title,status,due_at,created_at,updated_at)
+            VALUES ('demo','Fix title','new',:due,:now,:now)"""), {"due": past, "now": past})
+    body = client.get("/api/v1/portfolio/overview").json()
+    assert body["sites"][0]["data_coverage"]["gsc"] == {"last_date": today, "days_28": 1}
+    assert body["sites"][0]["data_coverage"]["ga4"] == {"last_date": None, "days_28": 0}
+    assert body["sites"][0]["work"] == {"open": 1, "overdue": 1, "unassigned": 1}
+    assert body["totals"]["overdue_work"] == 1
+
+
+def test_call_center_csv_import_preview_mapping_and_deduplication(client):
+    _seed(client)
+    content = "مشتری,موبایل,کانال,شهر\nعلی,۰۹۱۲۳۴۵۶۷۸۹,ادز,تهران\nمینا,۰۹۳۵۱۲۳۴۵۶۷,گوگل,شیراز\n".encode("utf-8-sig")
+    path = "/api/v1/call-center/calls/import"
+    mapping = json.dumps({"customer_name": "مشتری", "phone": "موبایل", "source": "کانال", "region": "شهر"})
+    upload = lambda: {"file": ("calls.csv", content, "text/csv")}
+    preview = client.post(path, files=upload(), data={"mapping": mapping, "dry_run": "true", "default_site_id": "demo"})
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["rows_valid"] == 2 and preview.json()["rows_imported"] == 0
+    assert [row["source"] for row in preview.json()["preview"]] == ["ads", "seo"]
+    assert client.get("/api/v1/call-center/calls").json()["total"] == 0
+    done = client.post(path, files=upload(), data={"mapping": mapping, "dry_run": "false", "default_site_id": "demo"})
+    assert done.status_code == 200 and done.json()["rows_imported"] == 2
+    repeat = client.post(path, files=upload(), data={"mapping": mapping, "dry_run": "false", "default_site_id": "demo"})
+    assert repeat.json()["rows_skipped"] == 2 and repeat.json()["rows_imported"] == 0
+    calls = client.get("/api/v1/call-center/calls").json()
+    assert calls["total"] == 2 and {row["source_basis"] for row in calls["items"]} == {"import"}
+    missing_phone = "مشتری,موبایل\nبدون شماره,\n".encode("utf-8-sig")
+    rejected = client.post(path, files={"file": ("missing.csv", missing_phone, "text/csv")},
+                           data={"dry_run": "true"})
+    assert rejected.status_code == 200 and rejected.json()["errors_count"] == 1
+
+
+def test_call_center_workbook_import_preserves_warranty_and_unknown_source(client):
+    _seed(client)
+    workbook = Workbook()
+    non_warranty = workbook.active
+    non_warranty.title = "غیر گارانتی"
+    non_warranty.append([])
+    non_warranty.append(["ردیف", "تاریخ و ساعت ثبت", "نام و نام خانوادگی", "شماره تماس", "برند خودرو", "محدوده", "مدل خودرو", "مشکل خودرو", "کنسل شد؟"])
+    non_warranty.append([1, datetime(2026, 9, 1, 12), "Test A", 9123456789, "Brand", "Tehran", "X1", "Issue", True])
+    non_warranty.append([None, None, None, None, None, None, None, None, False])
+    warranty = workbook.create_sheet("گارانتی")
+    warranty.append(["ردیف", "تاریخ و ساعت ثبت", "نام و نام خانوادگی", "شماره تماس", "برند خودرو", "مدل خودرو"])
+    warranty.append([1, None, None, 9351234567, "Brand", "X2"])
+    warranty.append([2, None, "No Phone", None, "Brand", "X3"])
+    buffer = BytesIO()
+    workbook.save(buffer)
+    data = buffer.getvalue()
+    path = "/api/v1/call-center/calls/import-workbook"
+    files = lambda: {"file": ("calls.xlsx", data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+    preview = client.post(path, files=files(), data={"dry_run": "true", "site_id": "demo"})
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["rows_valid"] == 2 and preview.json()["rows_imported"] == 0
+    assert preview.json()["sheets"]["گارانتی"]["missing_phone"] == 1
+    assert preview.json()["sheets"]["گارانتی"]["missing_date"] == 1
+    done = client.post(path, files=files(), data={"dry_run": "false", "site_id": "demo"})
+    assert done.status_code == 200 and done.json()["rows_imported"] == 2
+    assert client.post(path, files=files(), data={"dry_run": "false", "site_id": "demo"}).json()["rows_skipped"] == 2
+    calls = client.get("/api/v1/call-center/calls").json()["items"]
+    assert {row["source"] for row in calls} == {"unknown"}
+    assert {row["phone"] for row in calls} == {"09123456789", "09351234567"}
+    assert {row["warranty"] for row in calls} == {True, False}
+    assert {row["status"] for row in calls} == {"cancelled", "unreviewed"}
+    non_warranty.cell(3, 4, 9999999999)
+    changed_buffer = BytesIO()
+    workbook.save(changed_buffer)
+    changed = client.post(path, files={"file": ("changed.xlsx", changed_buffer.getvalue())}, data={"dry_run": "true"})
+    assert changed.json()["rows_changed"] == 1
+    assert changed.json()["conflicts"] == [{"sheet": "غیر گارانتی", "row": 3}]
+
+
 def test_memory_and_ai_orchestrator_endpoints(client):
     _seed(client)
     m = client.get("/api/v1/sites/demo/memory").json()
@@ -164,7 +470,7 @@ def test_api_token_enforced_when_set(tmp_path, monkeypatch):
 
 def test_legacy_dashboard_mounted(client):
     r = client.get("/legacy/api/sites")
-    assert r.status_code == 200
+    assert r.status_code == 403  # legacy view is administrator-only
     assert client.get("/").json()["legacy_dashboard"] == "/legacy"
 
 

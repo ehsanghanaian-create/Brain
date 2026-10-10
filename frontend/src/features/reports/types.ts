@@ -18,8 +18,23 @@ export interface ReportSummary {
   days: number;
   score: number;
   score_breakdown: { problems_penalty: number; connections_penalty: number };
+  crawl_coverage: {
+    status: string;
+    coverage_status: 'complete' | 'partial' | 'not_started';
+    sitemap_urls: number;
+    recent_crawled: number;
+    window_days: number;
+    latest_crawled: number;
+    max_urls: number | null;
+    started_at: string | null;
+    run_id?: string;
+  };
   gsc: {
     available: boolean;
+    metric_ref?: { source: 'gsc_property_daily' | 'gsc_daily'; grain: string; site_id: string;
+      search_type: string; property: string | null; sync_run_id: string | null;
+      period_start: string; period_end: string; covered_days: number; expected_days: number;
+      coverage_status: 'ready' | 'partial' };
     date_from?: string;
     date_to?: string;
     window?: { from: string; to: string; days: number };
@@ -29,10 +44,14 @@ export interface ReportSummary {
   };
   ga4: {
     available: boolean;
+    metric_ref?: { source: 'ga4_site_daily' | 'ga4_daily'; grain: string; covered_days: number;
+      expected_days: number; coverage_status: 'ready' | 'partial'; period_start: string; period_end: string };
     date_from?: string;
     date_to?: string;
-    totals?: { sessions: number; users: number; conversions: number; engagement_rate: number | null };
+    window?: { from: string; to: string; days: number };
+    totals?: { sessions: number; users: number | null; conversions: number; engagement_rate: number | null };
     timeseries?: { date: string; sessions: number; users: number }[];
+    channels?: { channel: string; sessions: number; conversions: number }[];
   };
   counts: {
     indexable_pages: number;
@@ -101,7 +120,110 @@ export interface ReportKeywordList {
   items: ReportKeywordRow[];
 }
 
+export interface InventoryRow {
+  url: string;
+  sources: ('wordpress' | 'sitemap' | 'crawled' | 'gsc')[];
+  first_seen: string | null;
+  last_seen: string | null;
+  wp_type: string | null;
+  wp_status: string | null;
+  wp_title: string | null;
+  status_code: number | null;
+  crawl_status: string | null;
+  indexable: number | null;
+  indexability_reason: string | null;
+  final_url: string | null;
+  canonical: string | null;
+  last_crawled: string | null;
+  indexability_source: 'crawler' | null;
+}
+
+export interface ReportInventory {
+  summary: { discovered: number; wordpress: number; crawled: number; sitemap: number; gsc: number };
+  items: InventoryRow[];
+  total: number;
+  limit: number;
+  offset: number;
+  coverage_note: string;
+}
+
+export interface InventoryDetail {
+  url: string;
+  sources: InventoryRow['sources'];
+  first_seen: string | null;
+  last_seen: string | null;
+  wordpress: { type: string; status: string; title: string; modified_gmt: string | null;
+    yoast_title: string | null; yoast_description: string | null } | null;
+  crawl: { status_code: number | null; crawl_status: string | null; indexable: number | null;
+    indexability_reason: string | null; canonical: string | null; final_url: string | null;
+    title: string | null; meta_description: string | null; word_count: number | null;
+    depth: number | null; last_crawled: string | null; crawl_run_id: string | null; in_sitemap: number | null } | null;
+  gsc_page_query_rows: { date_from: string; date_to: string; clicks: number; impressions: number;
+    query_count: number } | null;
+  problems: { problem_type: string; severity: string; detail: string | null; created_at: string }[];
+  note: string;
+}
+
+export interface MonthlyProgress {
+  site_id: string;
+  months: {
+    month: string;
+    gsc: { clicks: number | null; impressions: number | null; source: string | null;
+      covered_days: number; expected_days: number; status: 'ready' | 'partial' | 'missing' };
+    ga4: { sessions: number | null; conversions: number | null; source: string | null;
+      covered_days: number; expected_days: number; status: 'ready' | 'partial' | 'missing' };
+  }[];
+  note: string;
+}
+
+export type WorkStatus = 'new' | 'triaged' | 'approved' | 'assigned' | 'in_progress' | 'review' |
+  'published' | 'measurement_pending' | 'verified' | 'blocked' | 'rejected' | 'deferred';
+  export interface WorkItem {
+  id: number;
+  site_id: string;
+  title: string;
+  description: string;
+  kind: 'manual' | 'issue' | 'opportunity' | 'content';
+  source_id: number | null;
+  url: string | null;
+  query: string | null;
+  status: WorkStatus;
+  owner_id: number | null;
+    owner_name?: string | null;
+    team_id?: number | null;
+    team_name?: string | null;
+    priority?: 'critical' | 'high' | 'normal' | 'low';
+    estimated_hours?: number | null;
+    start_at?: string | null;
+    progress_percent?: number;
+    parent_id?: number | null;
+    milestone_id?: number | null;
+  due_at: string | null;
+  blocked_reason: string | null;
+  verification_note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface WorkList {
+  items: WorkItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  summary: { total: number; blocked: number; overdue: number; unassigned: number };
+}
+export interface WorkEvent {
+  id: number;
+  event_type: string;
+  before_json: string | null;
+  after_json: string;
+  note: string | null;
+  actor_id?: number | null;
+  actor_username?: string | null;
+  created_at: string;
+}
+
 export interface ReportProblemItem {
+  id: number;
   problem_type: string;
   severity: 'high' | 'medium' | 'low';
   url: string | null;
@@ -122,7 +244,7 @@ export interface ReportProblems {
 
 export interface ReportOpportunities {
   summary: Record<string, { count: number; type_fa: string }>;
-  items: { opp_type: string; type_fa: string; url: string | null; related_url: string | null; query: string | null; score: number; reason: string | null; confidence: number | null; detail: unknown; created_at: string }[];
+  items: { id: number; opp_type: string; type_fa: string; url: string | null; related_url: string | null; query: string | null; score: number; reason: string | null; confidence: number | null; detail: unknown; created_at: string }[];
 }
 
 export interface BacklinkRow {

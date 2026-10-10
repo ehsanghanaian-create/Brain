@@ -83,6 +83,7 @@ def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = 
     conn.commit()
     client = WordPressClient(site.wp_url, site.site_id, use_auth=use_auth)
     stats = {"run_id": run_id, "posts": 0, "types": {}, "taxonomies": {}, "media": 0,
+             "removed_stale_posts": 0,
              "duplicates": [], "errors": []}
     try:
         root = client.root()
@@ -129,6 +130,7 @@ def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = 
         # post types
         types = client.public_content_types()
         content_by_url: dict[str, tuple[dict, dict]] = {}
+        fetched_ids_by_type: dict[str, set[int]] = {}
         for slug, t in types.items():
             stats["types"].setdefault(slug, 0)
             _p("pages" if slug == "page" else "posts", post_type=slug)
@@ -138,6 +140,7 @@ def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = 
                 stats["errors"].append(str(e))
                 log.error(str(e))
                 continue
+            fetched_ids_by_type[slug] = {int(it["id"]) for it in items}
             for it in items:
                 content_html = (it.get("content") or {}).get("rendered") or ""
                 text = html_to_text(content_html)
@@ -185,6 +188,21 @@ def sync_wordpress(conn: sqlite3.Connection, site: SiteConfig, use_auth: bool = 
             stats["types"].setdefault(row["type"], 0)
             stats["types"][row["type"]] += 1
         stats["posts"] = sum(stats["types"].values())
+        # A post that was unpublished or deleted disappears from the public
+        # REST feed. Keep a stale snapshot only when that type's fetch failed
+        # (or unexpectedly returned empty despite an existing collection).
+        for slug, fresh_ids in fetched_ids_by_type.items():
+            old_ids = {int(row[0]) for row in conn.execute(
+                "SELECT wp_id FROM posts WHERE site_id=? AND type=?", (site.site_id, slug))}
+            if old_ids and not fresh_ids:
+                log.warning("Skipping stale-post cleanup: %s returned an empty feed", slug)
+                continue
+            for wp_id in old_ids - fresh_ids:
+                conn.execute("DELETE FROM post_terms WHERE site_id=? AND post_type=? AND post_wp_id=?",
+                             (site.site_id, slug, wp_id))
+                conn.execute("DELETE FROM posts WHERE site_id=? AND type=? AND wp_id=?",
+                             (site.site_id, slug, wp_id))
+                stats["removed_stale_posts"] += 1
         conn.commit()
 
         # media (alt text is SEO-relevant)

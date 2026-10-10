@@ -95,7 +95,8 @@ def _sites_from_db() -> list[SiteConfig]:
         return []
     try:
         cx = sqlite3.connect(str(p)); cx.row_factory = sqlite3.Row
-        rows = cx.execute("SELECT site_id, name, canonical_url, wp_url, language, gsc_property FROM sites ORDER BY site_id").fetchall()
+        rows = cx.execute("""SELECT site_id, name, canonical_url, wp_url, language, gsc_property
+            FROM sites WHERE site_id NOT IN (SELECT site_id FROM manual_projects) ORDER BY site_id""").fetchall()
         cx.close()
     except sqlite3.Error:
         return []

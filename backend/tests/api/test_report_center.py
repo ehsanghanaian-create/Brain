@@ -1,6 +1,7 @@
 """Site Report Center tests: summary, main keyword, keyword performance (weighted position),
 problems/opportunities exposure, backlink & reportage CRUD + verification, site isolation."""
 import json
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -56,6 +57,155 @@ def test_summary_empty_site_is_honest(client):
     assert body["main_keyword"]["keyword"] is None
     assert body["counts"]["backlinks"] == 0 and body["counts"]["reportages"] == 0
     assert 0 <= body["score"] <= 100  # penalised for missing connections, still real
+    assert body["crawl_coverage"]["coverage_status"] == "not_started"
+
+
+def test_summary_discloses_capped_crawl_coverage(client):
+    _seed(client)
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO crawl_runs(run_id,site_id,started_at,max_urls,urls_crawled,status,notes)
+            VALUES('crawl-1','demo',:at,20,2,'completed_capped',:notes)"""),
+                   {"at": stamp, "notes": json.dumps({"sitemap_urls": 100})})
+        for path in ("a", "b"):
+            cx.execute(text("""INSERT INTO pages(site_id,url,in_sitemap,crawl_status,last_crawled)
+                VALUES('demo',:url,1,'ok',:at)"""),
+                       {"url": f"https://demo.example/{path}/", "at": stamp})
+    coverage = client.get("/api/v1/sites/demo/report/summary").json()["crawl_coverage"]
+    assert coverage["coverage_status"] == "partial"
+    assert coverage["sitemap_urls"] == 100
+    assert coverage["recent_crawled"] == 2
+    assert coverage["latest_crawled"] == 2
+    with client.eng.begin() as cx:
+        cx.execute(text("UPDATE crawl_runs SET notes=:notes WHERE run_id='crawl-1'"),
+                   {"notes": json.dumps({"sitemap_urls": 2})})
+    assert client.get("/api/v1/sites/demo/report/summary").json()["crawl_coverage"]["coverage_status"] == "complete"
+
+
+def test_summary_ga4_uses_selected_gsc_window(client):
+    _seed(client)
+    _seed_gsc(client)
+    with client.eng.begin() as cx:
+        for day, sessions in (("2026-08-01", 100), ("2026-08-08", 20),
+                              ("2026-08-10", 30), ("2026-08-15", 200)):
+            cx.execute(text("""INSERT INTO ga4_daily(site_id, date, page_path, sessions, total_users, conversions, source)
+                               VALUES('demo', :day, '/', :sessions, :sessions, 0, 'page')"""),
+                       {"day": day, "sessions": sessions})
+    body = client.get("/api/v1/sites/demo/report/summary?days=7").json()
+    assert body["gsc"]["window"] == {"from": "2026-08-04", "to": "2026-08-10", "days": 7}
+    assert body["ga4"]["window"] == body["gsc"]["window"]
+    assert body["ga4"]["totals"]["sessions"] == 50
+    assert [row["date"] for row in body["ga4"]["timeseries"]] == ["2026-08-08", "2026-08-10"]
+    assert body["ga4"]["date_to"] == "2026-08-15"  # full data coverage remains visible
+
+
+def test_property_total_is_headline_and_detail_rows_stay_separate(client):
+    _seed(client)
+    _seed_gsc(client)
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO gsc_property_daily
+            (site_id,date,search_type,property,clicks,impressions,position,sync_run_id,observed_at)
+            VALUES ('demo','2026-08-10','web','sc-domain:demo.example',120,1000,3.5,'gsc-property',
+                    '2026-08-12T00:00:00Z')"""))
+    body = client.get("/api/v1/sites/demo/report/summary?days=7").json()
+    assert body["gsc"]["totals"]["clicks"] == 120
+    assert body["gsc"]["timeseries"] == [
+        {"date": "2026-08-10", "clicks": 120, "impressions": 1000, "position": 3.5}]
+    ref = body["gsc"]["metric_ref"]
+    assert ref["source"] == "gsc_property_daily" and ref["property"] == "sc-domain:demo.example"
+    assert ref["coverage_status"] == "partial" and ref["covered_days"] == 1
+    assert client.get("/api/v1/sites/demo/report/keywords?days=7").json()["total"] == 2
+
+
+def test_legacy_gsc_rows_are_labeled_partial(client):
+    _seed(client)
+    _seed_gsc(client)
+    ref = client.get("/api/v1/sites/demo/report/summary?days=7").json()["gsc"]["metric_ref"]
+    assert ref["source"] == "gsc_daily" and ref["coverage_status"] == "partial"
+
+
+def test_inventory_unifies_sources_and_keeps_site_isolation(client):
+    _seed(client)
+    _seed(client, "other")
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO posts(site_id,wp_id,type,url,title,status)
+            VALUES ('demo',1,'page','https://demo.example/a/','الف','publish'),
+                   ('demo',2,'post','https://demo.example/b/','ب','publish'),
+                   ('other',1,'page','https://other.example/private/','خصوصی','publish')"""))
+        cx.execute(text("""INSERT INTO pages(site_id,url,status_code,indexable,in_sitemap,last_crawled)
+            VALUES ('demo','https://demo.example/a/',200,1,1,'2026-08-12T00:00:00Z'),
+                   ('demo','https://demo.example/c/',404,0,0,'2026-08-12T00:00:00Z')"""))
+        cx.execute(text("""INSERT INTO gsc_daily
+            (site_id,date,page,query,country,device,clicks,impressions,ctr,position)
+            VALUES ('demo','2026-08-10','https://demo.example/a/','الف','irn','MOBILE',5,100,0.05,5),
+                   ('demo','2026-08-10','https://demo.example/d/','د','irn','MOBILE',1,10,0.1,12)"""))
+    body = client.get("/api/v1/sites/demo/report/inventory").json()
+    assert body["summary"] == {"discovered": 4, "wordpress": 2, "crawled": 2, "sitemap": 1, "gsc": 2}
+    assert body["total"] == 4
+    assert "https://other.example/private/" not in {row["url"] for row in body["items"]}
+    a = next(row for row in body["items"] if row["url"] == "https://demo.example/a/")
+    assert set(a["sources"]) == {"wordpress", "sitemap", "crawled", "gsc"}
+    assert a["indexable"] == 1 and a["indexability_source"] == "crawler"
+    filtered = client.get("/api/v1/sites/demo/report/inventory?source=gsc&limit=1&offset=1").json()
+    assert filtered["total"] == 2 and len(filtered["items"]) == 1
+    detail = client.get("/api/v1/sites/demo/report/inventory/page",
+                        params={"url": "https://demo.example/a"}).json()
+    assert detail["wordpress"]["title"] == "الف" and detail["gsc_page_query_rows"]["clicks"] == 5
+    assert client.get("/api/v1/sites/demo/report/inventory/page",
+                      params={"url": "https://other.example/private/"}).status_code == 404
+
+
+def test_monthly_progress_uses_property_totals_and_marks_missing_months(client):
+    _seed(client)
+    _seed_gsc(client)
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO gsc_property_daily
+            (site_id,date,search_type,property,clicks,impressions,position,sync_run_id,observed_at)
+            VALUES ('demo','2026-08-10','web','sc-domain:demo.example',120,1000,3.5,'r1',
+                    '2026-08-12T00:00:00Z')"""))
+        cx.execute(text("""INSERT INTO ga4_site_daily
+            (site_id,date,channel,property_id,sessions,total_users,conversions,sync_run_id,observed_at)
+            VALUES ('demo','2026-08-10','','123',70,60,2,'r1','2026-08-12T00:00:00Z')"""))
+    rows = client.get("/api/v1/sites/demo/report/monthly?months=2&through=2026-08").json()["months"]
+    assert rows[0]["month"] == "2026-07" and rows[0]["gsc"]["status"] == "missing"
+    assert rows[0]["gsc"]["clicks"] is None
+    august = rows[1]
+    assert august["gsc"]["clicks"] == 120 and august["gsc"]["source"] == "gsc_property_daily"
+    assert august["gsc"]["status"] == "partial" and august["gsc"]["covered_days"] == 1
+    assert august["ga4"]["sessions"] == 70 and august["ga4"]["source"] == "ga4_site_daily"
+
+
+def test_summary_ga4_without_gsc_anchors_to_latest_ga4_date(client):
+    _seed(client)
+    with client.eng.begin() as cx:
+        for day, sessions in (("2026-08-01", 100), ("2026-08-10", 0)):
+            cx.execute(text("""INSERT INTO ga4_daily(site_id, date, page_path, sessions, total_users, conversions, source)
+                               VALUES('demo', :day, '/', :sessions, 0, 0, 'page')"""),
+                       {"day": day, "sessions": sessions})
+    body = client.get("/api/v1/sites/demo/report/summary?days=7").json()
+    assert body["gsc"]["available"] is False
+    assert body["ga4"]["available"] is True
+    assert body["ga4"]["window"] == {"from": "2026-08-04", "to": "2026-08-10", "days": 7}
+    assert body["ga4"]["totals"]["sessions"] == 0
+    assert [row["date"] for row in body["ga4"]["timeseries"]] == ["2026-08-10"]
+
+
+def test_ga4_site_total_is_not_page_sum_or_sum_of_daily_users(client):
+    _seed(client)
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO ga4_daily(site_id,date,page_path,sessions,total_users,source)
+            VALUES ('demo','2026-08-09','/a',100,80,'page'),
+                   ('demo','2026-08-10','/b',100,80,'page')"""))
+        cx.execute(text("""INSERT INTO ga4_site_daily
+            (site_id,date,channel,property_id,sessions,total_users,conversions,sync_run_id,observed_at)
+            VALUES ('demo','2026-08-09','','123',70,60,2,'r1','2026-08-11T00:00:00Z'),
+                   ('demo','2026-08-10','','123',75,62,1,'r1','2026-08-11T00:00:00Z'),
+                   ('demo','2026-08-10','Organic Search','123',50,45,1,'r1','2026-08-11T00:00:00Z')"""))
+    ga4 = client.get("/api/v1/sites/demo/report/summary?days=7").json()["ga4"]
+    assert ga4["totals"]["sessions"] == 145
+    assert ga4["totals"]["users"] is None
+    assert ga4["metric_ref"]["source"] == "ga4_site_daily"
+    assert ga4["channels"] == [{"channel": "Organic Search", "sessions": 50, "conversions": 1.0}]
 
 
 def test_main_keyword_set_and_weighted_position(client):

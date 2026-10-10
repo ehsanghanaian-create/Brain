@@ -33,6 +33,7 @@ data/processed/*
 !data/processed/.keep
 storage/
 workspace/
+!frontend/src/features/workspace/
 
 # ---- databases
 *.sqlite

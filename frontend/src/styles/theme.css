@@ -1,6 +1,7 @@
 /* Import individual theme files */
 @import './themes/vercel.css';
 @import './themes/neon.css';
+@import './themes/gentelella.css';
 
 body {
   @apply overscroll-none;

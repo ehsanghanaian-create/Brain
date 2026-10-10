@@ -8,7 +8,7 @@ import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from '@/compon
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
 import { JalaliDateInput } from '@/features/content/components/jalali-date-input';
-import { jalaliLong } from '@/features/content/constants';
+import { formatUserDay, useDatePreference } from '@/lib/date-preference';
 import { PLAN_STATUS_COLOR, PLAN_STATUS_FA } from '@/features/content-planner/constants';
 import { parseTags } from '@/features/content-planner/lib';
 import { ApiError, endpoints, type ContentPlan, type PlanCategory, type PlanStatus, type WsOptions } from '@/lib/api/client';
@@ -56,6 +56,7 @@ async function pollJob(runId: string) {
 }
 
 export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClose, onChanged, onOpenEditor }: Props) {
+  const { calendar } = useDatePreference();
   const [id, setIdState] = useState<number | null>(null);
   const idRef = useRef<number | null>(null);
   const setId = (v: number | null) => { idRef.current = v; setIdState(v); };
@@ -110,7 +111,7 @@ export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClo
   const publish = () => {
     if (!p) return;
     const future = isFuture(f.publish_date, f.publish_time);
-    const when = f.publish_date ? `${jalaliLong(f.publish_date)} ساعت ${f.publish_time || '09:00'}` : 'همین حالا';
+    const when = f.publish_date ? `${formatUserDay(f.publish_date, calendar, 'long')} ساعت ${f.publish_time || '09:00'}` : 'همین حالا';
     if (!confirm(future ? `مقاله در وردپرس زمان‌بندی شود و رأس ${when} منتشر گردد؟` : `مقاله همین حالا در وردپرس منتشر شود؟ (تاریخ: ${when})`)) return;
     run('pub', async () => {
       const planId = await persist();
@@ -142,7 +143,7 @@ export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClo
         {pub.wp_post_id && (
           <div className='mt-3 rounded-md border border-emerald-500/40 bg-emerald-500/5 p-2 text-xs'>
             {pub.wp_status === 'future'
-              ? <>زمان‌بندی‌شده در وردپرس — رأس {pub.scheduled_for ? `${jalaliLong(String(pub.scheduled_for).slice(0, 10))} ساعت ${String(pub.scheduled_for).slice(11, 16)}` : 'تاریخ تقویم'} منتشر می‌شود</>
+              ? <>زمان‌بندی‌شده در وردپرس — رأس {pub.scheduled_for ? `${formatUserDay(String(pub.scheduled_for).slice(0, 10), calendar, 'long')} ساعت ${String(pub.scheduled_for).slice(11, 16)}` : 'تاریخ تقویم'} منتشر می‌شود</>
               : <>منتشرشده در وردپرس</>}
             {pub.link && <a className='ms-2 underline' href={safeHref(pub.link)} target='_blank' rel='noreferrer' dir='ltr'>پست #{pub.wp_post_id} ↗</a>}
           </div>
@@ -169,7 +170,7 @@ export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClo
                 </NativeSelect>
               ) : <Input value={PLAN_STATUS_FA.planned} disabled />}
             </div>
-            <div className='grid gap-1'><Label>تاریخ انتشار (شمسی)</Label><JalaliDateInput value={f.publish_date} onChange={(d) => setF((s) => ({ ...s, publish_date: d }))} /></div>
+            <div className='grid gap-1'><Label>تاریخ انتشار</Label><JalaliDateInput value={f.publish_date} onChange={(d) => setF((s) => ({ ...s, publish_date: d }))} /></div>
             <div className='grid gap-1'><Label>ساعت انتشار</Label><Input type='time' value={f.publish_time} onChange={set('publish_time')} dir='ltr' /></div>
             <div className='grid gap-1 md:col-span-2'>
               <Label>نویسندهٔ هوش مصنوعی و مدل</Label>

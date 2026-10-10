@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { checkResultView, saCardView } from '../gsc-sa';
 import { IntegrationCard } from './integration-card';
+import { formatUserDateTime, useDatePreference } from '@/lib/date-preference';
 
 /**
  * اتصال سریع Search Console با Service Account — بدون OAuth، بدون تأیید گوگل، بدون انقضای ۷روزه.
@@ -14,6 +15,7 @@ import { IntegrationCard } from './integration-card';
  * هیچ JSON/کلیدی هرگز در UI ظاهر نمی‌شود — فقط ایمیل عمومی Service Account.
  */
 export function GoogleSearchConsoleConnectionCard({ onSelect, onChecked }: { onSelect?: (property: string, domain: string) => void; onChecked?: () => void }) {
+  const { calendar } = useDatePreference();
   const [status, setStatus] = useState<SaGscStatus | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -67,7 +69,7 @@ export function GoogleSearchConsoleConnectionCard({ onSelect, onChecked }: { onS
         <Button type='button' size='sm' disabled={busy} onClick={() => void check()} data-testid='sa-check'>
           {busy ? 'در حال بررسی…' : 'بررسی دسترسی'}
         </Button>
-        {view.lastCheck && <span className='text-muted-foreground text-xs' dir='ltr'>آخرین بررسی: {new Date(view.lastCheck).toLocaleString('fa-IR')}</span>}
+        {view.lastCheck && <span className='text-muted-foreground text-xs' dir='ltr'>آخرین بررسی: {formatUserDateTime(view.lastCheck, calendar)}</span>}
       </div>
 
       {view.properties.length > 0 && (

@@ -1,16 +1,25 @@
 # Web Google OAuth + GA4 Property Discovery (SaaS onboarding layer)
 
-**Status:** done (2026-08-20). The CLI-only Google consent (`sync-gsc.py --auth-only`) now has a browser replacement.
+**Status:** browser flow available; production HTTPS callback added 2026-09-30. The CLI-only Google consent (`sync-gsc.py --auth-only`) has a browser replacement.
 No duplicate OAuth architecture: the flow reuses the EXISTING auth core in `gsc/client.py` — same OAuth client
-(`_client_config` → `.env` / SecretStore), same data scopes, same token file format (`Credentials.to_json()` at
-`GSC_TOKEN_PATH`) — so the GSC client, GA4 client, every pipeline and the CLI keep working unchanged.
+(`_client_config` → `.env` / SecretStore), same data scopes, same `Credentials.to_json()` format in the encrypted
+SecretStore (legacy file migration is supported) — so the GSC client, GA4 client and pipelines keep working.
 
 ```
 [اتصال حساب گوگل] → GET /connections/google/authorize (→ consent URL, state nonce)
-   → Google consent (openid email + webmasters.readonly + analytics.readonly)
-   → GET /connections/google/callback  (public route — Google's redirect can't send X-API-Token; state is the guard)
-   → token stored in the SAME tokens/gsc_token.json → GSC property discovery + GA4 property discovery work immediately
+   → Google consent (openid email + webmasters.readonly + analytics.readonly + adwords)
+   → GET https://seo.gearboxemdad.com/api/v1/connections/google/callback
+   → Caddy bypasses Basic auth only for this route and forwards to /api/backend/connections/google/callback
+   → encrypted shared token → GSC property discovery + GA4 property discovery
 ```
+
+## Production configuration
+
+- Set `FRONTEND_ORIGIN=https://seo.gearboxemdad.com` on the backend (or explicitly set `GOOGLE_OAUTH_REDIRECT`). The authorize response must return `https://seo.gearboxemdad.com/api/v1/connections/google/callback`, never a loopback address. Local development without an origin still uses loopback.
+- Create a Google OAuth **Web application** client and register that exact HTTPS callback under **Authorized redirect URIs**. A Desktop client accepts local loopback callbacks and cannot complete this server-side browser flow. Save the Web client ID and secret in SEO Brain's encrypted SecretStore; do not replace the working client until the Web client exists.
+- The Caddy block in `deploy/seo-brain/Caddyfile.snippet` routes only the exact callback around Basic auth, suppresses request logging for its one-time authorization code, and sets no-store/no-referrer. Keep the protected panel and all other routes behind Basic auth.
+- In Google Auth Platform → Audience, an external app in **Testing** loses its refresh grant after seven days. Complete Branding, publish **In production**, and perform one new consent. Sensitive scopes may require Google verification. This affects the entire Google Cloud OAuth project, so review other clients in that project before changing Branding or Audience.
+- The account token is shared across SEO Brain sites. Each configured Search Console/GA4 property still needs a separate access test under the connected Google account. Revoked grants surface as `needs_reconnect`; transient refresh failures retain the token and surface as `temporary_error`.
 
 ## Backend
 | Piece | File | Notes |
@@ -24,7 +33,7 @@ No duplicate OAuth architecture: the flow reuses the EXISTING auth core in `gsc/
 - **Selector ‏property ‏GA4** در `connection-tester.tsx`: جایگزین ورودی دستی — dropdown با `display_name — id (account)`؛ اگر listing در دسترس نباشد ورودی دستی با پیام راهنما می‌ماند.
 
 ## Security
-- توکن فقط در فایل git-ignored (فرمت قبلی) — **هیچ ذخیرهٔ plaintext در دیتابیس**؛ ‏client credentials مثل قبل `.env`/SecretStore.
+- توکن در SecretStore رمزگذاری می‌شود (فایل قدیمی فقط در صورت نبود SecretStore) — **هیچ ذخیرهٔ plaintext در دیتابیس**؛ ‏client credentials مثل قبل `.env`/SecretStore.
 - ‏callback با state یک‌بارمصرف محافظت می‌شود؛ پاسخ HTML هیچ token/کدی را بازتاب نمی‌دهد؛ لاگ‌ها فقط class خطا.
 - ‏scopeهای داده تغییر نکردند؛ ‏`openid email` فقط برای نمایش حساب اضافه شد. ‏revoke هنگام قطع اتصال (تنها POST خروجی مجاز — در گارد read-only صریحاً استثنا و مستند شد).
 - tokenهای موجود CLI بدون تغییر معتبر می‌مانند.

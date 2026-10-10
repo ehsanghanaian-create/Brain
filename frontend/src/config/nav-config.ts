@@ -23,6 +23,10 @@ export const navGroups: NavGroup[] = [
     items: [
       { title: 'داشبورد', url: '/dashboard/overview', icon: 'dashboard', shortcut: ['d', 'd'], items: [],
         description: 'وضعیت کلی سایت‌ها، گراف دانش و سلامت سیستم' },
+      { title: 'میز عملیات و تیم', url: '/dashboard/work', icon: 'kanban', shortcut: ['w', 'w'], items: [],
+        description: 'شیت کارها، کانبان، تایم‌لاین، تیم‌ها و گراف مسئولیت همهٔ سایت‌ها' },
+      { title: 'داشبورد مدیریت', url: '/dashboard/team-management', icon: 'teams', items: [],
+        description: 'تصویر کلی کار تیم، بار هر نفر، پروژه‌ها و روند پیشرفت' },
       { title: 'شروع راه‌اندازی', url: '/dashboard/onboarding', icon: 'sparkles', items: [],
         description: 'اتصال گوگل ← انتخاب سایت‌ها ← شروع تحلیل سئو (چهار قدم، بدون تنظیم فنی)' },
       { title: 'سایت‌ها', url: '/dashboard/sites', icon: 'sites', shortcut: ['s', 's'], items: [],
@@ -61,14 +65,22 @@ export const navGroups: NavGroup[] = [
       { title: 'لینک‌سازی داخلی', url: '/dashboard/internal-linking', icon: 'linking', items: [],
         description: 'پیشنهاد لینک داخلی و الگوهای یادگرفته‌شده (فاز ۱۳–۱۴)' },
       { title: 'فرصت‌های سئو', url: '/dashboard/opportunities', icon: 'opportunities', items: [],
-        description: 'صفحات جایگاه ۵–۲۰، CTR پایین، شکاف محتوا (فاز ۱۵)' }
+        description: 'صفحات جایگاه ۵–۲۰، CTR پایین، شکاف محتوا (فاز ۱۵)' },
+      { title: 'مشکلات سئو', url: '/dashboard/problems', icon: 'opportunities', items: [],
+        description: 'بررسی و رفع مرحله‌ای مشکلات سایت آزمایشی' }
     ]
   },
   {
     label: 'سیستم',
     items: [
+      { title: 'کال‌سنتر', url: '/dashboard/call-center', icon: 'phone', items: [],
+        description: 'ثبت تماس، تعیین منبع سئو یا ادز و پایش برند، مدل و منطقه' },
+      { title: 'مدیریت کاربران', url: '/dashboard/users', icon: 'teams', items: [],
+        description: 'مدیریت فهرست اعضای تیم و نقش‌ها' },
+      { title: 'تم داشبورد', url: '/dashboard/theme', icon: 'palette', items: [],
+        description: 'قالب Gentelella، رنگ شاخص و حالت روشن یا تیره' },
       { title: 'گزارش سایت', url: '/dashboard/reports', icon: 'reports', items: [],
-        description: 'مرکز گزارش کامل هر سایت: کلمه کلیدی اصلی، جایگاه‌ها، مشکلات، بک‌لینک و رپورتاژ' },
+        description: 'موجودی URL، روند ماهانه، کارهای تیم، سنجه‌های GSC و GA4، مشکلات و فرصت‌ها' },
       { title: 'داده زنده تبلیغات', url: '/ads-data', icon: 'reports', items: [],
         description: 'IP، GCLID، session و رفتار زنده ورودی‌های تبلیغاتی' },
       { title: 'ترافیک و تماس‌ها', url: '/dashboard/traffic', icon: 'trendingUp', items: [],

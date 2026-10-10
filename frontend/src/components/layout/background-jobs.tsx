@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { IconAlertTriangle, IconCheck, IconLoader2, IconStack2 } from '@tabler/icons-react';
 import { useEffect, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
+import { formatUserDate, useDatePreference } from '@/lib/date-preference';
 
 const TYPE_FA: Record<string, string> = {
   wordpress_sync: 'همگام‌سازی وردپرس',
@@ -87,6 +88,7 @@ export function BackgroundJobs() {
 }
 
 function JobRow({ job }: { job: JobRun }) {
+  const { calendar } = useDatePreference();
   const active = job.status === 'queued' || job.status === 'running';
   const at = job.finished_at ?? job.started_at ?? job.queued_at;
   return (
@@ -100,7 +102,7 @@ function JobRow({ job }: { job: JobRun }) {
           </div>
           <div className='mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground'>
             {job.site_id && <span dir='ltr'>{job.site_id}</span>}
-            <time>{new Date(at).toLocaleString('fa-IR', { dateStyle: 'short', timeStyle: 'short' })}</time>
+            <time>{formatUserDate(at, calendar, { dateStyle: 'short', timeStyle: 'short' })}</time>
           </div>
           {active && <div className='mt-3 h-1 overflow-hidden rounded-full bg-muted'><div className='h-full w-1/2 animate-pulse rounded-full bg-sky-500' /></div>}
           {job.error && <p className='mt-2 line-clamp-3 text-xs text-destructive' dir='ltr'>{job.error}</p>}

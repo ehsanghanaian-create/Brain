@@ -2,6 +2,7 @@
 
 import { Input } from '@/components/ui/input';
 import { jalaliNumeric, parseJalali } from '@/features/content/constants';
+import { useDatePreference } from '@/lib/date-preference';
 import { useEffect, useState } from 'react';
 
 /** ورودی تاریخ شمسی (۱۴۰۵/۰۶/۰۵) — مقدار API همان ISO میلادی می‌ماند؛ فقط نمایش/تایپ شمسی است.
@@ -9,6 +10,7 @@ import { useEffect, useState } from 'react';
 export function JalaliDateInput({ value, onChange, className, placeholder = '۱۴۰۵/۰۶/۰۵', clearable = true, ...rest }:
   { value: string | null | undefined; onChange: (iso: string | null) => void; className?: string; placeholder?: string; clearable?: boolean } & Record<string, unknown>) {
   const [text, setText] = useState(jalaliNumeric(value));
+  const { calendar } = useDatePreference();
   const [bad, setBad] = useState(false);
   useEffect(() => { setText(jalaliNumeric(value)); setBad(false); }, [value]);
   function commit() {
@@ -18,6 +20,7 @@ export function JalaliDateInput({ value, onChange, className, placeholder = '۱�
     if (isoDay) { setBad(false); setText(jalaliNumeric(isoDay)); if (isoDay !== value) onChange(isoDay); }
     else setBad(true);
   }
+  if (calendar === 'gregorian') return <Input type='date' value={value || ''} onChange={(event) => onChange(event.target.value || null)} className={className} {...rest} />;
   return (
     <Input value={text} dir='ltr' inputMode='numeric' placeholder={placeholder} title='تاریخ شمسی: سال/ماه/روز'
       aria-invalid={bad || undefined} className={`${className ?? ''} ${bad ? 'border-destructive' : ''}`.trim()}

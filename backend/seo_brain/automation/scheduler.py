@@ -37,6 +37,9 @@ MIN_INTERVAL_MINUTES = 10
 MAX_INTERVAL_MINUTES = 7 * 24 * 60
 RETRY_AFTER_MINUTES = 60          # one gentle retry per hour for transient failures…
 MAX_CONSECUTIVE_FAILURES = 3      # …then back off to the normal interval (not_authorized is never retried)
+MIN_FULL_CRAWL_URLS = 200
+MAX_FULL_CRAWL_URLS = 2000
+CAPPED_RECRAWL_MINUTES = 10
 
 
 def _utcnow() -> datetime:
@@ -155,6 +158,39 @@ def _failure_streak(engine: Engine, site_id: str, source: str) -> tuple[int, dat
     return streak, _parse(rows[0][1]), rows[0][0]
 
 
+def latest_site_crawl(engine: Engine, site_id: str) -> dict | None:
+    """Ignore targeted post-fix crawls when reporting whole-site coverage."""
+    with engine.connect() as cx:
+        rows = cx.execute(text("SELECT status, started_at, finished_at, max_urls, urls_crawled, urls_failed, notes "
+                               "FROM crawl_runs WHERE site_id=:s ORDER BY started_at DESC LIMIT 100"),
+                          {"s": site_id}).mappings().all()
+    for row in rows:
+        try:
+            notes = json.loads(row["notes"] or "{}")
+        except (ValueError, TypeError):
+            notes = {}
+        if not isinstance(notes, dict):
+            notes = {}
+        if notes.get("scope") != "targeted":
+            return {**dict(row), "parsed_notes": notes}
+    return None
+
+
+def full_crawl_limit(engine: Engine, site_id: str) -> int:
+    """Size a read-only crawl to the site's known content and expand capped crawls."""
+    with engine.connect() as cx:
+        posts = cx.execute(text("SELECT COUNT(*) FROM posts WHERE site_id=:s"), {"s": site_id}).scalar() or 0
+    latest = latest_site_crawl(engine, site_id)
+    limit = max(MIN_FULL_CRAWL_URLS, posts * 2 + 60)
+    if latest and latest["status"] == "completed_capped":
+        try:
+            remaining = int(latest["parsed_notes"].get("queue_remaining") or 0)
+        except (ValueError, TypeError):
+            remaining = 0
+        limit = max(limit, int(latest["max_urls"] or 0) + remaining + 50)
+    return min(MAX_FULL_CRAWL_URLS, limit)
+
+
 def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> dict[str, Any]:
     """Per-integration plan used by both the scheduler and the auto-sync API: last success, next planned, due."""
     now = now or _utcnow()
@@ -162,35 +198,54 @@ def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> 
     interval = timedelta(minutes=cfg["interval_minutes"])
     with engine.connect() as cx:
         site = cx.execute(text("SELECT wp_url, gsc_property, ga4_property FROM sites WHERE site_id=:s"), {"s": site_id}).first()
+        checks = {r[0]: (r[1], _parse(r[2])) for r in cx.execute(
+            text("SELECT kind, status, tested_at FROM site_connections WHERE site_id=:s"), {"s": site_id}).all()}
     if not site:
         return {"enabled": cfg["enabled"], "interval_minutes": cfg["interval_minutes"], "interval_hours": cfg["interval_hours"], "sources": {}}
     from ..connections.service import GA4_SCOPE, _google_client_configured, _token_info
+    from ..connections.service_account import sa_configured
     tok = _token_info()
-    google_ok = _google_client_configured() and tok.get("present")
+    oauth_ready = bool(_google_client_configured() and tok.get("oauth_present", tok.get("present"))
+                       and not tok.get("oauth_invalid"))
     configured = {
         "wordpress": bool(site[0]),
-        "gsc": bool(site[1] and google_ok),
-        "ga4": bool(site[2] and google_ok and GA4_SCOPE in (tok.get("scopes") or [])),
+        "gsc": bool(site[1] and tok.get("present") and (oauth_ready or sa_configured())),
+        "ga4": bool(site[2] and oauth_ready and GA4_SCOPE in (tok.get("oauth_scopes", tok.get("scopes")) or [])),
     }
     sources: dict[str, Any] = {}
     for kind, src in (("wordpress", "wordpress_pipeline"), ("gsc", "gsc_pipeline"), ("ga4", "ga4_pipeline")):
         last = last_success(engine, site_id, src)
         nxt = (last + interval) if last else now
-        # transient-failure retry: newest run failed (never not_authorized) → one retry per hour, max 3 in a row
+        # A rejected grant needs user reconnection; repeated failures must not hammer the site.
         streak, latest_started, latest_status = _failure_streak(engine, site_id, src)
-        if (cfg["enabled"] and configured[kind] and latest_status == "failed"
-                and 0 < streak < MAX_CONSECUTIVE_FAILURES and latest_started):
-            retry_at = latest_started + timedelta(minutes=RETRY_AFTER_MINUTES)
-            if retry_at < nxt:
-                nxt = retry_at
+        check_status, checked_at = checks.get(kind, (None, None))
+        blocked = latest_status == "not_authorized" and not (
+            check_status == "ok" and checked_at and latest_started and checked_at > latest_started)
+        if latest_status == "not_authorized" and not blocked:
+            nxt = now
+        elif latest_status == "failed" and latest_started:
+            delay = RETRY_AFTER_MINUTES if streak < MAX_CONSECUTIVE_FAILURES else cfg["interval_minutes"]
+            retry_at = latest_started + timedelta(minutes=delay)
+            nxt = retry_at if streak < MAX_CONSECUTIVE_FAILURES else max(nxt, retry_at)
+        if kind == "wordpress" and last and latest_status in OK_STATUSES:
+            crawl = latest_site_crawl(engine, site_id)
+            if (crawl and crawl["status"] == "completed_capped"
+                    and int(crawl["max_urls"] or 0) < MAX_FULL_CRAWL_URLS):
+                nxt = min(nxt, last + timedelta(minutes=CAPPED_RECRAWL_MINUTES))
         sources[kind] = {"configured": configured[kind], "last_success": _iso(last) if last else None,
-                         "next_at": _iso(nxt) if (cfg["enabled"] and configured[kind]) else None,
-                         "due": bool(cfg["enabled"] and configured[kind] and nxt <= now)}
+                         "blocked_reason": "not_authorized" if blocked else None,
+                         "next_at": _iso(nxt) if (cfg["enabled"] and configured[kind] and not blocked) else None,
+                         "due": bool(cfg["enabled"] and configured[kind] and not blocked and nxt <= now)}
     return {"enabled": cfg["enabled"], "interval_minutes": cfg["interval_minutes"], "interval_hours": cfg["interval_hours"], "sources": sources}
 
 
 def run_tick(engine: Engine, queue, max_sites: int = 2, stale_after_minutes: int = 120) -> dict[str, Any]:
     """One scheduler pass: recover stale runs, then enqueue the existing jobs for due integrations (staggered)."""
+    try:
+        from ..api.routers.call_center import reconcile_calls
+        reconcile_calls(limit=500, force=False, eng=engine)
+    except Exception as e:  # noqa: BLE001 — attribution must not stop scheduled syncs
+        log.warning(f"scheduler: call attribution recheck failed: {e.__class__.__name__}: {e}")
     recovered = recover_stale_runs(engine, stale_after_minutes)
     # calendar auto-publish: plans whose date/time arrived, on autopilot sites → the mode-gated writer job
     published: list[dict] = []
@@ -206,13 +261,23 @@ def run_tick(engine: Engine, queue, max_sites: int = 2, stale_after_minutes: int
         if published:
             log.info(f"scheduler: queued calendar publish for {published}")
     with engine.connect() as cx:
-        site_ids = [r[0] for r in cx.execute(text("SELECT site_id FROM sites ORDER BY site_id")).all()]
+        # Oldest attempted sites first: an alphabetical cap can starve later sites forever.
+        site_ids = [r[0] for r in cx.execute(text("""SELECT s.site_id FROM sites s
+            LEFT JOIN sync_runs r ON r.site_id=s.site_id AND r.source IN
+                ('wordpress_pipeline','gsc_pipeline','ga4_pipeline')
+            WHERE NOT EXISTS (SELECT 1 FROM manual_projects mp WHERE mp.site_id=s.site_id)
+            GROUP BY s.site_id ORDER BY MAX(r.started_at) ASC, s.site_id""")).all()]
+        active_sites = {r[0] for r in cx.execute(text("SELECT DISTINCT site_id FROM sync_runs WHERE source IN "
+            "('wordpress_pipeline','gsc_pipeline','ga4_pipeline') AND status IN ('queued','running')")).all()}
     queued: list[dict[str, str]] = []
     started_sites = 0
+    available_slots = max(0, max_sites - len(active_sites))
     from ..api.routers.sites import _queue_ga4_sync, _queue_gsc_sync, _queue_wordpress_sync
     for sid in site_ids:
-        if started_sites >= max_sites:
+        if started_sites >= available_slots:
             break
+        if sid in active_sites:
+            continue
         plan = plan_for_site(engine, sid)
         due = [k for k, v in plan["sources"].items() if v["due"]]
         if not due:
@@ -221,7 +286,8 @@ def run_tick(engine: Engine, queue, max_sites: int = 2, stale_after_minutes: int
         for kind in due:
             try:
                 if kind == "wordpress":
-                    r = _queue_wordpress_sync(sid, engine, queue, stage="full", crawl=True, max_urls=None, reason="scheduler")
+                    r = _queue_wordpress_sync(sid, engine, queue, stage="full", crawl=True,
+                                              max_urls=full_crawl_limit(engine, sid), reason="scheduler")
                 elif kind == "gsc":
                     r = _queue_gsc_sync(sid, engine, queue, days=None, reason="scheduler")
                 else:

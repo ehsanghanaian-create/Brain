@@ -15,7 +15,7 @@ from ..automation import get_job_queue
 from ..common.config import env
 from .deps import require_token
 from .errors import install_error_handlers
-from .routers import ads_data, ai, ai_config, ai_gateway, ai_workspace, content, content_plans, generation, graph, health, ip_graph, jobs, keywords, knowledge, links, memory, network, ops, portfolio, reports, site_media, site_security, sites, tracker, traffic
+from .routers import ads_data, ai, ai_config, ai_gateway, ai_workspace, call_center, content, content_plans, generation, graph, health, ip_graph, jobs, keywords, knowledge, links, memory, network, ops, portfolio, remediation, reports, site_media, site_security, sites, tracker, traffic
 
 API_PREFIX = "/api/v1"
 
@@ -74,6 +74,16 @@ def _register_builtin_jobs() -> None:
         from ..automation.content import ContentAutomationService
         return ContentAutomationService(_engine(), _gateway()).run(int(payload["generation_job_id"]))
 
+    def _run_seo_remediation(payload: dict):
+        from .deps import engine as _engine
+        from ..remediation.service import RemediationService, public_run
+        return public_run(RemediationService(_engine()).execute(payload["site_id"], payload["run_id"]))
+
+    def _run_seo_proposal(payload: dict):
+        from .deps import engine as _engine, gateway as _gateway
+        from ..remediation.service import RemediationService
+        return RemediationService(_engine(), _gateway()).propose(payload["site_id"], payload["issue_key"])
+
     def _run_wordpress_pipeline(payload: dict):
         """WordPress → sync → (crawl) → graph, one job; progress persisted in sync_runs (see wordpress/orchestrator.py)."""
         from .deps import engine as _engine
@@ -117,7 +127,8 @@ def _register_builtin_jobs() -> None:
 
     for name, fn in (("sync_wordpress", _run_sync_wordpress), ("build_graph", _run_build_graph), ("noop", _noop), ("links_analyze", _run_links_analyze), ("generation_run", _run_generation), ("content_automation", _run_content_automation), ("planner_analyze", _run_planner_analyze),
                      ("wordpress_sync", _run_wordpress_pipeline), ("gsc_sync", _run_gsc_sync), ("ga4_sync", _run_ga4_sync),
-                     ("plan_generate", _run_plan_generate), ("plan_publish", _run_plan_publish)):
+                     ("plan_generate", _run_plan_generate), ("plan_publish", _run_plan_publish), ("seo_remediation", _run_seo_remediation),
+                     ("seo_proposal", _run_seo_proposal)):
         try:
             q.register(name, fn)
         except Exception:  # noqa: BLE001
@@ -148,13 +159,41 @@ def create_app() -> FastAPI:
     origins = [o.strip() for o in (env("FRONTEND_ORIGIN", "http://localhost:3000,http://127.0.0.1:3000") or "").split(",") if o.strip()]
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["*"], allow_headers=["*"], expose_headers=["X-Request-ID"])
     install_error_handlers(app)
+    @app.middleware("http")
+    async def panel_audit_middleware(request, call_next):
+        if request.url.path.startswith("/legacy"):
+            from .panel_auth import require_panel
+            from .deps import engine as panel_engine
+            resolve_engine = request.app.dependency_overrides.get(panel_engine, panel_engine)
+            try:
+                user = require_panel(request, resolve_engine())
+                if not user or user["role"] != "admin":
+                    from fastapi.responses import JSONResponse
+                    return JSONResponse({"error": "forbidden"}, status_code=403)
+            except Exception:
+                from fastapi.responses import JSONResponse
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+        response = await call_next(request)
+        if getattr(request.state, "panel_user", None):
+            try:
+                from .panel_auth import audit_mutation
+                from .deps import engine as panel_engine
+                resolve_engine = request.app.dependency_overrides.get(panel_engine, panel_engine)
+                audit_mutation(resolve_engine(), request, response.status_code, getattr(request.state, "audit_fields", None))
+            except Exception as exc:  # noqa: BLE001 — logging failure must be observable but not alter a successful mutation
+                import logging
+                logging.getLogger("api.audit").exception("audit write failed: %s", exc)
+        return response
 
     deps = [Depends(require_token)]
     app.include_router(health.router, prefix=API_PREFIX)
     from .routers import google as google_router_mod
+    from .routers import work as work_router_mod, workspace as workspace_router_mod, projects as projects_router_mod
     app.include_router(google_router_mod.callback_router, prefix=API_PREFIX)     # Google's browser redirect cannot send X-API-Token; guarded by the state nonce
     app.include_router(tracker.router, prefix=API_PREFIX)   # عمومی — امنیتش با write-key سایت است، نه X-API-Token
-    for r in (portfolio.router, ads_data.router, sites.router, sites.gsc_router, google_router_mod.router, graph.router, memory.router, knowledge.router, site_security.router, site_media.router, network.router, ip_graph.router, ops.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router, reports.router, traffic.router):
+    from .routers import panel_auth as panel_auth_router
+    app.include_router(panel_auth_router.router, prefix=API_PREFIX)
+    for r in (portfolio.router, ads_data.router, call_center.router, sites.router, sites.gsc_router, google_router_mod.router, graph.router, remediation.router, memory.router, knowledge.router, site_security.router, site_media.router, network.router, ip_graph.router, ops.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router, reports.router, work_router_mod.router, workspace_router_mod.router, projects_router_mod.router, traffic.router):
         app.include_router(r, prefix=API_PREFIX, dependencies=deps)
 
     # legacy dashboard (v0.1) mounted read-only until UI parity

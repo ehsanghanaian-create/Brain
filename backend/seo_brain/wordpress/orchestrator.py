@@ -168,8 +168,14 @@ class WordPressSyncOrchestrator:
             self._persist(st)
             if stage == "full":
                 self._step(st, "resolve", lambda: self._resolve(site_id))
-                self._wordpress_steps(st, site_id)
-                self._step(st, "category_intelligence", lambda: self._category_intelligence(site_id))
+                try:
+                    self._wordpress_steps(st, site_id)
+                except Exception:
+                    # Public crawling can still collect current SEO evidence when
+                    # the WordPress REST endpoint is unavailable or times out.
+                    self._mark(st, "category_intelligence", "skipped", {"reason": "wordpress sync failed"})
+                else:
+                    self._step(st, "category_intelligence", lambda: self._category_intelligence(site_id))
                 if crawl:
                     self._step(st, "crawl", lambda: self._crawl(site_id, max_urls))
                 else:
@@ -319,6 +325,8 @@ class WordPressSyncOrchestrator:
         from ..database.db import db
         with db() as conn:
             stats = Crawler(site, max_urls=max_urls).run(conn)
+        if stats.get("failed") or not stats.get("crawled"):
+            raise RuntimeError(f"crawl fetched {stats.get('crawled', 0)} URLs and failed on {stats.get('failed', 0)}; previous page evidence was preserved")
         return {"crawled": int(stats.get("ok", stats.get("crawled", 0)) or 0), **{k: v for k, v in stats.items() if isinstance(v, (int, float, str)) and k != "run_id"}}
 
     def _build_graph(self, site_id: str) -> dict:

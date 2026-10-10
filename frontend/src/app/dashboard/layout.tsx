@@ -7,6 +7,9 @@ import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { BackgroundJobs } from '@/components/layout/background-jobs';
+import { redirect } from 'next/navigation';
+import type { PanelRole } from '@/lib/panel-access';
+import { DatePreferenceProvider, type DateCalendar } from '@/lib/date-preference';
 
 export const metadata: Metadata = {
   description: 'داشبورد SEO Brain — سیستم‌عامل سئوی محلی',
@@ -20,8 +23,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Persisting the sidebar state in the cookie.
   const cookieStore = await cookies();
   const defaultOpen = cookieStore.get('sidebar_state')?.value === 'true';
+  const token = cookieStore.get('sb_panel_session')?.value;
+  if (!token) redirect('/login');
+  const backend = (process.env.SEO_BRAIN_API_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
+  const me = await fetch(`${backend}/api/v1/auth/me`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
+  if (!me.ok) redirect('/login');
+  const user = await me.json() as { username: string; full_name: string; role: PanelRole; date_calendar: DateCalendar; is_superadmin: boolean };
   return (
-    <KBar>
+    <DatePreferenceProvider initialCalendar={user.date_calendar}>
+    <KBar role={user.role} isSuperadmin={user.is_superadmin}>
       <SidebarProvider defaultOpen={defaultOpen}>
         <a
           href='#main-content'
@@ -29,18 +39,19 @@ export default async function DashboardLayout({ children }: { children: React.Re
         >
           پرش به محتوا
         </a>
-        <AppSidebar />
+        <AppSidebar user={user} />
         <SidebarInset id='main-content' tabIndex={-1} className='scroll-mt-16'>
           <InfobarProvider defaultOpen={false}>
             <div className='flex min-w-0 flex-1 flex-col'>
-              <Header />
+              <Header user={user} />
               {children}
-              <BackgroundJobs />
+              {user.role === 'admin' && <BackgroundJobs />}
             </div>
             <InfoSidebar side='right' />
           </InfobarProvider>
         </SidebarInset>
       </SidebarProvider>
     </KBar>
+    </DatePreferenceProvider>
   );
 }

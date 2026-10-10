@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -77,8 +78,11 @@ def _site_operational_state(*, sync_status: str, connections: dict[str, str], ha
 
 @router.get("/overview")
 def overview(eng: Engine = Depends(engine)) -> dict[str, Any]:
+    today = datetime.now(timezone.utc).date()
+    window_start = (today - timedelta(days=27)).isoformat()
     with eng.connect() as cx:
-        site_rows = [dict(row._mapping) for row in cx.execute(text("SELECT * FROM sites ORDER BY name, site_id")).all()]
+        site_rows = [dict(row._mapping) for row in cx.execute(text("""SELECT * FROM sites
+            WHERE site_id NOT IN (SELECT site_id FROM manual_projects) ORDER BY name, site_id""")).all()]
         node_rows = cx.execute(text("SELECT site_id, node_type, COUNT(*) AS n FROM graph_nodes GROUP BY site_id, node_type")).all()
         nodes: dict[str, int] = defaultdict(int)
         by_type: dict[str, int] = defaultdict(int)
@@ -93,6 +97,28 @@ def overview(eng: Engine = Depends(engine)) -> dict[str, Any]:
         planned = _group_counts(cx, "content_items")
         new_links = _group_counts(cx, "link_suggestions", extra="WHERE status = 'new'")
         high_links = _group_counts(cx, "link_suggestions", extra="WHERE status = 'new' AND confidence = 'high'")
+        source_coverage: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
+        for source, table, extra in (
+            ("gsc", "gsc_property_daily", "AND search_type = 'web'"),
+            ("ga4", "ga4_site_daily", "AND channel = ''"),
+        ):
+            for site_id, last_date, days_28 in cx.execute(text(
+                f"SELECT site_id, MAX(date), COUNT(CASE WHEN date >= :window_start THEN 1 END) "
+                f"FROM {table} WHERE 1=1 {extra} GROUP BY site_id"
+            ), {"window_start": window_start}).all():
+                source_coverage[str(site_id)][source] = {
+                    "last_date": last_date, "days_28": int(days_28),
+                }
+        work_counts: dict[str, dict[str, int]] = defaultdict(lambda: {"open": 0, "overdue": 0, "unassigned": 0})
+        for site_id, open_count, overdue, unassigned in cx.execute(text("""
+            SELECT site_id, COUNT(*),
+                   SUM(CASE WHEN due_at IS NOT NULL AND julianday(due_at) < julianday(:now) THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN owner_id IS NULL THEN 1 ELSE 0 END)
+            FROM work_items
+            WHERE status NOT IN ('verified','rejected','deferred')
+            GROUP BY site_id
+        """), {"now": datetime.now(timezone.utc).isoformat()}).all():
+            work_counts[str(site_id)] = {"open": int(open_count), "overdue": int(overdue), "unassigned": int(unassigned)}
 
         connection_rows = cx.execute(text(
             "SELECT site_id, kind, status FROM site_connections ORDER BY tested_at DESC"
@@ -175,6 +201,11 @@ def overview(eng: Engine = Depends(engine)) -> dict[str, Any]:
                 "high_link_suggestions": high_links.get(sid, 0),
             },
             "connections": site_connections,
+            "data_coverage": {
+                source: source_coverage.get(sid, {}).get(source, {"last_date": None, "days_28": 0})
+                for source in ("gsc", "ga4")
+            },
+            "work": work_counts[sid],
             "latest_sync": sync,
         })
 
@@ -192,6 +223,9 @@ def overview(eng: Engine = Depends(engine)) -> dict[str, Any]:
             "planned_content": sum(planned.values()),
             "new_link_suggestions": sum(new_links.values()),
             "high_link_suggestions": sum(high_links.values()),
+            "open_work": sum(item["open"] for item in work_counts.values()),
+            "overdue_work": sum(item["overdue"] for item in work_counts.values()),
+            "unassigned_work": sum(item["unassigned"] for item in work_counts.values()),
         },
         "state_counts": state_counts,
         "by_node_type": dict(sorted(by_type.items(), key=lambda item: (-item[1], item[0]))),

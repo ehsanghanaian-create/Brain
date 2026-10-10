@@ -165,11 +165,11 @@ def test_rerun_produces_no_duplicate_graph_nodes_or_gsc_rows(env):
     assert nodes == 3 and qnodes == 1 and daily == 3 and dup == 0       # rebuild + upsert ⇒ idempotent, never additive
 
 
-def test_no_duplicate_gsc_tables_or_new_migrations(env):
-    """The pipeline must reuse the existing schema — no gsc_queries/gsc_pages/gsc_metrics or any new gsc table."""
+def test_no_duplicate_gsc_tables(env):
+    """Property totals use one distinct grain; the page/query tables remain unchanged."""
     with env["eng"].connect() as cx:
         tables = {r[0] for r in cx.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
-    assert {t for t in tables if "gsc" in t} == {"gsc_daily", "gsc_query_page"}
+    assert {t for t in tables if "gsc" in t} == {"gsc_daily", "gsc_query_page", "gsc_property_daily"}
     for forbidden in ("gsc_queries", "gsc_pages", "gsc_metrics", "gsc_sync_status", "gsc_runs"):
         assert forbidden not in tables
 

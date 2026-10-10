@@ -43,6 +43,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           dangerouslySetInnerHTML={{
             __html: `
               try {
+                var accent = localStorage.getItem('seo-brain-accent');
+                if (document.documentElement.dataset.theme === 'gentelella' && /^#[0-9a-fA-F]{6}$/.test(accent || '')) {
+                  ['--primary','--ring','--chart-1','--sidebar-primary'].forEach(function(token) { document.documentElement.style.setProperty(token, accent); });
+                }
                 // Set meta theme color
                 if (localStorage.theme === 'dark' || ((!('theme' in localStorage) || localStorage.theme === 'system') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
                   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '${META_THEME_COLORS.dark}')
@@ -62,7 +66,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <NuqsAdapter>
           <ThemeProvider
             attribute='class'
-            defaultTheme='dark'
+            defaultTheme='light'
             enableSystem
             disableTransitionOnChange
             enableColorScheme

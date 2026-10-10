@@ -161,8 +161,10 @@ def test_failed_rest_is_reported_never_silent_and_credentials_never_leak(env):
     env["state"]["fail"] = True
     r = c.post(f"/api/v1/sites/{SID}/wordpress/sync", json={}); assert r.status_code == 202
     st = c.get(f"/api/v1/sites/{SID}/wordpress/sync/status").json()
-    assert st["status"] == "failed" and st["job"]["status"] == "failed" and any("REST unreachable" in e for e in st["errors"])
-    assert {s["key"]: s["status"] for s in st["steps"]}["categories"] == "failed" and next(s for s in st["steps"] if s["key"] == "build_graph")["status"] == "pending"
+    assert st["status"] == "completed_with_errors" and st["job"]["status"] == "succeeded" and any("REST unreachable" in e for e in st["errors"])
+    statuses = {s["key"]: s["status"] for s in st["steps"]}
+    assert statuses["categories"] == "failed" and statuses["category_intelligence"] == "skipped"
+    assert statuses["crawl"] == "done" and env["state"]["crawl_calls"] == 1
     blob = json.dumps(st, ensure_ascii=False)
     with env["eng"].connect() as cx:
         notes = " ".join(r_[0] or "" for r_ in cx.execute(text("SELECT notes FROM sync_runs WHERE site_id=:s"), {"s": SID}).all())

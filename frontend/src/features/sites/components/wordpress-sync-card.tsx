@@ -8,6 +8,7 @@ import { useIntegrationSyncStatus } from '../use-sync-status';
 import { queueMessage, stepRows, wpSyncView } from '../wp-sync';
 import { ConnectionTester } from './connection-tester';
 import { IntegrationCard, SyncCounters, SyncErrors, SyncProgress } from './integration-card';
+import { formatUserDateTime, useDatePreference } from '@/lib/date-preference';
 
 /**
  * WordPress integration card — connection (URL + Application Password tester) و همگام‌سازی → گراف در یک قاب.
@@ -20,6 +21,7 @@ export function WordPressIntegrationCard({ siteId, initialValue, initialResult, 
   initialAuth?: WpAuthStatus | null;
   refreshKey?: number;
 }) {
+  const { calendar } = useDatePreference();
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const load = useCallback(() => endpoints.wpSyncStatus(siteId), [siteId]);
@@ -52,7 +54,7 @@ export function WordPressIntegrationCard({ siteId, initialValue, initialResult, 
       description={
         <>
           دسته‌ها، صفحات و نوشته‌ها از REST وردپرس (فقط‌خواندنی) خوانده می‌شوند، سپس لینک‌ها استخراج و گراف ساخته می‌شود. اجرا همیشه به‌صورت job در پس‌زمینه است.
-          {view.lastSync && <span className='block' dir='ltr'>آخرین همگام‌سازی: {new Date(view.lastSync).toLocaleString('fa-IR')}</span>}
+          {view.lastSync && <span className='block' dir='ltr'>آخرین همگام‌سازی: {formatUserDateTime(view.lastSync, calendar)}</span>}
         </>
       }
     >

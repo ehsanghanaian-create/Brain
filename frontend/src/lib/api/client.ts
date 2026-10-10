@@ -8,7 +8,7 @@
 import type { components } from './schema';
 import type {
   ReportBacklinks, ReportFull, ReportKeywordList, ReportKeywordPerf, ReportMainKeyword,
-  ReportOpportunities, ReportProblems, ReportReportages, ReportSummary
+  ReportOpportunities, ReportProblems, ReportReportages, ReportSummary, ReportInventory, InventoryDetail, MonthlyProgress
 } from '@/features/reports/types';
 
 export type Schemas = components['schemas'];
@@ -83,11 +83,13 @@ export type PortfolioSite = {
   issues: { kind: string; severity: 'blocking' | 'warning'; message: string }[];
   setup_progress: number; setup_steps: { wordpress_configured: boolean; content_synced: boolean; crawl_ready: boolean; graph_ready: boolean };
   connections: Record<string, string>; latest_sync: PortfolioActivity | null;
+  data_coverage: Record<'gsc' | 'ga4', { last_date: string | null; days_28: number }>;
+  work: { open: number; overdue: number; unassigned: number };
   counts: { content: number; crawled: number; graph_nodes: number; graph_edges: number; keywords: number; planned_content: number; new_link_suggestions: number; high_link_suggestions: number };
 };
 export type PortfolioOverview = {
   generated_at: string;
-  totals: { sites: number; ready_sites: number; needs_attention: number; content: number; crawled: number; graph_nodes: number; graph_edges: number; keywords: number; planned_content: number; new_link_suggestions: number; high_link_suggestions: number };
+  totals: { sites: number; ready_sites: number; needs_attention: number; content: number; crawled: number; graph_nodes: number; graph_edges: number; keywords: number; planned_content: number; new_link_suggestions: number; high_link_suggestions: number; open_work: number; overdue_work: number; unassigned_work: number };
   state_counts: Record<PortfolioSiteState, number>;
   by_node_type: Record<string, number>;
   sites: PortfolioSite[];
@@ -143,10 +145,10 @@ export type GscSyncStatus = {
   steps: WpSyncStep[]; run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null;
   coverage: GscSyncCoverage; steps_fa: Record<string, string>;
 };
-export type GoogleAccountStatus = { connected: boolean; email: string | null; scopes: string[]; expiry: string | null; gsc_scope: boolean; ga4_scope: boolean; client_configured: boolean; client_id_hint?: string | null; connected_at?: string | null };
+export type GoogleAccountStatus = { connected: boolean; authorization_state?: 'valid' | 'needs_reconnect' | 'temporary_error' | 'disconnected'; refresh_token_stored?: boolean; email: string | null; scopes: string[]; expiry: string | null; gsc_scope: boolean; ga4_scope: boolean; client_configured: boolean; client_id_hint?: string | null; connected_at?: string | null; redirect_uri?: string | null };
 export type Ga4Property = { property_id: string; display_name: string | null; account: string | null; website_url?: string | null };
 export type Ga4Properties = { status: 'ok' | 'not_configured' | 'not_authorized' | 'error' | string; properties: Ga4Property[]; message?: string };
-export type Ga4SyncCoverage = { date_from: string | null; date_to: string | null; rows: number; pages: number; sessions: number; users: number; conversions: number; content_snapshots: number; last_ga4_sync?: string | null; top_pages: { path: string; sessions: number; conversions: number }[] };
+export type Ga4SyncCoverage = { date_from: string | null; date_to: string | null; rows: number; pages: number; sessions: number; users: number | null; conversions: number; metric_source?: string; content_snapshots: number; last_ga4_sync?: string | null; top_pages: { path: string; sessions: number; conversions: number }[] };
 export type Ga4SyncStatus = {
   site_id: string; property: string | null; authorized: boolean;
   status: 'never' | 'queued' | 'running' | 'succeeded' | 'completed_with_errors' | 'failed' | 'not_authorized' | string;
@@ -355,6 +357,22 @@ export const endpoints = {
   reportFull: (id: string, days = 28) => api<ReportFull>(`/sites/${encodeURIComponent(id)}/report?days=${days}`),
   refreshSite: (id: string) => api<{ site_id: string; queued: { kind: string; status?: string; run_id?: string }[]; skipped: string[] }>(`/sites/${encodeURIComponent(id)}/refresh`, { method: 'POST' }),
   reportSummary: (id: string, days = 28) => api<ReportSummary>(`/sites/${encodeURIComponent(id)}/report/summary?days=${days}`),
+  reportInventory: (id: string, params: { q?: string; source?: string; limit?: number; offset?: number } = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => value !== undefined && value !== '' && q.set(key, String(value)));
+    return api<ReportInventory>(`/sites/${encodeURIComponent(id)}/report/inventory?${q.toString()}`);
+  },
+  reportInventoryPage: (id: string, url: string) => api<InventoryDetail>(`/sites/${encodeURIComponent(id)}/report/inventory/page?url=${encodeURIComponent(url)}`),
+  reportMonthly: (id: string, months = 12) => api<MonthlyProgress>(`/sites/${encodeURIComponent(id)}/report/monthly?months=${months}`),
+  siteWork: (id: string, params: { status?: string; q?: string; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => value !== undefined && value !== '' && query.set(key, String(value)));
+    return api<import('@/features/reports/types').WorkList>(`/sites/${encodeURIComponent(id)}/work?${query.toString()}`);
+  },
+  createSiteWork: (id: string, body: Record<string, unknown>) => api<import('@/features/reports/types').WorkItem>(`/sites/${encodeURIComponent(id)}/work`, { method: 'POST', json: body }),
+  updateSiteWork: (id: string, itemId: number, body: Record<string, unknown>) => api<import('@/features/reports/types').WorkItem>(`/sites/${encodeURIComponent(id)}/work/${itemId}`, { method: 'PATCH', json: body }),
+  siteWorkEvents: (id: string, itemId: number) => api<import('@/features/reports/types').WorkEvent[]>(`/sites/${encodeURIComponent(id)}/work/${itemId}/events`),
+  panelUsers: () => api<{ id: number; full_name: string; active: boolean }[]>('/call-center/operators'),
   reportMainKeyword: (id: string, days = 28) => api<ReportMainKeyword>(`/sites/${encodeURIComponent(id)}/report/main-keyword?days=${days}`),
   setReportMainKeyword: (id: string, keyword: string) =>
     api<{ keyword: string; performance: ReportKeywordPerf | null }>(`/sites/${encodeURIComponent(id)}/report/main-keyword`, { method: 'PUT', json: { keyword } }),

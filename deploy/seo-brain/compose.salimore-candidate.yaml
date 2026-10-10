@@ -1,0 +1,61 @@
+# Run from an isolated candidate directory with .env containing API_TOKEN.
+# This stack never mounts Salimore's production DB, config, or data.
+name: salimore-seo-brain-candidate
+
+services:
+  backend:
+    image: ${BACKEND_IMAGE:?Set candidate BACKEND_IMAGE}
+    user: "10001:10001"
+    environment:
+      SEO_KG_ROOT: /app
+      DATABASE_PATH: /app/runtime-db/seo.db
+      FRONTEND_ORIGIN: http://127.0.0.1:3110
+      API_TOKEN: ${API_TOKEN:?Set candidate API_TOKEN}
+      SCHEDULER_ENABLED: "0"
+    volumes:
+      - ./runtime-db:/app/runtime-db
+      - ./data:/app/data
+      - ./obsidian:/app/obsidian
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 6
+    mem_limit: 768m
+    cpus: 0.35
+    pids_limit: 128
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    networks: [candidate_net]
+
+  frontend:
+    image: ${FRONTEND_IMAGE:?Set candidate FRONTEND_IMAGE}
+    user: "1000:1000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      SEO_BRAIN_API_URL: http://backend:8000
+      SEO_BRAIN_API_TOKEN: ${API_TOKEN:?Set candidate API_TOKEN}
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    ports:
+      - 127.0.0.1:3110:3000
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 25s
+      retries: 6
+    mem_limit: 384m
+    cpus: 0.30
+    pids_limit: 128
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    networks: [candidate_net]
+
+networks:
+  candidate_net:
+    driver: bridge

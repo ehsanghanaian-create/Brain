@@ -25,8 +25,8 @@ def main() -> None:
         if row:
             raise RuntimeError("Username admin already exists without a usable password; resolve manually")
         at = utcnow()
-        cx.execute(text("""INSERT INTO panel_users(full_name,email,username,password_hash,role,active,created_at,updated_at)
-            VALUES ('Administrator','admin@local.invalid',:username,:password,'admin',1,:at,:at)"""),
+        cx.execute(text("""INSERT INTO panel_users(full_name,email,username,password_hash,role,active,is_superadmin,created_at,updated_at)
+            VALUES ('Administrator','admin@local.invalid',:username,:password,'admin',1,1,:at,:at)"""),
             {"username": username, "password": hash_password(password), "at": at})
     path = Path("data/panel-initial-admin.txt").resolve()
     path.parent.mkdir(parents=True, exist_ok=True)

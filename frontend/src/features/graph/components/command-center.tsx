@@ -314,7 +314,7 @@ function CommandCenterInner({ sites, initialSiteId, initialMode = 'seo', focusNo
           </ReactFlow>
         </div>
         <div className='min-h-[320px] xl:min-h-0'>
-          <NodeDetailsPanel details={details} loading={detailsLoading} error={detailsError} onClose={() => { setSelectedId(null); patch({ focusNeighbors: false }); }} onFocus={focusNode} />
+          <NodeDetailsPanel siteId={state.siteId} details={details} loading={detailsLoading} error={detailsError} onClose={() => { setSelectedId(null); patch({ focusNeighbors: false }); }} onFocus={focusNode} />
         </div>
       </div>
     </div>

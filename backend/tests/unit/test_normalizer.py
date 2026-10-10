@@ -49,3 +49,11 @@ def test_same_site():
 
 def test_strip_tracking_sorts():
     assert strip_tracking_params("b=1&a=2&utm_term=x") == "a=2&b=1"
+
+
+def test_site_specific_tracking_parameter_keeps_functional_filters():
+    url = "https://example.com/style-builder/?source=article_a&size=large"
+    assert normalize_url(url, site_host=H, extra_tracking_params=["source"]) == (
+        "https://example.com/style-builder/?size=large")
+    assert normalize_url(url, site_host=H) == (
+        "https://example.com/style-builder/?size=large&source=article_a")

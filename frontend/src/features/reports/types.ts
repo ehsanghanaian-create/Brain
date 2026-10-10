@@ -16,8 +16,19 @@ export interface ReportSummary {
   site: { site_id: string; name: string; canonical_url: string | null; gsc_property: string | null; ga4_property: string | null; wp_url: string | null };
   generated_at: string;
   days: number;
-  score: number;
+  score: number | null;
   score_breakdown: { problems_penalty: number; connections_penalty: number };
+  crawl_coverage: {
+    status: string;
+    coverage_status: 'complete' | 'partial' | 'not_started';
+    sitemap_urls: number;
+    recent_crawled: number;
+    window_days: number;
+    latest_crawled: number;
+    max_urls: number | null;
+    started_at: string | null;
+    run_id?: string;
+  };
   gsc: {
     available: boolean;
     date_from?: string;

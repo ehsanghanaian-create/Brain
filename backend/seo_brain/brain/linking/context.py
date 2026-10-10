@@ -98,7 +98,7 @@ def build_context(engine: Engine, site_id: str, settings: dict[str, Any] | None 
         cluster_topic = {r[0]: (r[1] or r[2]) for r in cx.execute(text("SELECT cluster_id, topic, name FROM keyword_clusters WHERE site_id=:s"), {"s": site_id}).all()}
         crawl = {}
         try:
-            for r in cx.execute(text("SELECT url, title, h1, h2, meta_description, word_count, indexable, status_code FROM pages WHERE site_id=:s"), {"s": site_id}).all():
+            for r in cx.execute(text("SELECT url, title, h1, h2, meta_description, word_count, indexable, status_code FROM pages WHERE site_id=:s AND crawl_status='ok'"), {"s": site_id}).all():
                 crawl[normalize_url(unquote(r[0]))] = {"title": r[1], "h1": r[2], "h2": r[3], "meta": r[4], "word_count": r[5], "indexable": r[6], "status_code": r[7]}
         except Exception:  # noqa: BLE001
             crawl = {}

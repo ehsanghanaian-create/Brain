@@ -107,7 +107,7 @@ def delete_provider_config(pid: int, repo: ProviderConfigRepository = Depends(cf
 
 @router.post("/provider-configs/{pid}/test")
 def test_provider_config(pid: int, repo: ProviderConfigRepository = Depends(cfg_repo), g=Depends(gateway)) -> dict:
-    """Read-only connection probe (model list) through the Gateway adapter — same transport/keys as real calls; never sends a prompt."""
+    """Non-mutating connection probe; Atria sends a tiny completion."""
     p = repo.get(pid)
     if not p:
         raise HTTPException(404, "provider not found")
@@ -138,8 +138,9 @@ def test_provider_config(pid: int, repo: ProviderConfigRepository = Depends(cfg_
                       else err)
                 res = {"ok": False, "status": "not_authorized" if "unauthorized" in err else "error",
                        "message": f"اتصال ناموفق: {fa}", "detail": err, "tested_at": utcnow()}
-        except Exception:  # noqa: BLE001 — fall back to the phase-6 probe
-            res = test_provider(p, key)
+        except Exception:  # noqa: BLE001 — legacy providers may use the phase-6 probe
+            res = ({"ok": False, "status": "error", "message": "آزمون اتصال Atria در دسترس نیست.", "tested_at": utcnow()}
+                   if p.kind == "atria" else test_provider(p, key))
     repo.record_test(pid, res)
     return res
 

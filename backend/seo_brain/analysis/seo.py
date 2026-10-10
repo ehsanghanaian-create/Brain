@@ -10,15 +10,18 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from collections import defaultdict
-from urllib.parse import unquote
+from datetime import datetime, timedelta, timezone
+from urllib.parse import unquote, urlsplit
 
 from rapidfuzz import fuzz
 
 from ..common.config import SiteConfig
 from ..common.logging_setup import new_run_id
 from ..database.db import j, rows, upsert, utcnow
+from ..normalizer import normalize_url
 
 log = logging.getLogger("analysis.seo")
 
@@ -34,6 +37,41 @@ def expected_ctr(pos: float) -> float:
         if pos <= p:
             return c
     return 0.01
+
+
+def _h1_comparison_url(url: str) -> str:
+    """Treat pages of one archive as one heading context, not competing documents."""
+    parts = urlsplit(url)
+    path = re.sub(r"/page/(?:[2-9]|[1-9]\d+)/?$", "/", unquote(parts.path))
+    return f"{parts.scheme}://{parts.netloc}{path.rstrip('/')}/"
+
+
+def _redirects_to_other_document(page: sqlite3.Row) -> bool:
+    """A redirect's final HTML belongs to its destination, not its source URL."""
+    if not page["redirect_chain"] or page["redirect_chain"] == "[]" or not page["final_url"]:
+        return False
+    source = unquote(urlsplit(page["url"]).path).rstrip("/").casefold()
+    destination = unquote(urlsplit(page["final_url"]).path).rstrip("/").casefold()
+    return source != destination
+
+
+def _distinct_document_urls(urls: list[str], by_url: dict, *, collapse_pagination: bool = True) -> list[str]:
+    """Collapse identical canonical aliases; pagination may share H1 but should have unique titles."""
+    unique_pages = {}
+    for url in sorted(urls, key=lambda value: (bool(re.search(r"/page/(?:[2-9]|[1-9]\d+)/?$", urlsplit(value).path)), value)):
+        unique_pages.setdefault(_h1_comparison_url(url) if collapse_pagination else url, url)
+    aliases = {}
+    for url in sorted(unique_pages.values(), key=lambda value: (by_url[value]["canonical"] != value, value)):
+        page = by_url[url]
+        canonical = page["canonical"] or ""
+        content_hash = page["content_hash"] or ""
+        if canonical and content_hash and urlsplit(canonical).netloc == urlsplit(url).netloc:
+            identity = (_h1_comparison_url(canonical) if collapse_pagination else canonical.rstrip("/") + "/",
+                        content_hash)
+        else:
+            identity = (_h1_comparison_url(url) if collapse_pagination else url, url)
+        aliases.setdefault(identity, url)
+    return list(aliases.values())
 
 
 def _clear(conn, sid, run_id):
@@ -61,7 +99,56 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
     conn.execute("INSERT INTO sync_runs(run_id, site_id, source, started_at, status) VALUES (?,?,?,?,?)",
                  (run_id, sid, "analysis", utcnow(), "running"))
     _clear(conn, sid, run_id)
-    pages = rows(conn, "SELECT * FROM pages WHERE site_id=? AND crawl_status='ok'", (sid,))
+    # Pages are retained across crawls for history and targeted verification.
+    # An uncapped full crawl replaces the previous snapshot. A capped daily
+    # crawl covers only a rotating slice, so combine pages seen within the
+    # last 30 days instead of analysing just its most recent 20 URLs.
+    full_crawl = None
+    sitemap_urls = 0
+    site_crawls = []
+    for crawl in rows(conn, "SELECT started_at,status,notes FROM crawl_runs WHERE site_id=? AND status IN ('completed','completed_capped') ORDER BY started_at DESC LIMIT 100", (sid,)):
+        try:
+            notes = json.loads(crawl["notes"] or "{}")
+        except (ValueError, TypeError):
+            notes = {}
+        if not isinstance(notes, dict) or notes.get("scope") != "targeted":
+            site_crawls.append((crawl, notes if isinstance(notes, dict) else {}))
+            if full_crawl is None:
+                sitemap_urls = max(0, int(notes.get("sitemap_urls") or 0)) if isinstance(notes, dict) else 0
+                full_crawl = ((datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
+                              if crawl["status"] == "completed_capped" else crawl["started_at"])
+    cutoff_at = datetime.now(timezone.utc) - timedelta(days=30)
+    full_crawl_complete = False
+    for crawl, notes in site_crawls:
+        try:
+            started_at = datetime.fromisoformat(crawl["started_at"].replace("Z", "+00:00"))
+        except (AttributeError, ValueError):
+            continue
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
+        if (crawl["status"] == "completed" and started_at >= cutoff_at
+                and int(notes.get("sitemap_urls") or 0) == sitemap_urls):
+            full_crawl_complete = True
+            break
+    # Missing inbound links cannot be inferred from a graph built from only a
+    # rotating slice of the sitemap. Positive per-page observations remain valid.
+    link_graph_complete = full_crawl_complete
+    fresh_sitemap_pages = 0
+    if sitemap_urls:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
+        fresh_sitemap_pages = conn.execute(
+            "SELECT COUNT(*) FROM pages WHERE site_id=? AND in_sitemap=1 AND crawl_status='ok' "
+            "AND h1_count IS NOT NULL AND last_crawled>=?", (sid, cutoff)
+        ).fetchone()[0]
+        link_graph_complete = full_crawl_complete and fresh_sitemap_pages >= sitemap_urls
+    page_sql = "SELECT * FROM pages WHERE site_id=? AND crawl_status='ok' AND h1_count IS NOT NULL"
+    crawled_pages = rows(conn, page_sql + (" AND last_crawled>=?" if full_crawl else ""),
+                         (sid, full_crawl) if full_crawl else (sid,))
+    pages = [page for page in crawled_pages
+             if not _redirects_to_other_document(page)
+             and urlsplit(normalize_url(page["url"], site_host=site.host,
+                                        extra_tracking_params=site.crawler.ignored_query_params)).query
+             == urlsplit(page["url"]).query]
     by_url = {p["url"]: p for p in pages}
     home = site.canonical_url
     # inbound/outbound from real crawled links (distinct source pages, self-links excluded)
@@ -69,13 +156,25 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
     inbound_body = defaultdict(set)
     outbound = defaultdict(set)
     for l in rows(conn, "SELECT source_url, target_url, is_nav, anchor_text FROM links WHERE site_id=? AND is_internal=1", (sid,)):
-        if l["source_url"] == l["target_url"]:
+        if l["source_url"] not in by_url or l["source_url"] == l["target_url"]:
             continue
         outbound[l["source_url"]].add(l["target_url"])
         inbound_all[l["target_url"]].add(l["source_url"])
         if not l["is_nav"]:
             inbound_body[l["target_url"]].add(l["source_url"])
+    gsc_impressions = {r["page"]: r["impressions"] for r in rows(
+        conn, "SELECT page, SUM(impressions) AS impressions FROM gsc_query_page WHERE site_id=? GROUP BY page", (sid,))}
+    editorial_urls = {r["url"] for r in rows(
+        conn, "SELECT url FROM posts WHERE site_id=? AND type='post' AND status='publish'", (sid,))}
     counts = {"problems": 0, "opportunities": 0}
+
+    # Report a stale sitemap entry at its source URL, but never attribute the
+    # destination's headings, images or links to that redirected URL.
+    for p in crawled_pages:
+        if p["redirect_chain"] and json.loads(p["redirect_chain"]) and p["in_sitemap"] and p["final_url"] and p["final_url"] != p["url"]:
+            _problem(conn, sid, "redirect_in_sitemap", "medium", p["url"],
+                     {"chain": json.loads(p["redirect_chain"]), "final_url": p["final_url"]}, run_id=run_id)
+            counts["problems"] += 1
 
     # --- link structure ---------------------------------------------------------
     for p in pages:
@@ -84,7 +183,7 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
             continue
         n_all, n_body = len(inbound_all[u]), len(inbound_body[u])
         is_home = u == home
-        if p["indexable"] == 1 and not is_home:
+        if link_graph_complete and p["indexable"] == 1 and not is_home:
             if n_all == 0:
                 _problem(conn, sid, "orphan", "high", u, {"definition": "indexable page with zero internal inbound links in crawled link graph",
                                                           "in_sitemap": p["in_sitemap"], "inbound_links": 0}, run_id=run_id)
@@ -112,31 +211,58 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
             _problem(conn, sid, "missing_h1", "high" if p["indexable"] else "low", u, {"title": p["title"]}, run_id=run_id); counts["problems"] += 1
         elif p["h1_count"] > 1:
             _problem(conn, sid, "multiple_h1", "medium", u, {"h1_count": p["h1_count"], "h1": h1[:10]}, run_id=run_id); counts["problems"] += 1
-        if not p["canonical"]:
+        if p["indexable"] == 1 and not p["canonical"]:
             _problem(conn, sid, "missing_canonical", "medium", u, {}, run_id=run_id); counts["problems"] += 1
-        if not p["meta_description"]:
+        if p["indexable"] == 1 and not p["meta_description"]:
             _problem(conn, sid, "missing_meta_description", "low", u, {"title": p["title"]}, run_id=run_id); counts["problems"] += 1
-        if p["indexable"] == 0 and (p["in_sitemap"] or len(inbound_all[u]) >= 3):
+        # A noindex archive linked from every global menu is often intentional.
+        # Contextual links, sitemap inclusion or search impressions are stronger
+        # signals that a non-indexable page merits an explicit review.
+        canonical_alias = bool(p["canonical"] and p["canonical"].rstrip("/") != u.rstrip("/"))
+        if p["indexable"] == 0 and (p["in_sitemap"] or gsc_impressions.get(u, 0) > 0
+                                    or (len(inbound_body[u]) >= 3 and not canonical_alias)):
             _problem(conn, sid, "important_non_indexable", "high", u, {"reason": p["indexability_reason"], "in_sitemap": p["in_sitemap"],
-                                                                        "inbound_links": len(inbound_all[u])}, run_id=run_id); counts["problems"] += 1
-        if p["indexable"] == 1 and (p["word_count"] or 0) < THIN_WORDS and "/category/" not in u and "/page/" not in u:
+                                                                        "inbound_links": len(inbound_all[u]),
+                                                                        "body_inbound_links": len(inbound_body[u]),
+                                                                        "gsc_impressions": gsc_impressions.get(u, 0)}, run_id=run_id); counts["problems"] += 1
+        # A 300-word rule is meaningful for editorial posts, not utility,
+        # policy, gallery or shopping-tool pages. Without WP post inventory,
+        # keep the older broad check as a fallback for standalone crawls.
+        editorial_candidate = u in editorial_urls if editorial_urls else ("/category/" not in u and "/page/" not in u)
+        if p["indexable"] == 1 and editorial_candidate and (p["word_count"] or 0) < THIN_WORDS:
             _problem(conn, sid, "thin_content", "medium", u, {"word_count": p["word_count"], "threshold": THIN_WORDS}, run_id=run_id); counts["problems"] += 1
-        if (p["images_missing_alt"] or 0) > 0:
-            _problem(conn, sid, "images_missing_alt", "low", u, {"images_missing_alt": p["images_missing_alt"]}, run_id=run_id); counts["problems"] += 1
-        if p["redirect_chain"] and json.loads(p["redirect_chain"]) and p["in_sitemap"]:
-            _problem(conn, sid, "redirect_in_sitemap", "medium", u, {"chain": json.loads(p["redirect_chain"]), "final_url": p["final_url"]}, run_id=run_id); counts["problems"] += 1
-        if p["title"]:
+        # Re-evaluate stored image markup so old crawls that counted explicit
+        # alt="" as missing do not keep producing false findings.
+        if p["images"] is not None:
+            try:
+                images = json.loads(p["images"] or "[]")
+            except (ValueError, TypeError):
+                images = []
+            missing_alt = sum(1 for image in images if image.get("alt") is None and not image.get("decorative"))
+        else:
+            missing_alt = p["images_missing_alt"] or 0
+        if missing_alt > 0:
+            _problem(conn, sid, "images_missing_alt", "low", u, {"images_missing_alt": missing_alt}, run_id=run_id); counts["problems"] += 1
+        # Noindex canonical aliases (for example shop filters) need not have
+        # distinct titles or H1s from the document they point to.
+        if p["indexable"] == 1 and p["title"]:
             titles[p["title"].strip()].append(u)
-        if h1:
+        if p["indexable"] == 1 and h1:
             h1s[h1[0].strip()].append(u)
     for t, urls in titles.items():
-        if len(urls) > 1:
-            for u in urls:
-                _problem(conn, sid, "duplicate_title", "medium", u, {"title": t, "shared_with": [x for x in urls if x != u]}, run_id=run_id); counts["problems"] += 1
+        distinct_urls = _distinct_document_urls(urls, by_url, collapse_pagination=False)
+        if len(distinct_urls) > 1:
+            for u in distinct_urls:
+                _problem(conn, sid, "duplicate_title", "medium", u,
+                         {"title": t, "shared_with": [x for x in distinct_urls if x != u]}, run_id=run_id)
+                counts["problems"] += 1
     for h, urls in h1s.items():
-        if len(urls) > 1:
-            for u in urls:
-                _problem(conn, sid, "duplicate_h1", "medium", u, {"h1": h, "shared_with": [x for x in urls if x != u]}, run_id=run_id); counts["problems"] += 1
+        distinct_urls = _distinct_document_urls(urls, by_url)
+        if len(distinct_urls) > 1:
+            for u in distinct_urls:
+                _problem(conn, sid, "duplicate_h1", "medium", u,
+                         {"h1": h, "shared_with": [x for x in distinct_urls if x != u]}, run_id=run_id)
+                counts["problems"] += 1
 
     # --- GSC-driven ---------------------------------------------------------------
     qp = rows(conn, "SELECT * FROM gsc_query_page WHERE site_id=?", (sid,))
@@ -275,8 +401,10 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
                      f"کاهش ترافیک GA4 نسبت به دوره قبل: {pr} → {rc} session ({drop*100:.0f}٪ افت) — محتوا و رتبه‌ها را بررسی کنید",
                      0.7, {"prev_sessions": pr, "recent_sessions": rc}, run_id=run_id); counts["opportunities"] += 1
 
+    analysis_notes = {**counts, "link_graph_complete": link_graph_complete,
+                      "sitemap_urls": sitemap_urls, "fresh_sitemap_pages": fresh_sitemap_pages}
     conn.execute("UPDATE sync_runs SET finished_at=?, status='completed', rows_written=?, notes=? WHERE run_id=?",
-                 (utcnow(), counts["problems"] + counts["opportunities"], j(counts), run_id))
+                 (utcnow(), counts["problems"] + counts["opportunities"], j(analysis_notes), run_id))
     conn.commit()
     summary = {"run_id": run_id, **counts,
                "by_problem": {r["problem_type"]: r["n"] for r in rows(conn, "SELECT problem_type, count(*) n FROM seo_problems WHERE site_id=? GROUP BY 1", (sid,))},

@@ -59,7 +59,7 @@ export function GscIntegrationCard({ siteId, initialValue, initialResult, refres
       }
     >
       <ConnectionTester siteId={siteId} kind='gsc' label='Google Search Console' hint='sc-domain:example.com'
-        initialValue={initialValue} initialResult={initialResult} onResult={() => setRefresh((n) => n + 1)} />
+        initialValue={initialValue} initialResult={initialResult} refreshKey={refreshKey} onResult={() => setRefresh((n) => n + 1)} />
 
       <SyncCounters kind='gsc' items={view.counters} />
 

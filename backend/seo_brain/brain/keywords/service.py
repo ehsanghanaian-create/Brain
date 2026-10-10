@@ -156,7 +156,7 @@ class KeywordService:
         # pages known to the crawler with zero inbound links
         with self.engine.connect() as cx:
             try:
-                for (url,) in cx.execute(text("SELECT url FROM pages WHERE site_id=:s"), {"s": site_id}).all():
+                for (url,) in cx.execute(text("SELECT url FROM pages WHERE site_id=:s AND crawl_status='ok'"), {"s": site_id}).all():
                     out.setdefault(normalize_url(unquote(url)), 0)
             except Exception:  # noqa: BLE001
                 pass

@@ -65,6 +65,26 @@ def test_expired_access_renews_and_survives_store_reopen(saved_token, monkeypatc
     assert len(requests) == 1
 
 
+def test_parallel_site_reads_share_one_refresh(saved_token, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    import time
+
+    calls = []
+
+    def request(**_kwargs):
+        calls.append(1)
+        time.sleep(0.05)
+        return type("Response", (), {
+            "status": 200, "headers": {},
+            "data": b'{"access_token":"shared-renewed-access","expires_in":3600,"token_type":"Bearer"}',
+        })()
+
+    monkeypatch.setattr("google.auth.transport.requests.Request", lambda: request)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        creds = list(pool.map(lambda _: client.get_credentials(interactive=False), range(2)))
+    assert [c.token for c in creds] == ["shared-renewed-access"] * 2
+    assert len(calls) == 1
+
 def test_invalid_grant_keeps_stored_credentials_for_diagnosis(saved_token, monkeypatch):
     _, original = saved_token
     calls = []
@@ -83,6 +103,15 @@ def test_invalid_grant_keeps_stored_credentials_for_diagnosis(saved_token, monke
     with pytest.raises(client.GscAuthError):
         client.get_credentials(interactive=True)
     assert client.read_token_json() == original
+    assert len(calls) == 1
+    from seo_brain.connections.google_oauth import status
+    state = status()
+    assert state["connected"] is False
+    assert state["authorization_state"] == "needs_reconnect"
+    assert state["refresh_token_stored"] is True
+    assert len(calls) == 1  # status and other sites do not retry a revoked grant
+    with pytest.raises(client.GscAuthError):
+        client.get_credentials(interactive=False)
     assert len(calls) == 1
 
 

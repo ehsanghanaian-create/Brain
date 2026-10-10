@@ -22,6 +22,7 @@ export const INTENT_FA: Record<string, string> = { informational: 'اطلاعا�
 export const TASK_FA: Record<string, string> = {
   content_writing: 'نگارش محتوا',
   seo_analysis: 'تحلیل سئو',
+  seo_remediation: 'رفع مشکلات سئو',
   research: 'تحقیق',
   brief: 'بریف محتوا',
   keyword_analysis: 'تحلیل کلمات کلیدی',

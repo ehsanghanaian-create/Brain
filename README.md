@@ -27,6 +27,8 @@ Claude Desktop ─stdio─▶ backend/mcp_server/server.py ─▶ seo_brain/grap
 ```
 Full details: `docs/architecture.md` (v0.1) and `docs/seo-brain/01-architecture.md` (platform); audit & decisions: `docs/architecture-validation-report.md`.
 
+For the evaluated open-source SEO platforms and the proposed evidence-to-task architecture, see [`docs/seo-brain/open-source-seo-architecture-research-2026-10-10.md`](docs/seo-brain/open-source-seo-architecture-research-2026-10-10.md).
+
 ## Installation
 
 ```powershell

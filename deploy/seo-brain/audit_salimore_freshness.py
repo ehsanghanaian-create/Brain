@@ -64,7 +64,11 @@ def main() -> None:
     result["post_url_examples"] = [row[0] for row in connection.execute(
         "SELECT url FROM posts WHERE site_id='salimore' LIMIT 5"
     )]
-    for source in ("crawl", "wordpress", "gsc", "ga4", "analysis", "graph"):
+    result["crawl_runs"] = [dict(row) for row in connection.execute(
+        "SELECT run_id,status,started_at,finished_at,max_urls,urls_crawled,urls_failed "
+        "FROM crawl_runs WHERE site_id='salimore' ORDER BY started_at DESC LIMIT 3"
+    )]
+    for source in ("wordpress", "gsc", "ga4", "analysis", "graph"):
         result["sync_runs"][source] = [
             dict(row) for row in connection.execute(
                 "SELECT run_id,status,started_at,finished_at,rows_written FROM sync_runs "

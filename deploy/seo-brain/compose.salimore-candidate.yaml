@@ -14,6 +14,7 @@ services:
       SCHEDULER_ENABLED: "0"
     volumes:
       - ./runtime-db:/app/runtime-db
+      - ./config:/app/config:ro
       - ./data:/app/data
       - ./obsidian:/app/obsidian
     healthcheck:

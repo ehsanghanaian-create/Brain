@@ -49,10 +49,18 @@ def main() -> None:
         "/api/backend/work/team-management",
         "/api/backend/work/team-management/tasks",
         "/dashboard/team-management",
+        "/dashboard/reports",
     ):
         status, content = request(path)
         assert status == 200, f"{path}: {status} {content[:200]!r}"
         print(f"{path}: 200")
+
+    status, content = request("/api/backend/sites/salimore/report")
+    assert status == 200, f"Salimore report: {status} {content[:200]!r}"
+    coverage = json.loads(content)["crawl_coverage"]
+    assert coverage["sitemap_urls"] > 0, "missing Salimore sitemap inventory"
+    assert coverage["coverage_status"] == "partial", "capped crawl presented as complete"
+    print("Salimore report: 200, partial crawl coverage disclosed")
 
     status, _ = request("/api/backend/auth/logout", "POST")
     assert status == 200, f"logout: {status}"

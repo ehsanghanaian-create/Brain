@@ -16,6 +16,7 @@ sites:
       respect_robots: true
       allowed_hosts: ["example.com", "www.example.com"]
       exclude_patterns: ["/wp-json/", "/feed/", "?s=", "/wp-admin/", "/wp-login"]
+      ignored_query_params: [] # site-specific tracking keys only; keep functional query parameters
     gsc:
       lookback_days: 1        # first validation sync; raise to 30 after validation
       dimensions: ["date", "query", "page", "country", "device"]

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import posixpath
 import re
+from collections.abc import Iterable
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
 TRACKING_PARAMS = {
@@ -46,16 +47,18 @@ def _norm_path(path: str, trailing_slash: bool) -> str:
     return quote(decoded, safe=_PATH_SAFE)
 
 
-def strip_tracking_params(query: str) -> str:
+def strip_tracking_params(query: str, extra_params: Iterable[str] = ()) -> str:
     if not query:
         return ""
-    pairs = [(k, v) for k, v in parse_qsl(query, keep_blank_values=True) if k.lower() not in TRACKING_PARAMS]
+    ignored = TRACKING_PARAMS | {key.lower() for key in extra_params}
+    pairs = [(k, v) for k, v in parse_qsl(query, keep_blank_values=True) if k.lower() not in ignored]
     pairs.sort()
     return urlencode(pairs, doseq=True)
 
 
 def normalize_url(url: str, *, site_host: str | None = None, canonical_scheme: str = "https",
-                  trailing_slash: bool = True, fold_www: bool = True) -> str:
+                  trailing_slash: bool = True, fold_www: bool = True,
+                  extra_tracking_params: Iterable[str] = ()) -> str:
     """Return the normalized form of `url`. Relative URLs must be resolved by the caller first."""
     url = url.strip()
     parts = urlsplit(url)
@@ -75,7 +78,7 @@ def normalize_url(url: str, *, site_host: str | None = None, canonical_scheme: s
     if port and str(port) != _DEFAULT_PORTS.get(scheme):
         netloc = f"{host}:{port}"
     path = _norm_path(parts.path, trailing_slash)
-    query = strip_tracking_params(parts.query)
+    query = strip_tracking_params(parts.query, extra_tracking_params)
     return urlunsplit((scheme, netloc, path, query, ""))
 
 

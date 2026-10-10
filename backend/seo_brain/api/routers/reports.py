@@ -213,7 +213,7 @@ def _crawl_coverage(cx, site_id: str) -> dict[str, Any]:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
     recent = (_one(cx, """SELECT COUNT(*) AS n FROM pages WHERE site_id=:s AND in_sitemap=1
         AND crawl_status='ok' AND last_crawled>=:cutoff""", s=site_id, cutoff=cutoff) or {}).get("n", 0)
-    complete = latest["status"] in {"completed", "completed_capped"} and sitemap_urls > 0 and recent >= sitemap_urls
+    complete = latest["status"] == "completed" and sitemap_urls > 0 and recent >= sitemap_urls
     return {"status": latest["status"], "coverage_status": "complete" if complete else "partial",
             "sitemap_urls": sitemap_urls, "recent_crawled": int(recent), "window_days": 30,
             "latest_crawled": int(latest.get("urls_crawled") or 0), "max_urls": latest.get("max_urls"),
@@ -257,7 +257,7 @@ def report_summary(site_id: str, days: int = Query(default=28, ge=7, le=365), en
         sev = {r["severity"]: r["n"] for r in _rows(cx,
             "SELECT severity, COUNT(*) AS n FROM seo_problems WHERE site_id=:s GROUP BY severity", s=site_id)}
         counts = {
-            "indexable_pages": (_one(cx, "SELECT COUNT(*) AS n FROM pages WHERE site_id=:s AND indexable=1", s=site_id) or {}).get("n", 0),
+            "indexable_pages": (_one(cx, "SELECT COUNT(*) AS n FROM pages WHERE site_id=:s AND in_sitemap=1 AND indexable=1", s=site_id) or {}).get("n", 0),
             "keywords": (_one(cx, "SELECT COUNT(*) AS n FROM keywords WHERE site_id=:s", s=site_id) or {}).get("n", 0),
             "gsc_queries": (_one(cx, "SELECT COUNT(DISTINCT query) AS n FROM gsc_daily WHERE site_id=:s", s=site_id) or {}).get("n", 0),
             "problems": {"high": sev.get("high", 0), "medium": sev.get("medium", 0), "low": sev.get("low", 0),

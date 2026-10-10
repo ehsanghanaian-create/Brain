@@ -21,6 +21,7 @@ from rapidfuzz import fuzz
 from ..common.config import SiteConfig
 from ..common.logging_setup import new_run_id
 from ..database.db import j, rows, upsert, utcnow
+from ..normalizer import normalize_url
 
 log = logging.getLogger("analysis.seo")
 
@@ -103,18 +104,31 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
     # crawl covers only a rotating slice, so combine pages seen within the
     # last 30 days instead of analysing just its most recent 20 URLs.
     full_crawl = None
-    full_crawl_complete = False
     sitemap_urls = 0
+    site_crawls = []
     for crawl in rows(conn, "SELECT started_at,status,notes FROM crawl_runs WHERE site_id=? AND status IN ('completed','completed_capped') ORDER BY started_at DESC LIMIT 100", (sid,)):
         try:
             notes = json.loads(crawl["notes"] or "{}")
         except (ValueError, TypeError):
             notes = {}
         if not isinstance(notes, dict) or notes.get("scope") != "targeted":
-            full_crawl_complete = crawl["status"] == "completed"
-            sitemap_urls = max(0, int(notes.get("sitemap_urls") or 0)) if isinstance(notes, dict) else 0
-            full_crawl = ((datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
-                          if crawl["status"] == "completed_capped" else crawl["started_at"])
+            site_crawls.append((crawl, notes if isinstance(notes, dict) else {}))
+            if full_crawl is None:
+                sitemap_urls = max(0, int(notes.get("sitemap_urls") or 0)) if isinstance(notes, dict) else 0
+                full_crawl = ((datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
+                              if crawl["status"] == "completed_capped" else crawl["started_at"])
+    cutoff_at = datetime.now(timezone.utc) - timedelta(days=30)
+    full_crawl_complete = False
+    for crawl, notes in site_crawls:
+        try:
+            started_at = datetime.fromisoformat(crawl["started_at"].replace("Z", "+00:00"))
+        except (AttributeError, ValueError):
+            continue
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
+        if (crawl["status"] == "completed" and started_at >= cutoff_at
+                and int(notes.get("sitemap_urls") or 0) == sitemap_urls):
+            full_crawl_complete = True
             break
     # Missing inbound links cannot be inferred from a graph built from only a
     # rotating slice of the sitemap. Positive per-page observations remain valid.
@@ -130,7 +144,11 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
     page_sql = "SELECT * FROM pages WHERE site_id=? AND crawl_status='ok' AND h1_count IS NOT NULL"
     crawled_pages = rows(conn, page_sql + (" AND last_crawled>=?" if full_crawl else ""),
                          (sid, full_crawl) if full_crawl else (sid,))
-    pages = [page for page in crawled_pages if not _redirects_to_other_document(page)]
+    pages = [page for page in crawled_pages
+             if not _redirects_to_other_document(page)
+             and urlsplit(normalize_url(page["url"], site_host=site.host,
+                                        extra_tracking_params=site.crawler.ignored_query_params)).query
+             == urlsplit(page["url"]).query]
     by_url = {p["url"]: p for p in pages}
     home = site.canonical_url
     # inbound/outbound from real crawled links (distinct source pages, self-links excluded)

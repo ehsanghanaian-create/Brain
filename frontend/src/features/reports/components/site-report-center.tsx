@@ -217,7 +217,7 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
               <KpiCard label='ورودی ارگانیک' value={cur?.clicks ?? null} hint={prev ? undefined : `${days} روز اخیر GSC`} />
               <KpiCard label='نمایش (Impression)' value={cur?.impressions ?? null} />
               <KpiCard label='میانگین جایگاه' value={cur?.position != null ? Number(cur.position.toFixed(1)) : null} />
-              <KpiCard label='قابل ایندکس در خزش' value={summary.counts.indexable_pages} hint='فقط URLهای خزیده‌شده؛ وضعیت ایندکس گوگل نیست' />
+              <KpiCard label='قابل ایندکس در سایت‌مپ' value={summary.counts.indexable_pages} hint='فقط URLهای خزیده‌شدهٔ سایت‌مپ؛ وضعیت ایندکس گوگل نیست' />
               <KpiCard label='کوئری‌های GSC' value={summary.counts.gsc_queries} />
               <KpiCard label='بک‌لینک‌ها' value={summary.counts.backlinks} />
               <KpiCard label='دامنه‌های ارجاع‌دهنده' value={summary.counts.referring_domains} />

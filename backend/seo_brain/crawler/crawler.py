@@ -69,7 +69,8 @@ class Crawler:
 
     # -- policy -----------------------------------------------------------------
     def norm(self, url: str) -> str:
-        return normalize_url(url, site_host=self.host)
+        return normalize_url(url, site_host=self.host,
+                             extra_tracking_params=self.cfg.ignored_query_params)
 
     def excluded(self, url: str) -> bool:
         return any(pat in url for pat in self.cfg.exclude_patterns)

@@ -77,9 +77,19 @@ def test_summary_discloses_capped_crawl_coverage(client):
     assert coverage["recent_crawled"] == 2
     assert coverage["latest_crawled"] == 2
     with client.eng.begin() as cx:
-        cx.execute(text("UPDATE crawl_runs SET notes=:notes WHERE run_id='crawl-1'"),
+        cx.execute(text("UPDATE crawl_runs SET status='completed', notes=:notes WHERE run_id='crawl-1'"),
                    {"notes": json.dumps({"sitemap_urls": 2})})
     assert client.get("/api/v1/sites/demo/report/summary").json()["crawl_coverage"]["coverage_status"] == "complete"
+
+
+def test_summary_counts_only_indexable_sitemap_pages(client):
+    _seed(client)
+    with client.eng.begin() as cx:
+        cx.execute(text("""INSERT INTO pages(site_id,url,in_sitemap,crawl_status,indexable)
+            VALUES('demo','https://demo.example/style-builder/',1,'ok',1),
+                  ('demo','https://demo.example/style-builder/?source=article_a',0,'ok',1)"""))
+    summary = client.get("/api/v1/sites/demo/report/summary").json()
+    assert summary["counts"]["indexable_pages"] == 1
 
 
 def test_main_keyword_set_and_weighted_position(client):

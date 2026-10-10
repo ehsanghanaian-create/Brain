@@ -1,7 +1,7 @@
 """A capped scheduled crawl must eventually reach every sitemap URL."""
 import sqlite3
 
-from seo_brain.common.config import SiteConfig
+from seo_brain.common.config import CrawlerConfig, SiteConfig
 from seo_brain.crawler import crawler as crawler_module
 
 
@@ -33,6 +33,22 @@ def test_site_crawl_prioritizes_uncrawled_then_oldest_urls(tmp_path, monkeypatch
     finally:
         crawler.http.close()
         connection.close()
+
+
+def test_crawler_deduplicates_configured_tracking_query(tmp_path, monkeypatch):
+    monkeypatch.setattr(crawler_module, "raw_data_dir", lambda: tmp_path)
+    crawler = crawler_module.Crawler(SiteConfig(
+        site_id="pilot", name="Pilot", canonical_url="https://pilot.example/",
+        wp_url="https://pilot.example",
+        crawler=CrawlerConfig(ignored_query_params=["source"]),
+    ))
+    try:
+        assert crawler.norm("https://pilot.example/style-builder/?source=article_a") == (
+            "https://pilot.example/style-builder/")
+        assert crawler.norm("https://pilot.example/style-builder/?size=large&source=article_a") == (
+            "https://pilot.example/style-builder/?size=large")
+    finally:
+        crawler.http.close()
 
 
 def test_sitemap_inventory_retains_uncrawled_pages_and_retires_removed_urls(tmp_path, monkeypatch):

@@ -47,6 +47,7 @@ class CrawlerConfig:
     respect_robots: bool = True
     allowed_hosts: list[str] = field(default_factory=list)
     exclude_patterns: list[str] = field(default_factory=list)
+    ignored_query_params: list[str] = field(default_factory=list)
 
 
 @dataclass

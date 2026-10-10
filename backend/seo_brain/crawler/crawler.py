@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -87,6 +87,9 @@ class Crawler:
         if self.excluded(url):
             return False, "skipped_excluded"
         path = urlsplit(url).path.lower()
+        for prefix, limit in self.cfg.max_query_params_by_path.items():
+            if path.startswith(prefix.lower()) and len({key for key, _ in parse_qsl(urlsplit(url).query)}) > limit:
+                return False, "skipped_query_combination"
         if re.search(r"\.(jpe?g|png|gif|webp|svg|ico|css|js|pdf|zip|mp4|mp3|woff2?|ttf|xml|json|txt)$", path):
             return False, "skipped_asset"
         if not self.allowed_by_robots(url):

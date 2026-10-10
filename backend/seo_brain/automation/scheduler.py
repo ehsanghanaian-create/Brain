@@ -263,6 +263,11 @@ def run_tick(engine: Engine, queue, max_sites: int = 2, stale_after_minutes: int
             GROUP BY s.site_id ORDER BY MAX(r.started_at) ASC, s.site_id""")).all()]
         active_sites = {r[0] for r in cx.execute(text("SELECT DISTINCT site_id FROM sync_runs WHERE source IN "
             "('wordpress_pipeline','gsc_pipeline','ga4_pipeline') AND status IN ('queued','running')")).all()}
+        # A CLI crawl has no wordpress_pipeline run. Do not enqueue another
+        # WordPress crawl for that site while its crawl_runs row is active.
+        active_crawl_since = _iso(datetime.now(timezone.utc) - timedelta(minutes=stale_after_minutes))
+        active_crawls = {r[0] for r in cx.execute(text("""SELECT DISTINCT site_id FROM crawl_runs
+            WHERE status='running' AND started_at>=:since"""), {"since": active_crawl_since}).all()}
     queued: list[dict[str, str]] = []
     started_sites = 0
     available_slots = max(0, max_sites - len(active_sites))
@@ -273,7 +278,7 @@ def run_tick(engine: Engine, queue, max_sites: int = 2, stale_after_minutes: int
         if sid in active_sites:
             continue
         plan = plan_for_site(engine, sid)
-        due = [k for k, v in plan["sources"].items() if v["due"]]
+        due = [k for k, v in plan["sources"].items() if v["due"] and not (k == "wordpress" and sid in active_crawls)]
         if not due:
             continue
         started_sites += 1

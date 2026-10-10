@@ -43,7 +43,8 @@ def test_crawler_deduplicates_configured_tracking_query(tmp_path, monkeypatch):
     crawler = crawler_module.Crawler(SiteConfig(
         site_id="pilot", name="Pilot", canonical_url="https://pilot.example/",
         wp_url="https://pilot.example",
-        crawler=CrawlerConfig(ignored_query_params=["source", "items"]),
+        crawler=CrawlerConfig(ignored_query_params=["source", "items"],
+                              max_query_params_by_path={"/shop/": 1}),
     ))
     try:
         assert crawler.norm("https://pilot.example/style-builder/?source=article_a") == (
@@ -52,6 +53,10 @@ def test_crawler_deduplicates_configured_tracking_query(tmp_path, monkeypatch):
             "https://pilot.example/style-builder/?size=large")
         assert crawler.norm("https://pilot.example/style-builder/?items=12,14&source=product_bundle") == (
             "https://pilot.example/style-builder/")
+        assert crawler.crawlable("https://pilot.example/shop/?color=black") == (True, "ok")
+        assert crawler.crawlable("https://pilot.example/shop/?color=black&size=M") == (
+            False, "skipped_query_combination")
+        assert crawler.crawlable("https://pilot.example/help/?q=size&category=men") == (True, "ok")
     finally:
         crawler.http.close()
 

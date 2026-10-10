@@ -160,6 +160,16 @@ def test_tick_enqueues_existing_jobs_with_cap_and_no_duplicates(env):
         cx.execute(text("UPDATE sync_runs SET status='failed' WHERE run_id=:r"), {"r": st.run_id})
 
 
+def test_tick_skips_wordpress_job_during_a_manual_crawl(env):
+    _mk_site(env["client"], "manual", wp_url="https://manual.example/")
+    with env["eng"].begin() as cx:
+        cx.execute(text("""INSERT INTO crawl_runs(run_id,site_id,started_at,max_urls,status)
+            VALUES('manual-crawl','manual',:at,900,'running')"""), {"at": _iso(datetime.now(timezone.utc))})
+    out = run_tick(env["eng"], env["q"], max_sites=2)
+    assert ("wordpress_sync", "manual") not in env["ran"]
+    assert out["sites_started"] == 0
+
+
 def test_tick_rotates_to_sites_beyond_per_tick_cap(env):
     c, eng, q, ran = env["client"], env["eng"], env["q"], env["ran"]
     for sid in ("a1", "a2", "a3"):

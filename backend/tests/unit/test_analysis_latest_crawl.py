@@ -1,4 +1,5 @@
 """A fresh full crawl must not report retained pages from older snapshots."""
+import json
 from datetime import datetime, timedelta, timezone
 
 from seo_brain.analysis.seo import run_analysis
@@ -26,6 +27,49 @@ def test_capped_crawl_analysis_combines_recent_batches(tmp_path):
             "SELECT url FROM seo_problems WHERE problem_type='images_missing_alt' ORDER BY url"
         )]
     assert urls == ["https://demo.example/current/", "https://demo.example/previous/"]
+
+
+def test_partial_sitemap_does_not_invent_missing_inbound_links(tmp_path):
+    site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with db(tmp_path / "seo.db") as conn:
+        ensure_site(conn, site)
+        conn.execute("""INSERT INTO crawl_runs(run_id,site_id,started_at,status,notes)
+            VALUES('crawl-current','demo',?,'completed_capped','{"scope":"site","sitemap_urls":2}')""", (now,))
+        conn.execute("""INSERT INTO pages(site_id,url,crawl_status,status_code,title,h1,h1_count,
+            indexable,word_count,images_missing_alt,in_sitemap,last_crawled)
+            VALUES('demo','https://demo.example/a/','ok',200,'A','["A"]',1,1,500,0,1,?)""", (now,))
+        run_analysis(conn, site)
+        assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type IN "
+                            "('orphan','no_body_inbound_links','low_inbound_links')").fetchone()[0] == 0
+        notes = json.loads(conn.execute(
+            "SELECT notes FROM sync_runs WHERE source='analysis' ORDER BY id DESC LIMIT 1").fetchone()[0])
+        assert notes["link_graph_complete"] is False
+
+        conn.execute("""INSERT INTO pages(site_id,url,crawl_status,status_code,title,h1,h1_count,
+            indexable,word_count,images_missing_alt,in_sitemap,last_crawled)
+            VALUES('demo','https://demo.example/b/','ok',200,'B','["B"]',1,1,500,0,1,?)""", (now,))
+        run_analysis(conn, site)
+        assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='orphan'").fetchone()[0] == 2
+
+
+def test_stale_self_redirect_is_not_a_sitemap_redirect(tmp_path):
+    site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    source = "https://demo.example/a/"
+    with db(tmp_path / "seo.db") as conn:
+        ensure_site(conn, site)
+        conn.execute("""INSERT INTO crawl_runs(run_id,site_id,started_at,status,notes)
+            VALUES('crawl-current','demo',?,'completed','{"scope":"site","sitemap_urls":1}')""", (now,))
+        conn.execute("""INSERT INTO pages(site_id,url,crawl_status,status_code,title,h1,h1_count,
+            indexable,word_count,images_missing_alt,in_sitemap,last_crawled,redirect_chain,final_url)
+            VALUES('demo',?,'ok',200,'A','["A"]',1,1,500,0,1,?,?,?)""",
+            (source, now, json.dumps([[source, 308]]), source))
+        run_analysis(conn, site)
+        assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='redirect_in_sitemap'").fetchone()[0] == 0
+        conn.execute("UPDATE pages SET final_url='https://demo.example/b/' WHERE url=?", (source,))
+        run_analysis(conn, site)
+        assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='redirect_in_sitemap'").fetchone()[0] == 1
 
 
 def test_parser_counts_main_outside_malformed_body():

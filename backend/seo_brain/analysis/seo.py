@@ -103,15 +103,28 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
     # crawl covers only a rotating slice, so combine pages seen within the
     # last 30 days instead of analysing just its most recent 20 URLs.
     full_crawl = None
+    sitemap_urls = 0
     for crawl in rows(conn, "SELECT started_at,status,notes FROM crawl_runs WHERE site_id=? AND status IN ('completed','completed_capped') ORDER BY started_at DESC LIMIT 100", (sid,)):
         try:
             notes = json.loads(crawl["notes"] or "{}")
         except (ValueError, TypeError):
             notes = {}
         if not isinstance(notes, dict) or notes.get("scope") != "targeted":
+            sitemap_urls = max(0, int(notes.get("sitemap_urls") or 0)) if isinstance(notes, dict) else 0
             full_crawl = ((datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
                           if crawl["status"] == "completed_capped" else crawl["started_at"])
             break
+    # Missing inbound links cannot be inferred from a graph built from only a
+    # rotating slice of the sitemap. Positive per-page observations remain valid.
+    link_graph_complete = True
+    fresh_sitemap_pages = 0
+    if sitemap_urls:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
+        fresh_sitemap_pages = conn.execute(
+            "SELECT COUNT(*) FROM pages WHERE site_id=? AND in_sitemap=1 AND crawl_status='ok' "
+            "AND h1_count IS NOT NULL AND last_crawled>=?", (sid, cutoff)
+        ).fetchone()[0]
+        link_graph_complete = fresh_sitemap_pages >= sitemap_urls
     page_sql = "SELECT * FROM pages WHERE site_id=? AND crawl_status='ok' AND h1_count IS NOT NULL"
     crawled_pages = rows(conn, page_sql + (" AND last_crawled>=?" if full_crawl else ""),
                          (sid, full_crawl) if full_crawl else (sid,))
@@ -136,7 +149,7 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
     # Report a stale sitemap entry at its source URL, but never attribute the
     # destination's headings, images or links to that redirected URL.
     for p in crawled_pages:
-        if p["redirect_chain"] and json.loads(p["redirect_chain"]) and p["in_sitemap"]:
+        if p["redirect_chain"] and json.loads(p["redirect_chain"]) and p["in_sitemap"] and p["final_url"] and p["final_url"] != p["url"]:
             _problem(conn, sid, "redirect_in_sitemap", "medium", p["url"],
                      {"chain": json.loads(p["redirect_chain"]), "final_url": p["final_url"]}, run_id=run_id)
             counts["problems"] += 1
@@ -148,7 +161,7 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
             continue
         n_all, n_body = len(inbound_all[u]), len(inbound_body[u])
         is_home = u == home
-        if p["indexable"] == 1 and not is_home:
+        if link_graph_complete and p["indexable"] == 1 and not is_home:
             if n_all == 0:
                 _problem(conn, sid, "orphan", "high", u, {"definition": "indexable page with zero internal inbound links in crawled link graph",
                                                           "in_sitemap": p["in_sitemap"], "inbound_links": 0}, run_id=run_id)
@@ -348,8 +361,10 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
                      f"کاهش ترافیک GA4 نسبت به دوره قبل: {pr} → {rc} session ({drop*100:.0f}٪ افت) — محتوا و رتبه‌ها را بررسی کنید",
                      0.7, {"prev_sessions": pr, "recent_sessions": rc}, run_id=run_id); counts["opportunities"] += 1
 
+    analysis_notes = {**counts, "link_graph_complete": link_graph_complete,
+                      "sitemap_urls": sitemap_urls, "fresh_sitemap_pages": fresh_sitemap_pages}
     conn.execute("UPDATE sync_runs SET finished_at=?, status='completed', rows_written=?, notes=? WHERE run_id=?",
-                 (utcnow(), counts["problems"] + counts["opportunities"], j(counts), run_id))
+                 (utcnow(), counts["problems"] + counts["opportunities"], j(analysis_notes), run_id))
     conn.commit()
     summary = {"run_id": run_id, **counts,
                "by_problem": {r["problem_type"]: r["n"] for r in rows(conn, "SELECT problem_type, count(*) n FROM seo_problems WHERE site_id=? GROUP BY 1", (sid,))},

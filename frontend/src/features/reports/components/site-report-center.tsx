@@ -208,7 +208,7 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
                   {summary.crawl_coverage.coverage_status === 'not_started' ? (
                     'هنوز خزشی برای این سایت ثبت نشده است؛ امتیاز و شمار مشکلات، تصویر کامل SEO سایت نیست.'
                   ) : (
-                    <>پوشش خزش محدود است: {fa.format(summary.crawl_coverage.recent_crawled)} URL در {fa.format(summary.crawl_coverage.window_days)} روز اخیر از {fa.format(summary.crawl_coverage.sitemap_urls)} URL سایت‌مپ بررسی شده‌اند. امتیاز و شمار مشکلات را نتیجهٔ قطعی کل سایت ندانید.</>
+                    <>پوشش خزش محدود است: {fa.format(summary.crawl_coverage.recent_crawled)} URL در {fa.format(summary.crawl_coverage.window_days)} روز اخیر از {fa.format(summary.crawl_coverage.sitemap_urls)} URL سایت‌مپ بررسی شده‌اند. تا کامل شدن خزش، کمبود لینک ورودی به عنوان مشکل ثبت نمی‌شود. امتیاز و شمار مشکلات را نتیجهٔ قطعی کل سایت ندانید.</>
                   )}
                 </div>
               </CardContent>

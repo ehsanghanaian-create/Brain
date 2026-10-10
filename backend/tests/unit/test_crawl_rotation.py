@@ -40,13 +40,15 @@ def test_crawler_deduplicates_configured_tracking_query(tmp_path, monkeypatch):
     crawler = crawler_module.Crawler(SiteConfig(
         site_id="pilot", name="Pilot", canonical_url="https://pilot.example/",
         wp_url="https://pilot.example",
-        crawler=CrawlerConfig(ignored_query_params=["source"]),
+        crawler=CrawlerConfig(ignored_query_params=["source", "items"]),
     ))
     try:
         assert crawler.norm("https://pilot.example/style-builder/?source=article_a") == (
             "https://pilot.example/style-builder/")
         assert crawler.norm("https://pilot.example/style-builder/?size=large&source=article_a") == (
             "https://pilot.example/style-builder/?size=large")
+        assert crawler.norm("https://pilot.example/style-builder/?items=12,14&source=product_bundle") == (
+            "https://pilot.example/style-builder/")
     finally:
         crawler.http.close()
 

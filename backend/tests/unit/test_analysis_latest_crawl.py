@@ -120,6 +120,25 @@ def test_explicit_empty_alt_is_not_a_missing_alt_finding_in_old_snapshot(tmp_pat
         assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='images_missing_alt'").fetchone()[0] == 0
 
 
+def test_word_count_warning_targets_editorial_posts_when_known(tmp_path):
+    site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    article = "https://demo.example/blog/short-guide/"
+    utility = "https://demo.example/looks/"
+    with db(tmp_path / "seo.db") as conn:
+        ensure_site(conn, site)
+        conn.execute("""INSERT INTO crawl_runs(run_id,site_id,started_at,status,notes)
+            VALUES('crawl-current','demo',?,'completed','{"scope":"site","sitemap_urls":2}')""", (now,))
+        conn.execute("INSERT INTO posts(site_id,wp_id,type,url,status) VALUES('demo',1,'post',?,'publish')", (article,))
+        for url in (article, utility):
+            conn.execute("""INSERT INTO pages(site_id,url,crawl_status,status_code,title,h1,h1_count,
+                indexable,word_count,images_missing_alt,in_sitemap,last_crawled)
+                VALUES('demo',?,'ok',200,?,'["Page"]',1,1,100,0,1,?)""", (url, url, now))
+        run_analysis(conn, site)
+        urls = [row[0] for row in conn.execute("SELECT url FROM seo_problems WHERE problem_type='thin_content'")]
+        assert urls == [article]
+
+
 def test_parser_counts_main_outside_malformed_body():
     html = "<html><body></body><main><h1>Current page</h1><p>Useful text for readers</p></main></html>"
     parsed = parse_html(html, "https://demo.example/")

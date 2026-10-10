@@ -164,6 +164,8 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
             inbound_body[l["target_url"]].add(l["source_url"])
     gsc_impressions = {r["page"]: r["impressions"] for r in rows(
         conn, "SELECT page, SUM(impressions) AS impressions FROM gsc_query_page WHERE site_id=? GROUP BY page", (sid,))}
+    editorial_urls = {r["url"] for r in rows(
+        conn, "SELECT url FROM posts WHERE site_id=? AND type='post' AND status='publish'", (sid,))}
     counts = {"problems": 0, "opportunities": 0}
 
     # Report a stale sitemap entry at its source URL, but never attribute the
@@ -221,7 +223,11 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
                                                                         "inbound_links": len(inbound_all[u]),
                                                                         "body_inbound_links": len(inbound_body[u]),
                                                                         "gsc_impressions": gsc_impressions.get(u, 0)}, run_id=run_id); counts["problems"] += 1
-        if p["indexable"] == 1 and (p["word_count"] or 0) < THIN_WORDS and "/category/" not in u and "/page/" not in u:
+        # A 300-word rule is meaningful for editorial posts, not utility,
+        # policy, gallery or shopping-tool pages. Without WP post inventory,
+        # keep the older broad check as a fallback for standalone crawls.
+        editorial_candidate = u in editorial_urls if editorial_urls else ("/category/" not in u and "/page/" not in u)
+        if p["indexable"] == 1 and editorial_candidate and (p["word_count"] or 0) < THIN_WORDS:
             _problem(conn, sid, "thin_content", "medium", u, {"word_count": p["word_count"], "threshold": THIN_WORDS}, run_id=run_id); counts["problems"] += 1
         # Re-evaluate stored image markup so old crawls that counted explicit
         # alt="" as missing do not keep producing false findings.

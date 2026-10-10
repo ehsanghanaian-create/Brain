@@ -275,7 +275,7 @@ def report_summary(site_id: str, days: int = Query(default=28, ge=7, le=365), en
         # health score: transparent, derived only from real signals (problems + connections)
         penalty = min(45.0, 3.0 * counts["problems"]["high"] + 1.0 * counts["problems"]["medium"] + 0.25 * counts["problems"]["low"])
         conn_penalty = (0 if gsc["available"] else 10) + (0 if ga4["available"] else 5)
-        score = max(0, round(100 - penalty - conn_penalty))
+        score = max(0, round(100 - penalty - conn_penalty)) if crawl_coverage["coverage_status"] == "complete" else None
 
         mk = _main_keyword(cx, site_id)
         main_keyword = {"keyword": mk, "performance": _keyword_perf(cx, site_id, mk, days) if mk else None}

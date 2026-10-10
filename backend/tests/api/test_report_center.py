@@ -56,7 +56,7 @@ def test_summary_empty_site_is_honest(client):
     assert body["ga4"]["available"] is False
     assert body["main_keyword"]["keyword"] is None
     assert body["counts"]["backlinks"] == 0 and body["counts"]["reportages"] == 0
-    assert 0 <= body["score"] <= 100  # penalised for missing connections, still real
+    assert body["score"] is None
     assert body["crawl_coverage"]["coverage_status"] == "not_started"
 
 
@@ -76,10 +76,13 @@ def test_summary_discloses_capped_crawl_coverage(client):
     assert coverage["sitemap_urls"] == 100
     assert coverage["recent_crawled"] == 2
     assert coverage["latest_crawled"] == 2
+    assert client.get("/api/v1/sites/demo/report/summary").json()["score"] is None
     with client.eng.begin() as cx:
         cx.execute(text("UPDATE crawl_runs SET status='completed', notes=:notes WHERE run_id='crawl-1'"),
                    {"notes": json.dumps({"sitemap_urls": 2})})
-    assert client.get("/api/v1/sites/demo/report/summary").json()["crawl_coverage"]["coverage_status"] == "complete"
+    complete = client.get("/api/v1/sites/demo/report/summary").json()
+    assert complete["crawl_coverage"]["coverage_status"] == "complete"
+    assert 0 <= complete["score"] <= 100
 
 
 def test_summary_counts_only_indexable_sitemap_pages(client):

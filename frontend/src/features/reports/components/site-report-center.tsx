@@ -196,9 +196,9 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
                 <CardDescription dir='ltr' className='text-start'>{summary.site.canonical_url || summary.site.wp_url || siteId}</CardDescription>
               </div>
               <div className='text-center'>
-                <div className='text-3xl font-bold tabular-nums'>{fa.format(summary.score)}<span className='text-muted-foreground text-base'>/۱۰۰</span></div>
+                <div className='text-3xl font-bold tabular-nums'>{summary.score == null ? '—' : fa.format(summary.score)}<span className='text-muted-foreground text-base'>/۱۰۰</span></div>
                 <div className='text-muted-foreground text-xs' title={`جریمه مشکلات: ${summary.score_breakdown.problems_penalty} · جریمه اتصال‌ها: ${summary.score_breakdown.connections_penalty}`}>
-                  {summary.crawl_coverage.coverage_status === 'complete' ? 'امتیاز سلامت سئو' : 'امتیاز اولیه؛ پوشش خزش محدود'}
+                  {summary.crawl_coverage.coverage_status === 'complete' ? 'امتیاز سلامت سئو' : 'امتیاز پس از تکمیل خزش نمایش داده می‌شود'}
                 </div>
               </div>
             </CardHeader>
@@ -221,7 +221,7 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
               <KpiCard label='کوئری‌های GSC' value={summary.counts.gsc_queries} />
               <KpiCard label='بک‌لینک‌ها' value={summary.counts.backlinks} />
               <KpiCard label='دامنه‌های ارجاع‌دهنده' value={summary.counts.referring_domains} />
-              <KpiCard label='مشکلات سئو' value={summary.counts.problems.total} hint={`${fa.format(summary.counts.problems.high)} بحرانی`} />
+              <KpiCard label={summary.crawl_coverage.coverage_status === 'complete' ? 'مشکلات سئو' : 'یافته‌های خزش فعلی'} value={summary.counts.problems.total} hint={`${fa.format(summary.counts.problems.high)} بحرانی`} />
             </CardContent>
             {(cur || prev) && (
               <CardContent className='text-muted-foreground flex flex-wrap gap-4 pt-0 text-xs'>

@@ -184,6 +184,34 @@ def test_global_navigation_alone_does_not_make_noindex_archive_important(tmp_pat
         assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='important_non_indexable'").fetchone()[0] == 1
 
 
+def test_noindex_canonical_filter_is_not_an_indexability_or_duplicate_title_problem(tmp_path):
+    site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
+    base = "https://demo.example/shop/"
+    filtered = "https://demo.example/shop/?category=shirts"
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with db(tmp_path / "seo.db") as conn:
+        ensure_site(conn, site)
+        conn.execute("""INSERT INTO crawl_runs(run_id,site_id,started_at,status,notes)
+            VALUES('crawl-current','demo',?,'completed','{"scope":"site","sitemap_urls":1}')""", (now,))
+        for url, indexable, in_sitemap, content_hash in ((base, 1, 1, "base"),
+                                                          (filtered, 0, 0, "filter")):
+            conn.execute("""INSERT INTO pages(site_id,url,crawl_status,status_code,title,meta_description,h1,h1_count,
+                canonical,indexable,indexability_reason,word_count,images_missing_alt,in_sitemap,last_crawled,content_hash)
+                VALUES ('demo',?,'ok',200,'Shop','Description','["Shop"]',1,?,?,?,500,0,?,?,?)""",
+                (url, base, indexable, "indexable" if indexable else "noindex", in_sitemap, now, content_hash))
+        for i in range(3):
+            source = f"https://demo.example/source-{i}/"
+            conn.execute("""INSERT INTO pages(site_id,url,crawl_status,status_code,title,meta_description,h1,h1_count,
+                canonical,indexable,word_count,images_missing_alt,in_sitemap,last_crawled)
+                VALUES ('demo',?,'ok',200,?,'Description','["Source"]',1,?,1,500,0,0,?)""",
+                (source, f"Source {i}", source, now))
+            conn.execute("""INSERT INTO links(site_id,source_url,target_url,is_internal,is_nav)
+                VALUES ('demo',?,?,1,0)""", (source, filtered))
+        run_analysis(conn, site)
+        assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='important_non_indexable'").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='duplicate_title'").fetchone()[0] == 0
+
+
 def test_analysis_excludes_old_pages_and_non_html_responses(tmp_path):
     site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
     with db(tmp_path / "seo.db") as conn:

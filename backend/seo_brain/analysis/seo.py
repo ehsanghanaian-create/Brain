@@ -218,7 +218,9 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
         # A noindex archive linked from every global menu is often intentional.
         # Contextual links, sitemap inclusion or search impressions are stronger
         # signals that a non-indexable page merits an explicit review.
-        if p["indexable"] == 0 and (p["in_sitemap"] or len(inbound_body[u]) >= 3 or gsc_impressions.get(u, 0) > 0):
+        canonical_alias = bool(p["canonical"] and p["canonical"].rstrip("/") != u.rstrip("/"))
+        if p["indexable"] == 0 and (p["in_sitemap"] or gsc_impressions.get(u, 0) > 0
+                                    or (len(inbound_body[u]) >= 3 and not canonical_alias)):
             _problem(conn, sid, "important_non_indexable", "high", u, {"reason": p["indexability_reason"], "in_sitemap": p["in_sitemap"],
                                                                         "inbound_links": len(inbound_all[u]),
                                                                         "body_inbound_links": len(inbound_body[u]),
@@ -241,9 +243,11 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
             missing_alt = p["images_missing_alt"] or 0
         if missing_alt > 0:
             _problem(conn, sid, "images_missing_alt", "low", u, {"images_missing_alt": missing_alt}, run_id=run_id); counts["problems"] += 1
-        if p["title"]:
+        # Noindex canonical aliases (for example shop filters) need not have
+        # distinct titles or H1s from the document they point to.
+        if p["indexable"] == 1 and p["title"]:
             titles[p["title"].strip()].append(u)
-        if h1:
+        if p["indexable"] == 1 and h1:
             h1s[h1[0].strip()].append(u)
     for t, urls in titles.items():
         distinct_urls = _distinct_document_urls(urls, by_url, collapse_pagination=False)

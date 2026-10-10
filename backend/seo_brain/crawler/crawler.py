@@ -16,6 +16,7 @@ import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from xml.etree import ElementTree as ET
@@ -295,6 +296,14 @@ class Crawler:
     def run(self, conn: sqlite3.Connection, seeds: list[str] | None = None) -> dict:
         run_id = new_run_id("crawl")
         ensure_site(conn, self.site)
+        # ensure_site's write transaction serializes this check across workers.
+        # A manual CLI crawl and the scheduler must not persist the same site's
+        # pages concurrently; their link snapshots would overwrite each other.
+        active_since = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        active = conn.execute("""SELECT run_id FROM crawl_runs WHERE site_id=? AND status='running'
+            AND started_at>=? ORDER BY started_at DESC LIMIT 1""", (self.site.site_id, active_since)).fetchone()
+        if active:
+            raise RuntimeError(f"crawl already running for {self.site.site_id}: {active['run_id']}")
         conn.execute("INSERT INTO crawl_runs(run_id, site_id, started_at, max_urls, status) VALUES (?,?,?,?,?)",
                      (run_id, self.site.site_id, utcnow(), self.max_urls, "running"))
         conn.commit()

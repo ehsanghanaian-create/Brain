@@ -13,6 +13,7 @@ import logging
 import re
 import sqlite3
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote, urlsplit
 
 from rapidfuzz import fuzz
@@ -98,17 +99,18 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
                  (run_id, sid, "analysis", utcnow(), "running"))
     _clear(conn, sid, run_id)
     # Pages are retained across crawls for history and targeted verification.
-    # A full crawl must not keep reporting pages that disappeared from the
-    # sitemap/link graph or now redirect elsewhere. Targeted recrawls performed
-    # after the full crawl remain eligible through their last_crawled timestamp.
+    # An uncapped full crawl replaces the previous snapshot. A capped daily
+    # crawl covers only a rotating slice, so combine pages seen within the
+    # last 30 days instead of analysing just its most recent 20 URLs.
     full_crawl = None
-    for crawl in rows(conn, "SELECT started_at,notes FROM crawl_runs WHERE site_id=? AND status IN ('completed','completed_capped') ORDER BY started_at DESC LIMIT 100", (sid,)):
+    for crawl in rows(conn, "SELECT started_at,status,notes FROM crawl_runs WHERE site_id=? AND status IN ('completed','completed_capped') ORDER BY started_at DESC LIMIT 100", (sid,)):
         try:
             notes = json.loads(crawl["notes"] or "{}")
         except (ValueError, TypeError):
             notes = {}
         if not isinstance(notes, dict) or notes.get("scope") != "targeted":
-            full_crawl = crawl["started_at"]
+            full_crawl = ((datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
+                          if crawl["status"] == "completed_capped" else crawl["started_at"])
             break
     page_sql = "SELECT * FROM pages WHERE site_id=? AND crawl_status='ok' AND h1_count IS NOT NULL"
     crawled_pages = rows(conn, page_sql + (" AND last_crawled>=?" if full_crawl else ""),

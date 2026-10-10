@@ -1,8 +1,31 @@
 """A fresh full crawl must not report retained pages from older snapshots."""
+from datetime import datetime, timedelta, timezone
+
 from seo_brain.analysis.seo import run_analysis
 from seo_brain.common.config import SiteConfig
 from seo_brain.crawler.parser import parse_html
 from seo_brain.database.db import db, ensure_site
+
+
+def test_capped_crawl_analysis_combines_recent_batches(tmp_path):
+    site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
+    now = datetime.now(timezone.utc)
+    previous = (now - timedelta(days=2)).isoformat(timespec="seconds")
+    current = now.isoformat(timespec="seconds")
+    with db(tmp_path / "seo.db") as conn:
+        ensure_site(conn, site)
+        conn.execute("""INSERT INTO crawl_runs(run_id,site_id,started_at,status,notes)
+            VALUES('crawl-current','demo',?,'completed_capped','{"scope":"site"}')""", (current,))
+        for path, observed in (("previous", previous), ("current", current)):
+            conn.execute("""INSERT INTO pages(site_id,url,crawl_status,status_code,h1,h1_count,
+                indexable,word_count,images_missing_alt,in_sitemap,last_crawled)
+                VALUES('demo',?,'ok',200,?,1,1,500,1,1,?)""",
+                (f"https://demo.example/{path}/", f'["{path}"]', observed))
+        run_analysis(conn, site)
+        urls = [row[0] for row in conn.execute(
+            "SELECT url FROM seo_problems WHERE problem_type='images_missing_alt' ORDER BY url"
+        )]
+    assert urls == ["https://demo.example/current/", "https://demo.example/previous/"]
 
 
 def test_parser_counts_main_outside_malformed_body():

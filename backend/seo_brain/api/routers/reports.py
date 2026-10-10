@@ -213,6 +213,31 @@ def _sync_history(cx, site_id: str, limit: int = 15) -> list[dict[str, Any]]:
     return rows
 
 
+def _crawl_coverage(cx, site_id: str) -> dict[str, Any]:
+    """Expose the crawl budget and its limits alongside SEO health numbers."""
+    latest = _one(cx, """SELECT run_id,status,started_at,finished_at,max_urls,urls_crawled,notes
+        FROM crawl_runs WHERE site_id=:s ORDER BY started_at DESC LIMIT 1""", s=site_id)
+    if not latest:
+        return {"status": "not_started", "coverage_status": "not_started",
+                "sitemap_urls": 0, "recent_crawled": 0, "window_days": 30,
+                "latest_crawled": 0, "max_urls": None, "started_at": None}
+    try:
+        notes = json.loads(latest.get("notes") or "{}")
+    except (ValueError, TypeError):
+        notes = {}
+    if not isinstance(notes, dict):
+        notes = {}
+    sitemap_urls = max(0, int(notes.get("sitemap_urls") or 0))
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat(timespec="seconds")
+    recent = (_one(cx, """SELECT COUNT(*) AS n FROM pages WHERE site_id=:s AND in_sitemap=1
+        AND crawl_status='ok' AND last_crawled>=:cutoff""", s=site_id, cutoff=cutoff) or {}).get("n", 0)
+    complete = latest["status"] in {"completed", "completed_capped"} and sitemap_urls > 0 and recent >= sitemap_urls
+    return {"status": latest["status"], "coverage_status": "complete" if complete else "partial",
+            "sitemap_urls": sitemap_urls, "recent_crawled": int(recent), "window_days": 30,
+            "latest_crawled": int(latest.get("urls_crawled") or 0), "max_urls": latest.get("max_urls"),
+            "started_at": latest.get("started_at"), "run_id": latest.get("run_id")}
+
+
 @router.get("")
 def full_report(site_id: str, days: int = Query(default=28, ge=7, le=365), eng: Engine = Depends(engine)) -> dict[str, Any]:
     """گزارش تجمیعی هر سایت: summary + وضعیت اتصال‌ها + تاریخچه همگام‌سازی — یک فراخوانی برای کل صفحه گزارش."""
@@ -231,6 +256,7 @@ def report_summary(site_id: str, days: int = Query(default=28, ge=7, le=365), en
     with eng.connect() as cx:
         site = _one(cx, "SELECT site_id, name, canonical_url, gsc_property, ga4_property, wp_url FROM sites WHERE site_id=:s", s=site_id)
         gsc = _gsc_block(cx, site_id, days)
+        crawl_coverage = _crawl_coverage(cx, site_id)
 
         ga4 = {"available": False}
         ga4_bounds = _one(cx, """
@@ -312,6 +338,7 @@ def report_summary(site_id: str, days: int = Query(default=28, ge=7, le=365), en
     return {"site": site, "generated_at": _now(), "days": days, "score": score,
             "score_breakdown": {"problems_penalty": penalty, "connections_penalty": conn_penalty},
             "gsc": gsc, "ga4": ga4, "counts": counts, "main_keyword": main_keyword,
+            "crawl_coverage": crawl_coverage,
             "freshness": {"last_runs": {r["source"]: r["at"] for r in last_runs}, "auto_sync": plan}}
 
 

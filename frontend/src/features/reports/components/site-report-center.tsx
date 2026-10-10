@@ -203,10 +203,21 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
               <div className='text-center'>
                 <div className='text-3xl font-bold tabular-nums'>{fa.format(summary.score)}<span className='text-muted-foreground text-base'>/۱۰۰</span></div>
                 <div className='text-muted-foreground text-xs' title={`جریمه مشکلات: ${summary.score_breakdown.problems_penalty} · جریمه اتصال‌ها: ${summary.score_breakdown.connections_penalty}`}>
-                  امتیاز سلامت سئو
+                  {summary.crawl_coverage.coverage_status === 'complete' ? 'امتیاز سلامت سئو' : 'امتیاز اولیه؛ پوشش خزش محدود'}
                 </div>
               </div>
             </CardHeader>
+            {summary.crawl_coverage.coverage_status !== 'complete' && (
+              <CardContent className='pb-3 pt-0'>
+                <div className='rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200'>
+                  {summary.crawl_coverage.coverage_status === 'not_started' ? (
+                    'هنوز خزشی برای این سایت ثبت نشده است؛ امتیاز و شمار مشکلات، تصویر کامل SEO سایت نیست.'
+                  ) : (
+                    <>پوشش خزش محدود است: {fa.format(summary.crawl_coverage.recent_crawled)} URL در {fa.format(summary.crawl_coverage.window_days)} روز اخیر از {fa.format(summary.crawl_coverage.sitemap_urls)} URL سایت‌مپ بررسی شده‌اند. امتیاز و شمار مشکلات را نتیجهٔ قطعی کل سایت ندانید.</>
+                  )}
+                </div>
+              </CardContent>
+            )}
             <CardContent className='grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8'>
               <KpiCard label={g?.metric_ref?.source === 'gsc_property_daily' ? 'کلیک کل سایت' : 'کلیک ردیف‌های GSC'} value={cur?.clicks ?? null} hint={prev ? undefined : `${days} روز اخیر GSC`} />
               <KpiCard label={g?.metric_ref?.source === 'gsc_property_daily' ? 'نمایش کل سایت' : 'نمایش ردیف‌های GSC'} value={cur?.impressions ?? null} />

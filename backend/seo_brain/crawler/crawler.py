@@ -150,6 +150,44 @@ class Crawler:
         log.info(f"sitemap inventory: {len(uniq)} URLs from {len(seen_docs)} sitemap docs")
         return uniq
 
+    def ordered_seeds(self, conn: sqlite3.Connection, sitemap: set[str],
+                      seeds: list[str] | None = None) -> list[str]:
+        """Rotate a capped site crawl through unseen and oldest pages first.
+
+        A fixed alphabetical order makes a daily 20-URL budget revisit the same
+        20 pages forever. Explicit targeted crawls retain the caller's order.
+        """
+        if seeds is not None:
+            return list(dict.fromkeys(self.norm(url) for url in seeds))
+        home = self.norm(self.site.canonical_url)
+        urls = sitemap | {home}
+        last_crawled = {
+            row[0]: row[1] for row in conn.execute(
+                "SELECT url,last_crawled FROM pages WHERE site_id=?", (self.site.site_id,)
+            )
+        }
+        return sorted(urls, key=lambda url: (
+            0 if url == home and not last_crawled.get(url) else 1,
+            bool(last_crawled.get(url)), last_crawled.get(url) or "", url,
+        ))
+
+    def record_sitemap_inventory(self, conn: sqlite3.Connection, sitemap: set[str]) -> None:
+        """Keep every current sitemap URL visible, including those awaiting crawl."""
+        if not sitemap:
+            return  # A failed sitemap fetch is not evidence that URLs disappeared.
+        current = sorted(url for url in sitemap if is_same_site(url, self.allowed))
+        if not current:
+            return
+        conn.execute("UPDATE pages SET in_sitemap=0 WHERE site_id=? AND in_sitemap=1", (self.site.site_id,))
+        conn.executemany(
+            "INSERT OR IGNORE INTO pages(site_id,url,in_sitemap,crawl_status) VALUES(?,?,1,'pending')",
+            ((self.site.site_id, url) for url in current),
+        )
+        conn.executemany(
+            "UPDATE pages SET in_sitemap=1 WHERE site_id=? AND url=?",
+            ((self.site.site_id, url) for url in current),
+        )
+
     # -- fetch ----------------------------------------------------------------------
     def fetch(self, url: str, depth: int, request_url: str | None = None) -> CrawlResult:
         res = CrawlResult(url=url)
@@ -265,10 +303,12 @@ class Crawler:
             self.load_robots()
             sitemap = set(self.read_sitemaps())
             stats["sitemap_urls"] = len(sitemap)
-            home = self.norm(self.site.canonical_url)
+            if seeds is None:
+                self.record_sitemap_inventory(conn, sitemap)
+                conn.commit()
             queue: deque[tuple[str, int, str | None]] = deque()
             seen: set[str] = set()
-            for u in ([home] + sorted(sitemap) if not seeds else [self.norm(s) for s in seeds]):
+            for u in self.ordered_seeds(conn, sitemap, seeds):
                 if u not in seen:
                     seen.add(u)
                     queue.append((u, 0, None))

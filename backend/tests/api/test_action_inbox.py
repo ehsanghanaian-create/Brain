@@ -24,10 +24,10 @@ def test_action_inbox_joins_only_active_site_scoped_signals(tmp_path, monkeypatc
                    ('one','case-old','missing_h1','https://one.example/old/','high','resolved','{}','2026-10-09','2026-10-10')"""))
         cx.execute(text("""INSERT INTO keywords(site_id,keyword,normalized) VALUES ('one','کفش مردانه','کفش مردانه')"""))
         cx.execute(text("""INSERT INTO keyword_opportunities(site_id,keyword_id,kind,target_url,score,reason,evidence,status)
-            VALUES ('one',1,'improve_page','https://one.example/a/',0.9,'بهبود صفحه','{\"impressions\": 90}','new'),
+            VALUES ('one',1,'improve_page','https://one.example/a/',0.4,'بهبود صفحه','{\"impressions\": 90}','new'),
                    ('one',1,'create_content','https://one.example/a/',0.4,'نادیده','{}','dismissed')"""))
         cx.execute(text("""INSERT INTO link_suggestions(site_id,source_node_id,target_node_id,kind,source_url,target_url,score,confidence,status)
-            VALUES ('one','src','dst','contextual','https://one.example/a/','https://one.example/b/',0.7,'recommended','new'),
+            VALUES ('one','src','dst','contextual','https://one.example/a/','https://one.example/b/',0.9,'high','new'),
                    ('two','src','dst','contextual','https://two.example/a/','https://two.example/b/',0.7,'recommended','new')"""))
 
     base = "/api/v1/portfolio/action-inbox"
@@ -38,6 +38,7 @@ def test_action_inbox_joins_only_active_site_scoped_signals(tmp_path, monkeypatc
     assert one["counts"] == {"issue": 1, "keyword": 1, "link": 1}
     assert one["total"] == 3
     assert len(one["items"]) == 2
+    assert [item["kind"] for item in one["items"]] == ["issue", "keyword"]
     assert all(item["site_id"] == "one" for item in one["items"])
     issue = next(item for item in one["items"] if item["kind"] == "issue")
     assert issue["evidence"] == {"count": 0}

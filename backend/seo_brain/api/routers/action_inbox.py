@@ -78,7 +78,8 @@ def action_inbox(
             SELECT kind,source_id,site_id,site_name,subtype,title,summary,url,related_url,
                    priority,score,evidence,run_id,observed_at
             FROM evidence WHERE (:kind='all' OR kind=:kind)
-            ORDER BY triage_rank ASC, observed_at DESC, kind, source_id DESC
+            ORDER BY CASE kind WHEN 'issue' THEN 0 WHEN 'keyword' THEN 1 ELSE 2 END,
+                     triage_rank ASC, observed_at DESC, source_id DESC
             LIMIT :limit OFFSET :offset
         """), params).mappings()
         items = [{**dict(row), "evidence": _evidence(row["evidence"])} for row in rows]

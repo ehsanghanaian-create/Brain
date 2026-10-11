@@ -24,7 +24,6 @@ export function GraphMission({ site, siteId, mode, view, onModeChange }: {
   onModeChange: (mode: ToolbarState['mode']) => void;
 }) {
   const current = LENSES.find((lens) => lens.key === mode) ?? LENSES[0];
-  const observed = view?.mode.key === mode ? (mode === 'links' ? view.stats.by_relation.LINKS_TO : view.stats.by_type[current.evidence]) : undefined;
   const needsData = site && site.state !== 'ready' && !site.setup_steps.graph_ready;
   const action = needsData ? { href: `/dashboard/sites/${encodeURIComponent(siteId)}?tab=${site.state === 'attention' ? 'automation' : 'integrations'}`, label: 'تکمیل داده‌های سایت' } : { href: current.href(siteId), label: current.action };
   return (
@@ -46,6 +45,7 @@ export function GraphMission({ site, siteId, mode, view, onModeChange }: {
           <span className='text-muted-foreground'>اقدام عملیاتی بعدی: <strong className='text-foreground'>{site.next_action}</strong></span>
         </div>}
       </div>
+      {site?.mission.objective.includes('فروش') && <Link href={`/dashboard/sales?site=${encodeURIComponent(siteId)}`} className='flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/25 bg-primary/[0.05] px-4 py-3 text-sm font-medium transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'><span>برای هدف فروش، روند صفحات محصول و دسته‌بندی و اقدام‌های مرتبط را ببینید.</span><span className='inline-flex items-center gap-1 text-primary'>مسیر رشد فروش <IconArrowLeft className='size-4' /></span></Link>}
       <div>
         <div className='mb-2 flex flex-wrap items-baseline justify-between gap-2'><h3 className='text-sm font-semibold'>الان دنبال پاسخ کدام سؤال هستید؟</h3><p className='text-muted-foreground text-xs'>هر نما بخشی از داده‌های همین سایت را نشان می‌دهد.</p></div>
         <div className='grid gap-2 sm:grid-cols-2 2xl:grid-cols-4' role='tablist' aria-label='پرسش‌های گراف'>
@@ -62,7 +62,7 @@ export function GraphMission({ site, siteId, mode, view, onModeChange }: {
       </div>
       <div className='flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card px-4 py-3 text-sm'>
         <div><strong>{current.title}</strong><p className='text-muted-foreground mt-1 text-xs'>
-          {view?.mode.key === mode ? view.nodes.length === 0 ? 'این نما هنوز داده ندارد؛ وضعیت اتصال و خزش سایت را بررسی کنید.' : `در این نمای محدود ${fa.format(observed ?? 0)} ${mode === 'links' ? 'لینک ثبت‌شده' : 'مورد از نوع اصلی'} دیده می‌شود${view.truncated ? `؛ از ${fa.format(view.total_nodes)} گره فقط ${fa.format(view.nodes.length)} گره بارگذاری شده` : ''}.` : 'در حال بارگذاری شواهد این نما…'}
+          {view?.mode.key === mode ? view.nodes.length === 0 ? 'این نما هنوز داده ندارد؛ وضعیت اتصال و خزش سایت را بررسی کنید.' : `${fa.format(view.nodes.length)} گره و ${fa.format(view.edges.length)} رابطهٔ قابل پیگیری دیده می‌شود${view.truncated ? `؛ این نمونهٔ متصل از ${fa.format(view.total_nodes)} گره موجود انتخاب شده است` : ''}${view.stats.edges_truncated ? '؛ بخشی از رابطه‌ها برای روان ماندن نما پنهان شده‌اند' : ''}.` : 'در حال بارگذاری شواهد این نما…'}
         </p></div>
         <Link href={action.href} className={cn(buttonVariants({ size: 'sm' }), 'shrink-0')}>{action.label}<IconArrowLeft className='size-4' /></Link>
       </div>

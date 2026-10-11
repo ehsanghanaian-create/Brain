@@ -232,7 +232,23 @@ export type InitializeResult = {
 export type GraphNode = { id: string; site_id: string; type: string; metadata: { label?: string; url?: string | null; pagerank?: number | null; community?: number | null; vault_path?: string | null; props?: Record<string, unknown> } & Record<string, unknown> };
 export type GraphEdge = { source: string; target: string; relation_type: string; weight: number; metadata: { edge_id?: string; props?: Record<string, unknown> }; site_id: string };
 export type GraphMode = { key: 'seo' | 'content' | 'links' | 'planner'; title_fa: string; description_fa: string; layout: string; group_by: string; node_types: string[]; relation_types: string[] };
-export type GraphView = { mode: GraphMode; nodes: GraphNode[]; edges: GraphEdge[]; truncated: boolean; total_nodes: number; stats: { by_type: Record<string, number>; by_relation: Record<string, number> } };
+export type GraphView = { mode: GraphMode; nodes: GraphNode[]; edges: GraphEdge[]; truncated: boolean; total_nodes: number; stats: { by_type: Record<string, number>; by_relation: Record<string, number>; sampled?: boolean; edges_truncated?: boolean } };
+export type SalesPath = {
+  site_id: string; generated_at: string; days: number; latest_gsc_date: string | null;
+  window: { from: string; to: string } | null; previous_window: { from: string; to: string } | null;
+  coverage: 'gsc_observed_top_rows_only'; sales_measurement: 'unavailable'; previous_available: boolean; previous_total_clicks: number | null;
+  inventory: Record<'product' | 'category' | 'shop', number>;
+  stages: { kind: 'product' | 'category' | 'shop'; clicks: number; impressions: number; pages_observed: number }[];
+  daily: { date: string; product: number; category: number; shop: number }[];
+  top_pages: { url: string; kind: 'product' | 'category' | 'shop'; clicks: number; impressions: number; ctr: number | null; previous_clicks: number | null; open_issues: number; new_keyword_opportunities: number }[];
+};
+export type SalesMeasurement = {
+  status: 'reported' | 'not_configured' | 'error'; source: 'ga4_data_api'; days: number;
+  currency?: string | null; property_time_zone?: string | null; tracking_verified: false;
+  channels: { channel: string; sessions: number; transactions: number; purchase_revenue: number }[];
+  organic_search: { channel: string; sessions: number; transactions: number; purchase_revenue: number } | null;
+  reason?: string;
+};
 export type NodeDetails = Record<string, unknown> & { id: string; type: string; label: string; url: string | null; pagerank: number | null; community: number | null; props: Record<string, unknown>; degree: number };
 // phase 5 — keywords
 export type KeywordGsc = { clicks: number; impressions: number; ctr: number; position: number | null; top_page: string | null; pages_count: number } | null;
@@ -367,6 +383,8 @@ export const endpoints = {
   sites: () => api<Site[]>('/sites', { cacheSeconds: 10 }),
   site: (id: string) => api<Site>(`/sites/${encodeURIComponent(id)}`, { cacheSeconds: 5 }),
   siteMission: (id: string) => api<SiteMission>(`/sites/${encodeURIComponent(id)}/mission`),
+  salesPath: (id: string, days = 28) => api<SalesPath>(`/sites/${encodeURIComponent(id)}/commerce/path?days=${days}`),
+  salesMeasurement: (id: string, days = 28) => api<SalesMeasurement>(`/sites/${encodeURIComponent(id)}/commerce/measurement?days=${days}`),
   putSiteMission: (id: string, body: Pick<SiteMission, 'objective' | 'success_metric'>) => api<SiteMission>(`/sites/${encodeURIComponent(id)}/mission`, { method: 'PUT', json: body }),
   urlInventory: (id: string, params: { search?: string; source?: 'all' | 'wordpress' | 'crawl' | 'gsc'; limit?: number; offset?: number } = {}) => {
     const query = new URLSearchParams();

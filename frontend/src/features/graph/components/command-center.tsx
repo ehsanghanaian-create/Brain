@@ -19,6 +19,7 @@ import {
   type OnSelectionChangeFunc
 } from '@xyflow/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTheme } from 'next-themes';
 import { TYPE_FAMILIES } from '../constants';
 import { layoutCircle, layoutForce, layoutGrouped, layoutLayered, layoutRadial, toFlowEdges, toFlowNodes } from '../layout';
 import { useManualLayout } from '../use-manual-layout';
@@ -41,6 +42,7 @@ export function CommandCenter({ sites, portfolio, initialSiteId, initialMode = '
 
 function CommandCenterInner({ sites, portfolio, initialSiteId, initialMode = 'seo', focusNodeId }: { sites: Site[]; portfolio: PortfolioOverview | null; initialSiteId: string; initialMode?: ToolbarState['mode']; focusNodeId?: string | null }) {
   const rf = useReactFlow();
+  const { resolvedTheme } = useTheme();
   const [state, setState] = useState<ToolbarState>({
     siteId: initialSiteId, mode: initialMode, query: '', familyOff: new Set(), relationOff: new Set(), grouping: 'none', direction: 'TB', hideIsolated: false, focusNeighbors: false, limit: 160, flow: false
   });
@@ -196,7 +198,8 @@ function CommandCenterInner({ sites, portfolio, initialSiteId, initialMode = 'se
 
   useEffect(() => {
     setAnimating(true);
-    const t = setTimeout(() => rf.fitView({ padding: 0.15, duration: 500 }), 60);
+    const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 500;
+    const t = setTimeout(() => rf.fitView({ padding: 0.15, duration }), 60);
     const t2 = setTimeout(() => setAnimating(false), 750);
     return () => { clearTimeout(t); clearTimeout(t2); };
   }, [view, state.grouping, state.direction, state.focusNeighbors, layoutTick, rf]);
@@ -239,7 +242,7 @@ function CommandCenterInner({ sites, portfolio, initialSiteId, initialMode = 'se
       setSelectedId(id);
       patch({ focusNeighbors: false });
       const n = rf.getNode(id);
-      if (n) rf.fitView({ nodes: [{ id }], duration: 400, maxZoom: 1.4 });
+      if (n) rf.fitView({ nodes: [{ id }], duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 400, maxZoom: 1.4 });
     },
     [rf, patch]
   );
@@ -301,7 +304,7 @@ function CommandCenterInner({ sites, portfolio, initialSiteId, initialMode = 'se
             maxZoom={2.5}
             nodesConnectable={false}
             proOptions={{ hideAttribution: true }}
-            colorMode='dark'
+            colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
             onlyRenderVisibleElements
           >
             <Background gap={24} size={1} />

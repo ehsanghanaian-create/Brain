@@ -29,6 +29,8 @@ export const navGroups: NavGroup[] = [
   {
     label: 'تحلیل سایت',
     items: [
+      { title: 'مسیر رشد فروش', url: '/dashboard/sales', icon: 'trendingUp', items: [],
+        description: 'صفحات تجاری، روند تقاضای ارگانیک، مسئله‌ها و شکاف سنجش سفارش' },
       { title: 'نقشه تصمیم', url: '/dashboard/graph', icon: 'graph', shortcut: ['g', 'g'], items: [],
         description: 'هدف سایت، پرسش‌های سئو و مسیر اقدام از روی شواهد گراف' },
       { title: 'کلمات کلیدی', url: '/dashboard/keywords', icon: 'keywords', items: [],

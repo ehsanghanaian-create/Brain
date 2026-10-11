@@ -59,6 +59,13 @@ export function WordPressIntegrationCard({ siteId, initialValue, initialResult, 
       <ConnectionTester siteId={siteId} kind='wordpress' label='WordPress REST' hint='https://example.com'
         initialValue={initialValue} initialResult={initialResult} initialAuth={initialAuth} onResult={() => setRefresh((n) => n + 1)} />
 
+      {status?.stage === 'graph_only' && (
+        <p className='rounded-lg border bg-muted/40 p-2 text-xs'>آخرین اجرا فقط گراف را بازسازی کرده است. وضعیت همگام‌سازی کامل وردپرس: <strong>{status.full_sync?.status ?? 'هرگز اجرا نشده'}</strong>
+          {status.full_sync?.finished_at && <span dir='ltr'> · {new Date(status.full_sync.finished_at).toLocaleString('fa-IR')}</span>}
+          {status.full_sync?.errors?.length ? <span className='block text-destructive'>{status.full_sync.errors.at(-1)}</span> : null}
+        </p>
+      )}
+
       <SyncCounters kind='wp' items={view.counters} />
 
       <div className='flex flex-wrap items-center gap-2'>

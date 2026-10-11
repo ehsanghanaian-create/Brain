@@ -16,6 +16,7 @@ import { BUSINESS_CATEGORIES, MODE_FA } from '../constants';
 import { AutoSyncLine } from './auto-sync-line';
 import { StatusBadge } from './connection-tester';
 import { PhoneTab } from './phone-tab';
+import { UrlInventoryTab } from './url-inventory-tab';
 import { SecurityCard } from './security-card';
 import { DeleteSiteButton } from './delete-site-button';
 import { Ga4IntegrationCard } from './ga4-integration-card';
@@ -25,8 +26,8 @@ import { SiteBrainForm } from './site-brain-form';
 import { WordPressIntegrationCard } from './wordpress-sync-card';
 
 const fa = new Intl.NumberFormat('fa-IR');
-type SiteTab = 'overview' | 'integrations' | 'automation' | 'phone' | 'brain' | 'settings';
-const validTabs = new Set<SiteTab>(['overview', 'integrations', 'automation', 'phone', 'brain', 'settings']);
+type SiteTab = 'overview' | 'urls' | 'integrations' | 'automation' | 'phone' | 'brain' | 'settings';
+const validTabs = new Set<SiteTab>(['overview', 'urls', 'integrations', 'automation', 'phone', 'brain', 'settings']);
 
 export function SiteDetail({ site, connections, memory, graph, initialTab }: {
   site: Site;
@@ -89,6 +90,7 @@ export function SiteDetail({ site, connections, memory, graph, initialTab }: {
       <div className='sticky top-14 z-20 -mx-4 border-y bg-background/95 px-4 py-2 backdrop-blur md:-mx-6 md:px-6'>
         <TabsList variant='line' className='h-10 max-w-full justify-start overflow-x-auto'>
           <TabsTrigger value='overview'><IconActivity />نمای کلی</TabsTrigger>
+          <TabsTrigger value='urls'><IconWorld />صفحات سایت</TabsTrigger>
           <TabsTrigger value='integrations'><IconPlugConnected />اتصال‌ها</TabsTrigger>
           <TabsTrigger value='automation'><IconClock />عملیات و زمان‌بندی</TabsTrigger>
           <TabsTrigger value='phone'><IconPhone />شمارهٔ تماس</TabsTrigger>
@@ -138,6 +140,10 @@ export function SiteDetail({ site, connections, memory, graph, initialTab }: {
             </CardContent>
           </Card>
         </div>
+      </TabsContent>
+
+      <TabsContent value='urls' className='space-y-4'>
+        {tab === 'urls' && <UrlInventoryTab siteId={site.site_id} />}
       </TabsContent>
 
       <TabsContent value='integrations' className='space-y-4'>

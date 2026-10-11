@@ -199,7 +199,7 @@ def integrations(site_id: str, site: Site = Depends(require_site), eng: Engine =
     _ga4_pipe = _Ga4Pipeline(eng)
     out = [
         {"kind": "wordpress", "label": "وردپرس", "connection": connection("wordpress"),
-         "sync": sync_block(wp.latest(site_id), wp.counts(site_id)),
+         "sync": sync_block(wp.latest(site_id, "full"), wp.counts(site_id)),
          "configured": bool(site.wp_url), "property": site.wp_url,
          "actions": ["test"] + (["sync", "rebuild"] if site.wp_url else [])},
         {"kind": "gsc", "label": "Google Search Console", "connection": connection("gsc"),

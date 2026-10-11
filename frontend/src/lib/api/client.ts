@@ -132,6 +132,21 @@ export type WpSyncStatus = {
   step: string | null; step_fa: string | null; progress: number; stage: 'full' | 'graph_only' | null;
   started_at: string | null; finished_at: string | null; items: Record<string, unknown>; errors: string[]; steps: WpSyncStep[];
   run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null; counts: WpSyncCounts; steps_fa: Record<string, string>;
+  full_sync: { run_id: string; status: string; started_at: string | null; finished_at: string | null; errors: string[] } | null;
+  graph_rebuild: { run_id: string; status: string; started_at: string | null; finished_at: string | null; errors: string[] } | null;
+};
+export type UrlInventoryItem = {
+  url: string; title: string | null; sources: ('wordpress' | 'crawl' | 'gsc')[];
+  wordpress_type: string | null; wordpress_status: string | null;
+  crawl_status: string | null; status_code: number | null; indexable: number | null;
+  canonical: string | null; in_sitemap: number | null; last_crawled: string | null; crawl_run_id: string | null;
+  gsc_clicks: number | null; gsc_impressions: number | null; gsc_position: number | null;
+  gsc_date_from: string | null; gsc_date_to: string | null; gsc_updated_at: string | null;
+};
+export type UrlInventory = {
+  site_id: string; items: UrlInventoryItem[]; total: number; limit: number; offset: number;
+  coverage: { crawl: { run_id: string; status: string; started_at: string; finished_at: string | null; max_urls: number | null; urls_crawled: number; urls_failed: number } | null;
+    gsc_latest_date: string | null; gsc_scope: 'observed_top_rows_only'; missing_source_means_zero: false };
 };
 export type WpSyncQueued = { status: 'queued' | 'already_running' | 'not_queued' | string; job_id?: string | null; run_id?: string | null; stage?: string; step?: string | null; error?: string | null };
 export type GscSyncCoverage = { date_from: string | null; date_to: string | null; rows: number; queries: number; important_queries: number; pages: number; content_snapshots: number; keyword_opportunities?: number; last_gsc_sync?: string | null };
@@ -312,6 +327,14 @@ export const endpoints = {
   portfolioOverview: () => api<PortfolioOverview>('/portfolio/overview', { cacheSeconds: 10 }),
   sites: () => api<Site[]>('/sites', { cacheSeconds: 10 }),
   site: (id: string) => api<Site>(`/sites/${encodeURIComponent(id)}`, { cacheSeconds: 5 }),
+  urlInventory: (id: string, params: { search?: string; source?: 'all' | 'wordpress' | 'crawl' | 'gsc'; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (params.search) query.set('search', params.search);
+    if (params.source && params.source !== 'all') query.set('source', params.source);
+    query.set('limit', String(params.limit ?? 50));
+    query.set('offset', String(params.offset ?? 0));
+    return api<UrlInventory>(`/sites/${encodeURIComponent(id)}/urls?${query}`);
+  },
   graphSummary: (id: string) => api<GraphSummary>(`/sites/${encodeURIComponent(id)}/graph/summary`, { cacheSeconds: 10 }),
   memory: (id: string) => api<SiteMemory>(`/sites/${encodeURIComponent(id)}/memory`, { cacheSeconds: 5 }),
   // phase 3 — sites management

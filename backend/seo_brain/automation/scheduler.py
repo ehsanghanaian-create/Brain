@@ -4,8 +4,8 @@ Every tick (default ۱۰ دقیقه):
   1. stale recovery — pipeline runs stuck in queued/running longer than the threshold (e.g. the API was restarted
      mid-run) are marked failed with an interruption note, in BOTH the sync_runs.status column and the state JSON
      in notes (which is what is_running() reads) — otherwise one crash blocks a site's syncs forever.
-  2. planning — for every site and every configured integration, compare the last successful pipeline run
-     (sync_runs) with the per-site interval (site_settings key `auto_sync`, default enabled/daily) and enqueue the
+  2. planning — for every site and every configured integration, compare the last finished pipeline run
+     (sync_runs) with the per-site interval (site_settings key `auto_sync`, default enabled/10 minutes) and enqueue the
      SAME job the UI buttons use (_queue_wordpress_sync / _queue_gsc_sync / _queue_ga4_sync). The existing
      per-site locks + already_running guards make double-enqueue harmless.
 
@@ -40,6 +40,7 @@ MAX_CONSECUTIVE_FAILURES = 3      # …then back off to the normal interval (not
 MIN_FULL_CRAWL_URLS = 200
 MAX_FULL_CRAWL_URLS = 2000
 CAPPED_RECRAWL_MINUTES = 10
+MIN_WORDPRESS_INTERVAL_MINUTES = 24 * 60  # A full site crawl must not run every Google refresh tick.
 
 
 def _utcnow() -> datetime:
@@ -137,9 +138,18 @@ def recover_stale_runs(engine: Engine, stale_after_minutes: int = 120) -> int:
 
 def last_success(engine: Engine, site_id: str, source: str) -> datetime | None:
     with engine.connect() as cx:
-        r = cx.execute(text("SELECT finished_at FROM sync_runs WHERE site_id=:s AND source=:src AND status IN ('succeeded','completed_with_errors') "
+        r = cx.execute(text("SELECT finished_at FROM sync_runs WHERE site_id=:s AND source=:src AND status='succeeded' "
                             "ORDER BY started_at DESC LIMIT 1"), {"s": site_id, "src": source}).first()
     return _parse(r[0]) if r else None
+
+
+def last_finished(engine: Engine, site_id: str, source: str) -> tuple[datetime | None, str | None]:
+    """A partial run still sets the next cadence, but must never be labelled a success."""
+    with engine.connect() as cx:
+        r = cx.execute(text("SELECT finished_at, status FROM sync_runs WHERE site_id=:s AND source=:src "
+                            "AND status IN ('succeeded','completed_with_errors') "
+                            "ORDER BY started_at DESC LIMIT 1"), {"s": site_id, "src": source}).first()
+    return (_parse(r[0]), r[1]) if r else (None, None)
 
 
 def _failure_streak(engine: Engine, site_id: str, source: str) -> tuple[int, datetime | None, str | None]:
@@ -195,7 +205,6 @@ def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> 
     """Per-integration plan used by both the scheduler and the auto-sync API: last success, next planned, due."""
     now = now or _utcnow()
     cfg = auto_sync_settings(engine, site_id)
-    interval = timedelta(minutes=cfg["interval_minutes"])
     with engine.connect() as cx:
         site = cx.execute(text("SELECT wp_url, gsc_property, ga4_property FROM sites WHERE site_id=:s"), {"s": site_id}).first()
         checks = {r[0]: (r[1], _parse(r[2])) for r in cx.execute(
@@ -215,7 +224,9 @@ def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> 
     sources: dict[str, Any] = {}
     for kind, src in (("wordpress", "wordpress_pipeline"), ("gsc", "gsc_pipeline"), ("ga4", "ga4_pipeline")):
         last = last_success(engine, site_id, src)
-        nxt = (last + interval) if last else now
+        finished, finished_status = last_finished(engine, site_id, src)
+        effective_minutes = max(cfg["interval_minutes"], MIN_WORDPRESS_INTERVAL_MINUTES) if kind == "wordpress" else cfg["interval_minutes"]
+        nxt = (finished + timedelta(minutes=effective_minutes)) if finished else now
         # A rejected grant needs user reconnection; repeated failures must not hammer the site.
         streak, latest_started, latest_status = _failure_streak(engine, site_id, src)
         check_status, checked_at = checks.get(kind, (None, None))
@@ -227,12 +238,15 @@ def plan_for_site(engine: Engine, site_id: str, now: datetime | None = None) -> 
             delay = RETRY_AFTER_MINUTES if streak < MAX_CONSECUTIVE_FAILURES else cfg["interval_minutes"]
             retry_at = latest_started + timedelta(minutes=delay)
             nxt = retry_at if streak < MAX_CONSECUTIVE_FAILURES else max(nxt, retry_at)
-        if kind == "wordpress" and last and latest_status in OK_STATUSES:
+        if kind == "wordpress" and finished and latest_status in OK_STATUSES:
             crawl = latest_site_crawl(engine, site_id)
             if (crawl and crawl["status"] == "completed_capped"
                     and int(crawl["max_urls"] or 0) < MAX_FULL_CRAWL_URLS):
-                nxt = min(nxt, last + timedelta(minutes=CAPPED_RECRAWL_MINUTES))
+                nxt = min(nxt, finished + timedelta(minutes=CAPPED_RECRAWL_MINUTES))
         sources[kind] = {"configured": configured[kind], "last_success": _iso(last) if last else None,
+                         "last_finished": _iso(finished) if finished else None,
+                         "last_status": latest_status or finished_status,
+                         "effective_interval_minutes": effective_minutes,
                          "blocked_reason": "not_authorized" if blocked else None,
                          "next_at": _iso(nxt) if (cfg["enabled"] and configured[kind] and not blocked) else None,
                          "due": bool(cfg["enabled"] and configured[kind] and not blocked and nxt <= now)}

@@ -126,6 +126,21 @@ def test_plan_due_logic_and_settings(env):
     assert not any(v["due"] for v in plan_for_site(eng, "s2")["sources"].values())
 
 
+def test_partial_wordpress_run_is_not_a_success_and_full_crawl_waits_a_day(env):
+    _mk_site(env["client"], "partial", wp_url="https://partial.example/")
+    recent = _iso(datetime.now(timezone.utc) - timedelta(minutes=5))
+    with env["eng"].begin() as cx:
+        cx.execute(text("INSERT INTO sync_runs(run_id,site_id,source,started_at,finished_at,status,notes) "
+                        "VALUES('partial-run','partial','wordpress_pipeline',:t,:t,'completed_with_errors','{}')"),
+                   {"t": recent})
+    wp = plan_for_site(env["eng"], "partial")["sources"]["wordpress"]
+    assert wp["last_success"] is None
+    assert wp["last_finished"] == recent
+    assert wp["last_status"] == "completed_with_errors"
+    assert wp["effective_interval_minutes"] == 1440
+    assert wp["due"] is False
+
+
 def test_revoked_oauth_stops_google_sync_but_keeps_service_account_gsc(env, monkeypatch):
     from seo_brain.connections import service
 

@@ -158,8 +158,8 @@ export type Ga4SyncStatus = {
 export type SaGscProperty = { property: string; permission: string | null };
 export type SaGscStatus = { configured: boolean; service_account_email: string | null; accessible_properties: SaGscProperty[]; last_check: string | null };
 export type SaGscCheck = { status: 'ok' | 'not_configured' | 'error' | string; service_account_email: string | null; properties: SaGscProperty[]; message?: string; checked_at?: string };
-export type AutoSyncSource = { configured: boolean; last_success: string | null; next_at: string | null; due: boolean };
-export type AutoSyncPlan = { site_id: string; enabled: boolean; interval_hours: number; sources: Record<'wordpress' | 'gsc' | 'ga4', AutoSyncSource> };
+export type AutoSyncSource = { configured: boolean; last_success: string | null; last_finished?: string | null; last_status?: string | null; effective_interval_minutes?: number; next_at: string | null; due: boolean };
+export type AutoSyncPlan = { site_id: string; enabled: boolean; interval_minutes?: number; interval_hours: number; sources: Record<'wordpress' | 'gsc' | 'ga4', AutoSyncSource> };
 export type IntegrationBlock = {
   kind: 'wordpress' | 'gsc' | 'ga4' | string; label: string;
   connection: { status: string; tested_at: string | null; detail: Record<string, unknown> };

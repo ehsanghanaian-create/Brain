@@ -9,6 +9,11 @@ export function intervalFa(hours: number): string {
   return `هر ${hours.toLocaleString('fa-IR')} ساعت`;
 }
 
+export function intervalMinutesFa(minutes: number): string {
+  if (minutes < 60) return `هر ${minutes.toLocaleString('fa-IR')} دقیقه`;
+  return intervalFa(minutes / 60);
+}
+
 export function nextSyncFa(plan: Partial<AutoSyncPlan> | null | undefined): string | null {
   if (!plan?.enabled || !plan.sources) return null;
   const nexts = Object.values(plan.sources).map((s) => s.next_at).filter((n): n is string => Boolean(n));
@@ -25,5 +30,13 @@ export function autoSyncLine(plan: Partial<AutoSyncPlan> | null | undefined): st
   if (!plan) return '';
   if (!plan.enabled) return 'به‌روزرسانی خودکار: خاموش';
   const nxt = nextSyncFa(plan);
-  return `به‌روزرسانی خودکار: ${intervalFa(plan.interval_hours ?? 24)}${nxt ? ` · بعدی: ${nxt}` : ''}`;
+  const minutes = plan.interval_minutes ?? (plan.interval_hours ?? 24) * 60;
+  const wp = plan.sources?.wordpress;
+  const crawlCadence = wp?.configured && wp.effective_interval_minutes && wp.effective_interval_minutes !== minutes
+    ? ` · خزش سایت: ${intervalMinutesFa(wp.effective_interval_minutes)}` : '';
+  const incomplete = Object.entries(plan.sources ?? {})
+    .filter(([, source]) => source.configured && source.last_status === 'completed_with_errors')
+    .map(([kind]) => ({ wordpress: 'وردپرس', gsc: 'سرچ کنسول', ga4: 'آنالیتیکس' })[kind as 'wordpress' | 'gsc' | 'ga4'] ?? kind);
+  const warning = incomplete.length ? ` · همگام‌سازی ناقص: ${incomplete.join('، ')}` : '';
+  return `به‌روزرسانی خودکار: ${intervalMinutesFa(minutes)}${crawlCadence}${nxt ? ` · بعدی: ${nxt}` : ''}${warning}`;
 }

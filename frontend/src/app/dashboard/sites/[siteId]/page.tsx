@@ -13,9 +13,10 @@ export async function generateMetadata({ params }: { params: Promise<{ siteId: s
   return { title: site.data ? site.data.name : 'سایت' };
 }
 
-export default async function SitePage({ params, searchParams }: { params: Promise<{ siteId: string }>; searchParams: Promise<{ tab?: string }> }) {
+export default async function SitePage({ params, searchParams }: { params: Promise<{ siteId: string }>; searchParams: Promise<{ tab?: string; case?: string }> }) {
   const { siteId } = await params;
-  const { tab } = await searchParams;
+  const { tab, case: caseParam } = await searchParams;
+  const initialCaseId = caseParam && /^\d+$/.test(caseParam) ? Number(caseParam) : null;
   const site = await getSite(siteId);
   if (site.error?.status === 404) notFound();
   if (site.error) {
@@ -43,6 +44,7 @@ export default async function SitePage({ params, searchParams }: { params: Promi
         mission={mission.data ?? { site_id: siteId, objective: '', success_metric: '', updated_at: null }}
         portfolioSite={portfolio.data?.sites.find((item) => item.site_id === siteId) ?? null}
         initialTab={tab ?? 'overview'}
+        initialCaseId={initialCaseId}
       />
     </PageContainer>
   );

@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import Engine, text
 
 from ..deps import engine, require_site
+from ..errors import ApiError
 
 router = APIRouter(prefix="/sites/{site_id}/urls", tags=["url-inventory"], dependencies=[Depends(require_site)])
 
@@ -79,3 +80,50 @@ def list_urls(
     return {"site_id": site_id, "items": items, "total": total, "limit": limit, "offset": offset,
             "coverage": {"crawl": dict(crawl) if crawl else None, "gsc_latest_date": latest_gsc_date,
                          "gsc_scope": "observed_top_rows_only", "missing_source_means_zero": False}}
+
+
+@router.get("/detail")
+def url_detail(site_id: str, url: str = Query(min_length=8, max_length=2048),
+               eng: Engine = Depends(engine)) -> dict:
+    """One URL across source inventory, monthly GSC observations and durable issues.
+
+    Months without observed rows are omitted rather than being filled with zero.
+    Search Console's top-row export is partial, so even present monthly totals are
+    labelled as observed rows rather than site-wide or absolute traffic.
+    """
+    params = {"site_id": site_id, "url": url}
+    with eng.connect() as cx:
+        row = cx.execute(text(_URLS + "SELECT * FROM inventory WHERE url=:url LIMIT 1"), params).mappings().first()
+        if not row:
+            raise ApiError(404, "این URL در داده‌های ثبت‌شدهٔ سایت پیدا نشد", code="not_found")
+        months = cx.execute(text("""
+            SELECT substr(date,1,7) AS month, SUM(clicks) AS clicks, SUM(impressions) AS impressions,
+                   CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE NULL END AS position,
+                   MIN(date) AS date_from, MAX(date) AS date_to
+            FROM gsc_daily WHERE site_id=:site_id AND page=:url
+            GROUP BY substr(date,1,7) ORDER BY month DESC LIMIT 12
+        """), params).mappings().all()
+        latest = cx.execute(text("SELECT MAX(date) FROM gsc_daily WHERE site_id=:site_id AND page=:url"), params).scalar()
+        queries = cx.execute(text("""
+            SELECT query,SUM(clicks) AS clicks,SUM(impressions) AS impressions,
+                   CASE WHEN SUM(impressions)>0 THEN SUM(position*impressions)/SUM(impressions) ELSE NULL END AS position
+            FROM gsc_daily WHERE site_id=:site_id AND page=:url
+              AND date>=date((SELECT MAX(date) FROM gsc_daily WHERE site_id=:site_id AND page=:url),'-90 days')
+            GROUP BY query ORDER BY impressions DESC,clicks DESC LIMIT 10
+        """), params).mappings().all()
+        issues = cx.execute(text("""
+            SELECT id,problem_type,severity,status,first_seen,last_seen
+            FROM issue_cases WHERE site_id=:site_id AND url=:url
+            ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END,last_seen DESC LIMIT 20
+        """), params).mappings().all()
+        opportunity_count = int(cx.execute(text("""
+            SELECT COUNT(*) FROM keyword_opportunities
+            WHERE site_id=:site_id AND target_url=:url AND status='new'
+        """), params).scalar() or 0)
+    inventory = dict(row)
+    inventory["sources"] = [source for source, flag in (("wordpress", "has_wordpress"), ("crawl", "has_crawl"), ("gsc", "has_gsc")) if inventory.pop(flag)]
+    return {"site_id": site_id, "url": url, "inventory": inventory,
+            "monthly_gsc": [dict(item) for item in reversed(months)],
+            "gsc_latest_date": latest, "top_queries": [dict(item) for item in queries],
+            "issue_cases": [dict(item) for item in issues], "new_keyword_opportunities": opportunity_count,
+            "coverage": "gsc_observed_top_rows_only", "missing_month_means_zero": False}

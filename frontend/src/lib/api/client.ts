@@ -94,6 +94,19 @@ export type PortfolioOverview = {
   sites: PortfolioSite[];
   recent_activity: PortfolioActivity[];
 };
+export type ActionInboxKind = 'all' | 'issue' | 'keyword' | 'link';
+export type ActionInboxItem = {
+  kind: Exclude<ActionInboxKind, 'all'>; source_id: number; site_id: string; site_name: string;
+  subtype: string; title: string; summary: string; url: string; related_url: string;
+  priority: 'high' | 'medium' | 'low'; score: number | null;
+  evidence: Record<string, unknown>; run_id: string | null; observed_at: string;
+};
+export type ActionInbox = {
+  generated_at: string; site_id: string | null; kind: ActionInboxKind;
+  counts: Record<Exclude<ActionInboxKind, 'all'>, number>;
+  total: number; limit: number; offset: number; items: ActionInboxItem[];
+  scope: string; ranking_note: string;
+};
 export type GraphSummary = { site_id: string; nodes: number; edges: number; by_node_type: Record<string, number>; by_relation_type: Record<string, number>; site: Record<string, unknown> };
 export type SiteMemory = {
   site_id: string;
@@ -149,6 +162,14 @@ export type UrlInventory = {
   site_id: string; items: UrlInventoryItem[]; total: number; limit: number; offset: number;
   coverage: { crawl: { run_id: string; status: string; started_at: string; finished_at: string | null; max_urls: number | null; urls_crawled: number; urls_failed: number } | null;
     gsc_latest_date: string | null; gsc_scope: 'observed_top_rows_only'; missing_source_means_zero: false };
+};
+export type UrlDetail = {
+  site_id: string; url: string; inventory: UrlInventoryItem;
+  monthly_gsc: { month: string; clicks: number; impressions: number; position: number | null; date_from: string; date_to: string }[];
+  gsc_latest_date: string | null;
+  top_queries: { query: string; clicks: number; impressions: number; position: number | null }[];
+  issue_cases: { id: number; problem_type: string; severity: string; status: 'open' | 'resolved'; first_seen: string; last_seen: string }[];
+  new_keyword_opportunities: number; coverage: 'gsc_observed_top_rows_only'; missing_month_means_zero: false;
 };
 export type IssueCase = {
   id: number; problem_type: string; url: string; related_url: string; severity: string;
@@ -338,6 +359,11 @@ export const endpoints = {
   jobs: (limit = 50) => api<JobRun[]>(`/jobs?limit=${limit}`),
   job: (runId: string) => api<JobRun>(`/jobs/${encodeURIComponent(runId)}`),
   portfolioOverview: () => api<PortfolioOverview>('/portfolio/overview'),
+  actionInbox: (params: { siteId?: string; kind?: ActionInboxKind; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams({ kind: params.kind ?? 'all', limit: String(params.limit ?? 20), offset: String(params.offset ?? 0) });
+    if (params.siteId) query.set('site_id', params.siteId);
+    return api<ActionInbox>(`/portfolio/action-inbox?${query}`);
+  },
   sites: () => api<Site[]>('/sites', { cacheSeconds: 10 }),
   site: (id: string) => api<Site>(`/sites/${encodeURIComponent(id)}`, { cacheSeconds: 5 }),
   siteMission: (id: string) => api<SiteMission>(`/sites/${encodeURIComponent(id)}/mission`),
@@ -350,6 +376,7 @@ export const endpoints = {
     query.set('offset', String(params.offset ?? 0));
     return api<UrlInventory>(`/sites/${encodeURIComponent(id)}/urls?${query}`);
   },
+  urlDetail: (id: string, url: string) => api<UrlDetail>(`/sites/${encodeURIComponent(id)}/urls/detail?${new URLSearchParams({ url })}`),
   issueCases: (id: string, params: { status?: 'open' | 'resolved' | 'all'; limit?: number; offset?: number } = {}) => {
     const query = new URLSearchParams({ status: params.status ?? 'open', limit: String(params.limit ?? 50), offset: String(params.offset ?? 0) });
     return api<IssueCases>(`/sites/${encodeURIComponent(id)}/issues?${query}`);

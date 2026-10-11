@@ -5,7 +5,8 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
-import { endpoints, type Health, type PortfolioOverview, type PortfolioSite, type PortfolioSiteState } from '@/lib/api/client';
+import { endpoints, type ActionInbox, type Health, type PortfolioOverview, type PortfolioSite, type PortfolioSiteState } from '@/lib/api/client';
+import { ActionSignalCard } from '@/features/opportunities/components/action-inbox-page';
 import { cn } from '@/lib/utils';
 import {
   IconAlertTriangle, IconArrowLeft, IconBolt, IconBrandWordpress, IconCircleCheck,
@@ -134,7 +135,7 @@ function AttentionPanel({ data }: { data: PortfolioOverview }) {
   );
 }
 
-export function PortfolioDashboard({ data, health }: { data: PortfolioOverview; health: Health | null }) {
+export function PortfolioDashboard({ data, health, inbox }: { data: PortfolioOverview; health: Health | null; inbox: ActionInbox | null }) {
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'all' | PortfolioSiteState>('all');
@@ -178,6 +179,11 @@ export function PortfolioDashboard({ data, health }: { data: PortfolioOverview; 
         <MetricCard title='موجودی محتوا' value={data.totals.content} description='صفحه و نوشته دریافت‌شده از وردپرس؛ مبنای تحلیل و ساخت گراف.' icon={IconFileText} lineClass='bg-sky-500' iconClass='bg-sky-500/10 text-sky-600' footer={<div className='flex justify-between gap-3'><span className='text-muted-foreground'>خزش‌شده</span><span className='font-semibold tabular-nums'>{fa.format(data.totals.crawled)} صفحه</span></div>} />
         <MetricCard title='سایت‌های دارای هدف' value={goalsDefined} description='هدف کاری و معیار موفقیت توسط تیم تعریف می‌شود؛ این عدد نشانهٔ رشد رتبه نیست.' icon={IconTargetArrow} lineClass='bg-violet-500' iconClass='bg-violet-500/10 text-violet-600' footer={<div className='flex justify-between gap-3'><span className='text-muted-foreground'>بدون هدف ثبت‌شده</span><span className='font-semibold tabular-nums'>{fa.format(data.totals.sites - goalsDefined)} سایت</span></div>} />
         <MetricCard title='فرصت‌های لینک' value={data.totals.new_link_suggestions} description='پیشنهادهای جدیدی که هنوز بررسی یا وارد جریان اجرا نشده‌اند.' icon={IconLink} lineClass='bg-amber-500' iconClass='bg-amber-500/10 text-amber-600' footer={<div className='flex justify-between gap-3'><span className='text-muted-foreground'>اولویت بالا</span><span className='font-semibold text-amber-600 dark:text-amber-400'>{fa.format(data.totals.high_link_suggestions)} مورد</span></div>} />
+      </section>
+
+      <section aria-label='اولویت‌های سئو' className='grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(300px,1fr)]'>
+        <Card className='border-border/70 shadow-sm'><CardHeader className='flex flex-row flex-wrap items-start justify-between gap-3'><div><CardTitle className='text-base'>از داده به اقدام</CardTitle><CardDescription className='mt-1'>موارد باز از تحلیل سایت، کلمات و لینک‌ها با مسیر بررسی مشخص</CardDescription></div><Link href='/dashboard/opportunities' className={buttonVariants({ variant: 'outline', size: 'sm' })}>مرکز فرصت‌ها<IconArrowLeft className='size-4' /></Link></CardHeader><CardContent className='space-y-2'>{inbox?.items.length ? inbox.items.map((item) => <ActionSignalCard key={`${item.kind}:${item.site_id}:${item.source_id}`} item={item} compact />) : <p className='rounded-xl border border-dashed p-5 text-sm text-muted-foreground'>{inbox ? 'در داده‌های فعلی مورد باز یا جدیدی ثبت نشده است؛ پوشش هر منبع را جدا بررسی کنید.' : 'صف فرصت‌ها فعلاً در دسترس نیست؛ وضعیت API را بررسی کنید.'}</p>}</CardContent></Card>
+        <Card className='border-border/70 shadow-sm'><CardHeader><CardTitle className='text-base'>ترکیب صف بررسی</CardTitle><CardDescription className='mt-1'>از سه منبع واقعی؛ شمارش با وضعیت باز یا جدید</CardDescription></CardHeader><CardContent className='space-y-4'>{inbox ? <><div className='grid grid-cols-3 gap-2'>{([['پرونده', inbox.counts.issue, 'bg-rose-500'], ['کلمه', inbox.counts.keyword, 'bg-sky-500'], ['لینک', inbox.counts.link, 'bg-violet-500']] as const).map(([label, count, color]) => <div key={label} className='rounded-xl border bg-muted/20 p-3 text-center'><strong className='block text-2xl tabular-nums'>{fa.format(count)}</strong><span className='mt-1 block text-xs text-muted-foreground'>{label}</span><span className={cn('mx-auto mt-2 block h-1 w-8 rounded-full', color)} /></div>)}</div><p className='text-xs leading-6 text-muted-foreground'>امتیازهای سه منبع با هم یکسان نیستند. از هر مورد به شواهد و تصمیم خودش بروید؛ ثبت «انجام شد» اثبات رشد جست‌وجو نیست.</p></> : <p className='text-sm text-muted-foreground'>دادهٔ صف هنوز بارگذاری نشده است.</p>}</CardContent></Card>
       </section>
 
       <section className='grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(310px,1fr)]'>

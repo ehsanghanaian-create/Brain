@@ -44,3 +44,20 @@ def test_inventory_union_filters_pagination_and_site_scope(tmp_path, monkeypatch
     assert client.get(base, params={"source": "invalid"}).status_code == 422
     assert client.get("/api/v1/sites/two/urls").json()["total"] == 1
     assert client.get("/api/v1/sites/missing/urls").status_code == 404
+    with eng.begin() as cx:
+        cx.execute(text("INSERT INTO gsc_daily(site_id,date,page,query,clicks,impressions,position) VALUES('one','2026-09-03','https://one.example/a/','query',2,20,10),('one','2026-10-03','https://one.example/a/','query',4,40,8),('one','2026-10-04','https://one.example/a/','second',1,10,12)"))
+        cx.execute(text("INSERT INTO issue_cases(site_id,fingerprint,problem_type,url,severity,first_seen,last_seen) VALUES('one','one-issue','missing_h1','https://one.example/a/','medium','2026-09-01','2026-10-11')"))
+        cx.execute(text("INSERT INTO keywords(site_id,keyword,normalized) VALUES('one','query','query')"))
+        cx.execute(text("INSERT INTO keyword_opportunities(site_id,keyword_id,kind,target_url,score) VALUES('one',1,'improve_page','https://one.example/a/',0.8)"))
+    detail = client.get(base + "/detail", params={"url": "https://one.example/a/"}).json()
+    assert detail["inventory"]["sources"] == ["wordpress", "crawl", "gsc"]
+    assert [(m["month"], m["clicks"]) for m in detail["monthly_gsc"]] == [("2026-09", 2), ("2026-10", 5)]
+    assert round(detail["monthly_gsc"][-1]["position"], 1) == 8.8
+    assert detail["gsc_latest_date"] == "2026-10-04"
+    assert detail["top_queries"][0]["query"] == "query"
+    assert detail["issue_cases"][0]["problem_type"] == "missing_h1"
+    assert detail["new_keyword_opportunities"] == 1
+    assert detail["missing_month_means_zero"] is False
+    empty = client.get(base + "/detail", params={"url": "https://one.example/c/"}).json()
+    assert empty["monthly_gsc"] == [] and empty["gsc_latest_date"] is None
+    assert client.get(base + "/detail", params={"url": "https://two.example/private/"}).status_code == 404

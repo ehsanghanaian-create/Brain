@@ -18,10 +18,10 @@ import { KeywordEditor } from './keyword-editor';
 
 const PAGE = 25;
 
-export function KeywordsPage({ sites, initialSiteId }: { sites: Site[]; initialSiteId: string }) {
+export function KeywordsPage({ sites, initialSiteId, initialTab = 'list' }: { sites: Site[]; initialSiteId: string; initialTab?: 'list' | 'opps' }) {
   const [siteId, setSiteId] = useState(initialSiteId);
   const [meta, setMeta] = useState<KeywordsMeta | null>(null);
-  const [tab, setTab] = useState('list');
+  const [tab, setTab] = useState<string>(initialTab);
   const [list, setList] = useState<KeywordList | null>(null);
   const [filters, setFilters] = useState({ q: '', status: '', intent: '', priority: '', cluster_id: '', sort: 'updated_at', order: 'desc' });
   const [page, setPage] = useState(0);

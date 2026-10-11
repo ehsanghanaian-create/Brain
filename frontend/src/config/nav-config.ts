@@ -2,14 +2,11 @@ import { NavGroup } from '@/types';
 
 // Hidden from the sidebar and command palette for now; the pages stay reachable by URL.
 export const hiddenNavUrls = new Set([
-  '/dashboard/keywords',
   '/dashboard/content',
   '/dashboard/content-planner',
   '/dashboard/ai-content-test',
   '/dashboard/ai-studio',
-  '/dashboard/ai-models',
-  '/dashboard/internal-linking',
-  '/dashboard/opportunities'
+  '/dashboard/ai-models'
 ]);
 
 /**
@@ -60,8 +57,8 @@ export const navGroups: NavGroup[] = [
         description: 'ارائه‌دهنده‌ها، مدل‌ها، مسیردهی، پرامپت‌ها، بودجه (فاز ۹)' },
       { title: 'لینک‌سازی داخلی', url: '/dashboard/internal-linking', icon: 'linking', items: [],
         description: 'پیشنهاد لینک داخلی و الگوهای یادگرفته‌شده (فاز ۱۳–۱۴)' },
-      { title: 'فرصت‌های سئو', url: '/dashboard/opportunities', icon: 'opportunities', items: [],
-        description: 'صفحات جایگاه ۵–۲۰، CTR پایین، شکاف محتوا (فاز ۱۵)' },
+      { title: 'مرکز فرصت‌های سئو', url: '/dashboard/opportunities', icon: 'opportunities', items: [],
+        description: 'پرونده‌های باز، فرصت‌های کلمه و پیشنهادهای لینک در یک صف با شواهد و مسیر تصمیم' },
       { title: 'مشکلات سئو', url: '/dashboard/problems', icon: 'opportunities', items: [],
         description: 'بررسی و رفع مرحله‌ای مشکلات سایت آزمایشی' }
     ]

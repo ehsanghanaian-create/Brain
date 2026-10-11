@@ -17,10 +17,10 @@ const labels: Record<string, string> = {
 };
 const eventFa = { opened: 'شناسایی شد', reopened: 'دوباره باز شد', resolved: 'رفع آن در خزش کامل تأیید شد' } as const;
 
-export function IssueCasesTab({ siteId }: { siteId: string }) {
+export function IssueCasesTab({ siteId, initialCaseId = null }: { siteId: string; initialCaseId?: number | null }) {
   const [status, setStatus] = useState<'open' | 'resolved'>('open');
   const [page, setPage] = useState(0);
-  const [selected, setSelected] = useState<number | null>(null);
+  const [selected, setSelected] = useState<number | null>(initialCaseId);
   const cases = useQuery({ queryKey: ['issue-cases', siteId, status, page], queryFn: () => endpoints.issueCases(siteId, { status, offset: page * 30, limit: 30 }), staleTime: 30_000 });
   const detail = useQuery({ queryKey: ['issue-case', siteId, selected], queryFn: () => endpoints.issueCase(siteId, selected!), enabled: selected !== null, staleTime: 30_000 });
   const data = cases.data;

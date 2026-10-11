@@ -31,7 +31,7 @@ const fa = new Intl.NumberFormat('fa-IR');
 type SiteTab = 'overview' | 'urls' | 'issues' | 'integrations' | 'automation' | 'phone' | 'brain' | 'settings';
 const validTabs = new Set<SiteTab>(['overview', 'urls', 'issues', 'integrations', 'automation', 'phone', 'brain', 'settings']);
 
-export function SiteDetail({ site, connections, memory, graph, mission, portfolioSite, initialTab }: {
+export function SiteDetail({ site, connections, memory, graph, mission, portfolioSite, initialTab, initialCaseId }: {
   site: Site;
   connections: ConnectionsStatus;
   memory: SiteMemory;
@@ -39,6 +39,7 @@ export function SiteDetail({ site, connections, memory, graph, mission, portfoli
   mission: SiteMission;
   portfolioSite: PortfolioSite | null;
   initialTab: string;
+  initialCaseId: number | null;
 }) {
   const router = useRouter();
   const [mode, setMode] = useState(site.mode);
@@ -153,7 +154,7 @@ export function SiteDetail({ site, connections, memory, graph, mission, portfoli
       </TabsContent>
 
       <TabsContent value='issues' className='space-y-4'>
-        {tab === 'issues' && <IssueCasesTab siteId={site.site_id} />}
+        {tab === 'issues' && <IssueCasesTab siteId={site.site_id} initialCaseId={initialCaseId} />}
       </TabsContent>
 
       <TabsContent value='integrations' className='space-y-4'>

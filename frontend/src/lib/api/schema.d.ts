@@ -100,6 +100,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/portfolio/action-inbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Action Inbox */
+        get: operations["action_inbox_api_v1_portfolio_action_inbox_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ads-data/events": {
         parameters: {
             query?: never;
@@ -4748,6 +4765,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/urls/detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Url Detail
+         * @description One URL across source inventory, monthly GSC observations and durable issues.
+         *
+         *     Months without observed rows are omitted rather than being filled with zero.
+         *     Search Console's top-row export is partial, so even present monthly totals are
+         *     labelled as observed rows rather than site-wide or absolute traffic.
+         */
+        get: operations["url_detail_api_v1_sites__site_id__urls_detail_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites/{site_id}/issues": {
         parameters: {
             query?: never;
@@ -6391,6 +6432,44 @@ export interface operations {
     overview_api_v1_portfolio_overview_get: {
         parameters: {
             query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    action_inbox_api_v1_portfolio_action_inbox_get: {
+        parameters: {
+            query?: {
+                site_id?: string | null;
+                kind?: "all" | "issue" | "keyword" | "link";
+                limit?: number;
+                offset?: number;
+            };
             header?: {
                 "x-api-token"?: string | null;
             };
@@ -17442,6 +17521,43 @@ export interface operations {
                 source?: "all" | "wordpress" | "crawl" | "gsc";
                 limit?: number;
                 offset?: number;
+            };
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    url_detail_api_v1_sites__site_id__urls_detail_get: {
+        parameters: {
+            query: {
+                url: string;
             };
             header?: {
                 "x-api-token"?: string | null;

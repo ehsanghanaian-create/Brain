@@ -18,6 +18,7 @@ from ..deps import engine
 from .site_mission import _read as _mission_value
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
+FULL_WORDPRESS_RUN_SQL = " AND COALESCE(json_extract(CASE WHEN json_valid(notes) THEN notes ELSE '{}' END, '$.stage'), 'full')='full'"
 
 
 def _group_counts(cx, table: str, *, extra: str = "") -> dict[str, int]:
@@ -57,9 +58,13 @@ def _site_operational_state(*, sync_status: str, connections: dict[str, str], ha
         issues.append({"kind": "ga4", "severity": "warning", "message": "داده GA4 کامل در دسترس نیست"})
 
     if sync_status in {"queued", "running"}:
-        return "running", "پردازش داده‌های سایت در حال اجراست", "صبر تا پایان پردازش", issues
+        return "running", "همگام‌سازی کامل وردپرس در حال اجراست", "صبر تا پایان همگام‌سازی کامل", issues
     if sync_status in {"failed", "completed_with_errors"}:
-        return "attention", "آخرین اجرای پردازش ناموفق یا ناقص بوده است", "بررسی خطای آخرین اجرا", issues
+        issues.append({"kind": "wordpress_sync", "severity": "blocking", "message": "آخرین همگام‌سازی کامل وردپرس ناموفق یا ناقص بود"})
+        reason = "آخرین همگام‌سازی کامل وردپرس ناموفق یا ناقص بوده است"
+        if has_content and has_graph:
+            reason += "؛ دادهٔ موجود قابل بررسی است اما ممکن است قدیمی باشد"
+        return "attention", reason, "بررسی خطای همگام‌سازی کامل", issues
     if wp_status == "error":
         return "attention", "اتصال وردپرس برقرار نیست؛ داده موجود ممکن است قدیمی باشد", "اصلاح اتصال وردپرس", issues
     if has_content and has_graph:
@@ -105,21 +110,27 @@ def overview(eng: Engine = Depends(engine)) -> dict[str, Any]:
         for site_id, kind, status in connection_rows:
             connections[str(site_id)].setdefault(str(kind), str(status))
 
-        sync_rows = cx.execute(text(
-            "SELECT site_id, run_id, status, started_at, finished_at, notes "
-            "FROM sync_runs WHERE source = 'wordpress_pipeline' ORDER BY started_at DESC, id DESC"
+        run_columns = "site_id, run_id, status, started_at, finished_at, notes"
+        latest_rows = cx.execute(text(
+            f"SELECT {run_columns} FROM (SELECT {run_columns}, "
+            "ROW_NUMBER() OVER (PARTITION BY site_id ORDER BY started_at DESC, id DESC) AS row_number "
+            "FROM sync_runs WHERE source='wordpress_pipeline'" + FULL_WORDPRESS_RUN_SQL + ") "
+            "WHERE row_number=1"
         )).all()
-        latest_sync: dict[str, dict[str, Any]] = {}
-        activity: list[dict[str, Any]] = []
+        activity_rows = cx.execute(text(
+            f"SELECT {run_columns} FROM sync_runs WHERE source='wordpress_pipeline'"
+            + FULL_WORDPRESS_RUN_SQL + " ORDER BY started_at DESC, id DESC LIMIT 8"
+        )).all()
         names = {str(row["site_id"]): str(row["name"]) for row in site_rows}
-        for site_id, run_id, status, started_at, finished_at, notes in sync_rows:
+        def run_item(row) -> dict[str, Any]:
+            site_id, run_id, status, started_at, finished_at, notes = row
             sid = str(site_id)
             state = _pipeline_state(notes, str(status))
-            item = {
+            return {
                 "site_id": sid,
                 "site_name": names.get(sid, sid),
                 "run_id": run_id,
-                "status": state.get("status") or status,
+                "status": status,
                 "progress": float(state.get("progress") or 0),
                 "step": state.get("step"),
                 "step_fa": state.get("step_fa"),
@@ -127,10 +138,8 @@ def overview(eng: Engine = Depends(engine)) -> dict[str, Any]:
                 "finished_at": state.get("finished_at") or finished_at,
                 "errors": list(state.get("errors") or []),
             }
-            if sid not in latest_sync:
-                latest_sync[sid] = item
-            if len(activity) < 8:
-                activity.append(item)
+        latest_sync = {str(row[0]): run_item(row) for row in latest_rows}
+        activity = [run_item(row) for row in activity_rows]
 
     sites: list[dict[str, Any]] = []
     state_counts = {"ready": 0, "running": 0, "attention": 0, "partial": 0, "not_started": 0}

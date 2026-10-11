@@ -26,9 +26,10 @@ export function GraphMission({ site, siteId, mode, view, onModeChange }: {
   const current = LENSES.find((lens) => lens.key === mode) ?? LENSES[0];
   const graphHasEvidence = view?.mode.key === mode && view.nodes.length > 0;
   const needsData = site && site.state !== 'ready' && !site.setup_steps.graph_ready && !graphHasEvidence;
-  const action = needsData ? { href: `/dashboard/sites/${encodeURIComponent(siteId)}?tab=${site.state === 'attention' ? 'automation' : 'integrations'}`, label: 'تکمیل داده‌های سایت' } : { href: current.href(siteId), label: current.action };
+  const action = needsData ? { href: `/dashboard/sites/${encodeURIComponent(siteId)}?tab=integrations`, label: 'تکمیل داده‌های سایت' } : { href: current.href(siteId), label: current.action };
   const salesObjective = site?.mission.objective.includes('فروش');
-  const nextStep = graphHasEvidence ? salesObjective ? 'بررسی مسیر رشد فروش' : action.label : site?.next_action;
+  const nextStep = site?.state === 'attention' ? site.next_action : graphHasEvidence ? salesObjective ? 'بررسی مسیر رشد فروش' : action.label : site?.next_action;
+  const nextStepHref = site?.state === 'attention' ? `/dashboard/sites/${encodeURIComponent(siteId)}?tab=integrations` : graphHasEvidence && salesObjective ? `/dashboard/sales?site=${encodeURIComponent(siteId)}` : action.href;
   return (
     <section className='space-y-3' aria-label='هدف و مسیر تحلیل سایت'>
       <div className='overflow-hidden rounded-2xl border border-sky-500/20 bg-gradient-to-l from-sky-500/[0.10] via-card to-violet-500/[0.06] p-4 shadow-sm sm:p-5'>
@@ -45,8 +46,8 @@ export function GraphMission({ site, siteId, mode, view, onModeChange }: {
         </div>
         {site && <div className='mt-4 flex flex-wrap items-center gap-2 border-t border-border/60 pt-3 text-xs'>
           <Badge variant='secondary'>نقشه: {graphHasEvidence ? 'دارای شواهد قابل بررسی' : 'در انتظار شواهد این نما'}</Badge>
-          {site.state !== 'ready' && <span className='text-muted-foreground'>پردازش پس‌زمینه: {site.state_reason}</span>}
-          <span className='text-muted-foreground'>قدم بعدی: <strong className='text-foreground'>{nextStep}</strong></span>
+          {site.state !== 'ready' && <span className='text-muted-foreground'>وضعیت منبع: {site.state_reason}</span>}
+          <span className='text-muted-foreground'>قدم بعدی: <Link href={nextStepHref} className='font-semibold text-foreground underline-offset-4 hover:underline focus-visible:rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'>{nextStep}</Link></span>
         </div>}
       </div>
       {salesObjective && <Link href={`/dashboard/sales?site=${encodeURIComponent(siteId)}`} className='flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/25 bg-primary/[0.05] px-4 py-3 text-sm font-medium transition-colors hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'><span>برای هدف فروش، روند صفحات محصول و دسته‌بندی و اقدام‌های مرتبط را ببینید.</span><span className='inline-flex items-center gap-1 text-primary'>مسیر رشد فروش <IconArrowLeft className='size-4' /></span></Link>}

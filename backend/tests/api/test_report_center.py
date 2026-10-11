@@ -270,7 +270,7 @@ def test_scheduler_minutes_interval_and_due_logic(client):
     assert sch.auto_sync_settings(eng, "demo")["interval_minutes"] == 120
     sch.save_auto_sync_settings(eng, "demo", interval_minutes=10)
     assert sch.auto_sync_settings(eng, "demo")["interval_minutes"] == 10
-    # wordpress پیکربندی شده (wp_url دارد): بدون اجرای موفق → due؛ اجرای موفق ۵ دقیقه پیش → not due؛ ۱۱ دقیقه پیش → due
+    # Full WordPress sync has a 24-hour minimum interval, independent of the 10-minute Google refresh tick.
     from datetime import datetime, timedelta, timezone
     now = datetime.now(timezone.utc)
     plan = sch.plan_for_site(eng, "demo", now=now)
@@ -282,7 +282,7 @@ def test_scheduler_minutes_interval_and_due_logic(client):
     assert sch.plan_for_site(eng, "demo", now=now)["sources"]["wordpress"]["due"] is False
     with eng.begin() as cx:
         cx.execute(text("UPDATE sync_runs SET started_at=:a, finished_at=:a WHERE run_id='w1'"),
-                   {"a": sch._iso(now - timedelta(minutes=11))})
+                   {"a": sch._iso(now - timedelta(days=1, minutes=1))})
     assert sch.plan_for_site(eng, "demo", now=now)["sources"]["wordpress"]["due"] is True
 
 

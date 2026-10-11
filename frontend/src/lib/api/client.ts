@@ -148,6 +148,17 @@ export type UrlInventory = {
   coverage: { crawl: { run_id: string; status: string; started_at: string; finished_at: string | null; max_urls: number | null; urls_crawled: number; urls_failed: number } | null;
     gsc_latest_date: string | null; gsc_scope: 'observed_top_rows_only'; missing_source_means_zero: false };
 };
+export type IssueCase = {
+  id: number; problem_type: string; url: string; related_url: string; severity: string;
+  status: 'open' | 'resolved'; detail: Record<string, unknown>; first_seen: string; last_seen: string;
+  last_run_id: string | null; seen_count: number; resolved_at: string | null;
+};
+export type IssueCases = { site_id: string; items: IssueCase[]; total: number; limit: number; offset: number;
+  counts: { open: number; resolved: number }; resolution_policy: 'complete_successful_crawl_only' };
+export type IssueCaseDetail = IssueCase & {
+  observations: { run_id: string; severity: string; detail: Record<string, unknown>; observed_at: string }[];
+  events: { run_id: string | null; event_type: 'opened' | 'reopened' | 'resolved'; created_at: string }[];
+};
 export type WpSyncQueued = { status: 'queued' | 'already_running' | 'not_queued' | string; job_id?: string | null; run_id?: string | null; stage?: string; step?: string | null; error?: string | null };
 export type GscSyncCoverage = { date_from: string | null; date_to: string | null; rows: number; queries: number; important_queries: number; pages: number; content_snapshots: number; keyword_opportunities?: number; last_gsc_sync?: string | null };
 export type GscSyncStatus = {
@@ -335,6 +346,11 @@ export const endpoints = {
     query.set('offset', String(params.offset ?? 0));
     return api<UrlInventory>(`/sites/${encodeURIComponent(id)}/urls?${query}`);
   },
+  issueCases: (id: string, params: { status?: 'open' | 'resolved' | 'all'; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams({ status: params.status ?? 'open', limit: String(params.limit ?? 50), offset: String(params.offset ?? 0) });
+    return api<IssueCases>(`/sites/${encodeURIComponent(id)}/issues?${query}`);
+  },
+  issueCase: (id: string, caseId: number) => api<IssueCaseDetail>(`/sites/${encodeURIComponent(id)}/issues/${caseId}`),
   graphSummary: (id: string) => api<GraphSummary>(`/sites/${encodeURIComponent(id)}/graph/summary`, { cacheSeconds: 10 }),
   memory: (id: string) => api<SiteMemory>(`/sites/${encodeURIComponent(id)}/memory`, { cacheSeconds: 5 }),
   // phase 3 — sites management

@@ -22,6 +22,7 @@ from ..common.config import SiteConfig
 from ..common.logging_setup import new_run_id
 from ..database.db import j, rows, upsert, utcnow
 from ..normalizer import normalize_url
+from .issue_cases import reconcile_issue_cases
 
 log = logging.getLogger("analysis.seo")
 
@@ -106,7 +107,7 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
     full_crawl = None
     sitemap_urls = 0
     site_crawls = []
-    for crawl in rows(conn, "SELECT started_at,status,notes FROM crawl_runs WHERE site_id=? AND status IN ('completed','completed_capped') ORDER BY started_at DESC LIMIT 100", (sid,)):
+    for crawl in rows(conn, "SELECT started_at,status,notes,urls_failed FROM crawl_runs WHERE site_id=? AND status IN ('completed','completed_capped') ORDER BY started_at DESC LIMIT 100", (sid,)):
         try:
             notes = json.loads(crawl["notes"] or "{}")
         except (ValueError, TypeError):
@@ -401,7 +402,12 @@ def run_analysis(conn: sqlite3.Connection, site: SiteConfig) -> dict:
                      f"کاهش ترافیک GA4 نسبت به دوره قبل: {pr} → {rc} session ({drop*100:.0f}٪ افت) — محتوا و رتبه‌ها را بررسی کنید",
                      0.7, {"prev_sessions": pr, "recent_sessions": rc}, run_id=run_id); counts["opportunities"] += 1
 
-    analysis_notes = {**counts, "link_graph_complete": link_graph_complete,
+    latest_site_crawl = site_crawls[0][0] if site_crawls else None
+    cases = reconcile_issue_cases(conn, sid, run_id, allow_resolve=bool(
+        latest_site_crawl and latest_site_crawl["status"] == "completed"
+        and not latest_site_crawl["urls_failed"] and sitemap_urls > 0 and link_graph_complete
+    ))
+    analysis_notes = {**counts, "link_graph_complete": link_graph_complete, "cases": cases,
                       "sitemap_urls": sitemap_urls, "fresh_sitemap_pages": fresh_sitemap_pages}
     conn.execute("UPDATE sync_runs SET finished_at=?, status='completed', rows_written=?, notes=? WHERE run_id=?",
                  (utcnow(), counts["problems"] + counts["opportunities"], j(analysis_notes), run_id))

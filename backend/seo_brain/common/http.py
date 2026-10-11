@@ -138,10 +138,11 @@ class ReadOnlyClient:
 
     def __init__(self, user_agent: str, timeout: float = 20.0, max_retries: int = 3,
                  min_interval: float = 1.0, follow_redirects: bool = True, auth: tuple[str, str] | None = None,
-                 verify: bool = True):
+                 verify: bool = True, transport: httpx.BaseTransport | None = None):
         self._client = httpx.Client(
             headers={"User-Agent": user_agent, "Accept-Language": "fa,en;q=0.8"},
-            timeout=timeout, follow_redirects=follow_redirects, auth=auth, verify=verify, proxy=site_proxy(),
+            timeout=timeout, follow_redirects=follow_redirects, auth=auth, verify=verify,
+            proxy=None if transport else site_proxy(), transport=transport,
         )
         self.max_retries = max_retries
         self.rate = RateLimiter(min_interval=min_interval)

@@ -38,7 +38,9 @@ class WordPressClient:
             if a:
                 auth = a.basic
                 self.authenticated = True
-        self.http = ReadOnlyClient(user_agent=user_agent, min_interval=min_interval, auth=auth)
+        from .origin import wordpress_rest_transport
+        self.http = ReadOnlyClient(user_agent=user_agent, min_interval=min_interval, auth=auth,
+                                   transport=wordpress_rest_transport(self.base))
         self.save_raw = save_raw
         self.raw_dir: Path = raw_data_dir() / "wordpress" / site_id
         if save_raw:

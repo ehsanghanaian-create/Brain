@@ -404,6 +404,7 @@ class WordPressSyncOrchestrator:
 def _default_probe(url: str) -> int | None:
     import httpx
     try:
-        return httpx.get(url, timeout=10, follow_redirects=True, headers={"User-Agent": "SEO-Brain/0.2 (+local; read-only)"}).status_code
+        from .origin import wordpress_get
+        return wordpress_get(url, timeout=10).status_code
     except httpx.HTTPError:
         return None

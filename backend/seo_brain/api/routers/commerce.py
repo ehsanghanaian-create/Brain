@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 from functools import lru_cache
 from time import time
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import Engine, text
@@ -29,6 +29,13 @@ def _page_kind(url: str) -> str:
     if path == "shop" or path.startswith("shop/") or path == "categories":
         return "shop"
     return "other"
+
+
+def _url_key(url: str) -> str:
+    """Join source URLs despite a trailing slash or encoded Persian path."""
+    parts = urlsplit(url)
+    path = unquote(parts.path).rstrip("/") or "/"
+    return f"{(parts.hostname or '').lower()}{path}{'?' + parts.query if parts.query else ''}"
 
 
 @lru_cache(maxsize=128)
@@ -93,7 +100,7 @@ def sales_path(site_id: str, days: int = Query(28, ge=7, le=90), eng: Engine = D
                     "coverage": "gsc_observed_top_rows_only", "sales_measurement": "unavailable",
                     "inventory": {kind: sum(_page_kind(url) == kind for url in known_urls)
                                   for kind in ("product", "category", "shop")},
-                    "stages": [], "daily": [], "top_pages": [], "previous_available": False,
+                    "stages": [], "daily": [], "top_pages": [], "priority_pages": [], "previous_available": False,
                     "previous_total_clicks": None}
 
         end = date.fromisoformat(latest)
@@ -105,14 +112,31 @@ def sales_path(site_id: str, days: int = Query(28, ge=7, le=90), eng: Engine = D
             FROM gsc_daily WHERE site_id=:s AND date BETWEEN :a AND :b
             GROUP BY date, page
         """), {"s": site_id, "a": previous_start.isoformat(), "b": latest}).all()
-        issues = dict(cx.execute(text("""
+        issue_rows = cx.execute(text("""
             SELECT url, COUNT(*) FROM issue_cases
             WHERE site_id=:s AND status='open' GROUP BY url
-        """), {"s": site_id}).all())
-        opportunities = dict(cx.execute(text("""
+        """), {"s": site_id}).all()
+        opportunity_rows = cx.execute(text("""
             SELECT target_url, COUNT(*) FROM keyword_opportunities
             WHERE site_id=:s AND status='new' AND target_url IS NOT NULL GROUP BY target_url
-        """), {"s": site_id}).all())
+        """), {"s": site_id}).all()
+        link_rows = cx.execute(text("""
+            SELECT target_url, COUNT(*) FROM link_suggestions
+            WHERE site_id=:s AND status='new' AND target_url IS NOT NULL GROUP BY target_url
+        """), {"s": site_id}).all()
+
+    source_urls = {_url_key(url): url for url in known_urls}
+    def counts_by_url(rows):
+        counts: dict[str, int] = defaultdict(int)
+        for url, count in rows:
+            key = _url_key(url)
+            source_urls.setdefault(key, url)
+            counts[key] += int(count)
+        return counts
+
+    issues = counts_by_url(issue_rows)
+    opportunities = counts_by_url(opportunity_rows)
+    links = counts_by_url(link_rows)
 
     stages = {kind: {"kind": kind, "clicks": 0, "impressions": 0, "pages_observed": set()}
               for kind in ("product", "category", "shop")}
@@ -126,27 +150,53 @@ def sales_path(site_id: str, days: int = Query(28, ge=7, le=90), eng: Engine = D
         if kind == "other":
             continue
         clicks, impressions = int(clicks or 0), int(impressions or 0)
+        key = _url_key(page)
+        source_urls.setdefault(key, page)
         if day < start.isoformat():
-            previous[page] += clicks
-            previous_seen.add(page)
+            previous[key] += clicks
+            previous_seen.add(key)
             previous_available = True
             continue
         stage = stages[kind]
         stage["clicks"] += clicks
         stage["impressions"] += impressions
-        stage["pages_observed"].add(page)
+        stage["pages_observed"].add(key)
         series = daily.setdefault(day, {"date": day, "product": 0, "category": 0, "shop": 0})
         series[kind] += clicks
-        item = pages.setdefault(page, {"url": page, "kind": kind, "clicks": 0, "impressions": 0})
+        item = pages.setdefault(key, {"url": page, "kind": kind, "clicks": 0, "impressions": 0})
         item["clicks"] += clicks
         item["impressions"] += impressions
 
     top_pages = sorted(pages.values(), key=lambda row: (-row["impressions"], -row["clicks"], row["url"]))[:10]
-    for item in top_pages:
+    for item in pages.values():
+        key = _url_key(item["url"])
         item["ctr"] = round(item["clicks"] / item["impressions"], 4) if item["impressions"] else None
-        item["previous_clicks"] = previous[item["url"]] if item["url"] in previous_seen else None
-        item["open_issues"] = int(issues.get(item["url"], 0))
-        item["new_keyword_opportunities"] = int(opportunities.get(item["url"], 0))
+        item["previous_clicks"] = previous[key] if key in previous_seen else None
+        item["open_issues"] = issues.get(key, 0)
+        item["new_keyword_opportunities"] = opportunities.get(key, 0)
+        item["new_link_suggestions"] = links.get(key, 0)
+    priority_pages = []
+    for key in issues.keys() | opportunities.keys() | links.keys():
+        url = source_urls[key]
+        kind = _page_kind(url)
+        if kind == "other":
+            continue
+        observed = pages.get(key)
+        priority_pages.append({"url": observed["url"] if observed else url, "kind": kind,
+                               "clicks": observed["clicks"] if observed else None,
+                               "impressions": observed["impressions"] if observed else None,
+                               "open_issues": issues.get(key, 0),
+                               "new_keyword_opportunities": opportunities.get(key, 0),
+                               "new_link_suggestions": links.get(key, 0)})
+    priority_pages.sort(key=lambda row: (-(row["impressions"] if row["impressions"] is not None else -1),
+                                         -row["open_issues"], -row["new_keyword_opportunities"],
+                                         -row["new_link_suggestions"], row["url"]))
+    selected_priority = []
+    for signal in ("open_issues", "new_keyword_opportunities", "new_link_suggestions"):
+        match = next((row for row in priority_pages if row[signal] > 0), None)
+        if match is not None and match not in selected_priority:
+            selected_priority.append(match)
+    selected_priority.extend(row for row in priority_pages if row not in selected_priority)
     return {"site_id": site_id, "generated_at": utcnow(), "days": days,
             "latest_gsc_date": latest,
             "window": {"from": start.isoformat(), "to": latest},
@@ -157,5 +207,6 @@ def sales_path(site_id: str, days: int = Query(28, ge=7, le=90), eng: Engine = D
             "stages": [{**{k: v for k, v in stage.items() if k != "pages_observed"},
                         "pages_observed": len(stage["pages_observed"])} for stage in stages.values()],
             "daily": [daily[day] for day in sorted(daily)], "top_pages": top_pages,
+            "priority_pages": selected_priority[:10],
             "previous_available": previous_available,
             "previous_total_clicks": sum(previous.values()) if previous_available else None}

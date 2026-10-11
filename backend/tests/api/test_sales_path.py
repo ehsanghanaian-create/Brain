@@ -35,6 +35,15 @@ def test_sales_path_scopes_commercial_pages_and_preserves_unknown_sales(tmp_path
         """))
         cx.execute(text("""INSERT INTO issue_cases(site_id,fingerprint,problem_type,url,severity,first_seen,last_seen)
                            VALUES('one','issue','missing_h1','https://one.example/category/shirts/','medium','2026-10-10','2026-10-10')"""))
+        cx.execute(text("""INSERT INTO keywords
+            (site_id,keyword,normalized,created_at,updated_at)
+            VALUES ('one','shirt','shirt','2026-10-10','2026-10-10')"""))
+        cx.execute(text("""INSERT INTO keyword_opportunities
+            (site_id,keyword_id,kind,target_url,score,created_at,updated_at)
+            VALUES ('one',1,'missing_content','https://one.example/product/shirt',0.7,'2026-10-10','2026-10-10')"""))
+        cx.execute(text("""INSERT INTO link_suggestions
+            (site_id,kind,source_node_id,target_node_id,target_url,score,confidence,created_at,updated_at)
+            VALUES ('one','contextual','source','target','https://one.example/product/shirt',0.8,'high','2026-10-10','2026-10-10')"""))
     response = client.get("/api/v1/sites/one/commerce/path", params={"days": 28})
     assert response.status_code == 200
     data = response.json()
@@ -47,6 +56,11 @@ def test_sales_path_scopes_commercial_pages_and_preserves_unknown_sales(tmp_path
     assert len(data["top_pages"]) == 2
     category = next(item for item in data["top_pages"] if item["kind"] == "category")
     assert category["open_issues"] == 1 and category["previous_clicks"] is None
+    product = next(item for item in data["top_pages"] if item["kind"] == "product")
+    assert product["new_keyword_opportunities"] == 1
+    assert product["new_link_suggestions"] == 1
+    assert any(item["url"] == product["url"] and item["new_link_suggestions"] == 1
+               for item in data["priority_pages"])
     assert all("two.example" not in item["url"] for item in data["top_pages"])
     assert client.get("/api/v1/sites/one/commerce/measurement").json()["status"] == "not_configured"
     with eng.begin() as cx:

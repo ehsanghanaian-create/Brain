@@ -240,7 +240,8 @@ export type SalesPath = {
   inventory: Record<'product' | 'category' | 'shop', number>;
   stages: { kind: 'product' | 'category' | 'shop'; clicks: number; impressions: number; pages_observed: number }[];
   daily: { date: string; product: number; category: number; shop: number }[];
-  top_pages: { url: string; kind: 'product' | 'category' | 'shop'; clicks: number; impressions: number; ctr: number | null; previous_clicks: number | null; open_issues: number; new_keyword_opportunities: number }[];
+  top_pages: { url: string; kind: 'product' | 'category' | 'shop'; clicks: number; impressions: number; ctr: number | null; previous_clicks: number | null; open_issues: number; new_keyword_opportunities: number; new_link_suggestions: number }[];
+  priority_pages: { url: string; kind: 'product' | 'category' | 'shop'; clicks: number | null; impressions: number | null; open_issues: number; new_keyword_opportunities: number; new_link_suggestions: number }[];
 };
 export type SalesMeasurement = {
   status: 'reported' | 'not_configured' | 'error'; source: 'ga4_data_api'; days: number;

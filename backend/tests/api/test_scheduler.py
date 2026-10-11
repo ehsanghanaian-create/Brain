@@ -133,6 +133,10 @@ def test_partial_wordpress_run_is_not_a_success_and_full_crawl_waits_a_day(env):
         cx.execute(text("INSERT INTO sync_runs(run_id,site_id,source,started_at,finished_at,status,notes) "
                         "VALUES('partial-run','partial','wordpress_pipeline',:t,:t,'completed_with_errors','{}')"),
                    {"t": recent})
+        cx.execute(text("INSERT INTO sync_runs(run_id,site_id,source,started_at,finished_at,status,notes) "
+                        "VALUES('graph-only','partial','wordpress_pipeline',:t,:t,'succeeded',:notes)"),
+                   {"t": _iso(datetime.now(timezone.utc) - timedelta(minutes=2)),
+                    "notes": json.dumps({"stage": "graph_only"})})
     wp = plan_for_site(env["eng"], "partial")["sources"]["wordpress"]
     assert wp["last_success"] is None
     assert wp["last_finished"] == recent

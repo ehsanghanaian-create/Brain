@@ -41,6 +41,7 @@ MIN_FULL_CRAWL_URLS = 200
 MAX_FULL_CRAWL_URLS = 2000
 CAPPED_RECRAWL_MINUTES = 10
 MIN_WORDPRESS_INTERVAL_MINUTES = 24 * 60  # A full site crawl must not run every Google refresh tick.
+FULL_WORDPRESS_RUN_SQL = " AND COALESCE(json_extract(CASE WHEN json_valid(notes) THEN notes ELSE '{}' END, '$.stage'), 'full')='full'"
 
 
 def _utcnow() -> datetime:
@@ -137,26 +138,29 @@ def recover_stale_runs(engine: Engine, stale_after_minutes: int = 120) -> int:
 
 
 def last_success(engine: Engine, site_id: str, source: str) -> datetime | None:
+    full_only = FULL_WORDPRESS_RUN_SQL if source == "wordpress_pipeline" else ""
     with engine.connect() as cx:
         r = cx.execute(text("SELECT finished_at FROM sync_runs WHERE site_id=:s AND source=:src AND status='succeeded' "
-                            "ORDER BY started_at DESC LIMIT 1"), {"s": site_id, "src": source}).first()
+                            + full_only + " ORDER BY started_at DESC LIMIT 1"), {"s": site_id, "src": source}).first()
     return _parse(r[0]) if r else None
 
 
 def last_finished(engine: Engine, site_id: str, source: str) -> tuple[datetime | None, str | None]:
     """A partial run still sets the next cadence, but must never be labelled a success."""
+    full_only = FULL_WORDPRESS_RUN_SQL if source == "wordpress_pipeline" else ""
     with engine.connect() as cx:
         r = cx.execute(text("SELECT finished_at, status FROM sync_runs WHERE site_id=:s AND source=:src "
                             "AND status IN ('succeeded','completed_with_errors') "
-                            "ORDER BY started_at DESC LIMIT 1"), {"s": site_id, "src": source}).first()
+                            + full_only + " ORDER BY started_at DESC LIMIT 1"), {"s": site_id, "src": source}).first()
     return (_parse(r[0]), r[1]) if r else (None, None)
 
 
 def _failure_streak(engine: Engine, site_id: str, source: str) -> tuple[int, datetime | None, str | None]:
     """(consecutive failed runs since the last success, started_at of the newest run, its status)."""
+    full_only = FULL_WORDPRESS_RUN_SQL if source == "wordpress_pipeline" else ""
     with engine.connect() as cx:
         rows = cx.execute(text("SELECT status, started_at FROM sync_runs WHERE site_id=:s AND source=:src "
-                               "ORDER BY started_at DESC, id DESC LIMIT 10"), {"s": site_id, "src": source}).all()
+                               + full_only + " ORDER BY started_at DESC, id DESC LIMIT 10"), {"s": site_id, "src": source}).all()
     if not rows:
         return 0, None, None
     streak = 0

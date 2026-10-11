@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ApiError, endpoints, type ConnectionsStatus, type ContentKnowledgePack, type GraphSummary, type InitializeResult, type JobRun, type Site, type SiteMemory } from '@/lib/api/client';
+import { ApiError, endpoints, type ConnectionsStatus, type ContentKnowledgePack, type GraphSummary, type InitializeResult, type JobRun, type PortfolioSite, type Site, type SiteMemory, type SiteMission } from '@/lib/api/client';
 import { useQuery } from '@tanstack/react-query';
 import { IconActivity, IconAdjustments, IconBrain, IconCheck, IconClock, IconExternalLink, IconPhone, IconPlugConnected, IconRefresh, IconSettings, IconWorld } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
@@ -24,17 +24,20 @@ import { Ga4IntegrationCard } from './ga4-integration-card';
 import { GoogleAccountCard } from './google-account-card';
 import { GscIntegrationCard } from './gsc-sync-card';
 import { SiteBrainForm } from './site-brain-form';
+import { SiteMissionForm } from './site-mission-form';
 import { WordPressIntegrationCard } from './wordpress-sync-card';
 
 const fa = new Intl.NumberFormat('fa-IR');
 type SiteTab = 'overview' | 'urls' | 'issues' | 'integrations' | 'automation' | 'phone' | 'brain' | 'settings';
 const validTabs = new Set<SiteTab>(['overview', 'urls', 'issues', 'integrations', 'automation', 'phone', 'brain', 'settings']);
 
-export function SiteDetail({ site, connections, memory, graph, initialTab }: {
+export function SiteDetail({ site, connections, memory, graph, mission, portfolioSite, initialTab }: {
   site: Site;
   connections: ConnectionsStatus;
   memory: SiteMemory;
   graph: GraphSummary | null;
+  mission: SiteMission;
+  portfolioSite: PortfolioSite | null;
   initialTab: string;
 }) {
   const router = useRouter();
@@ -84,7 +87,7 @@ export function SiteDetail({ site, connections, memory, graph, initialTab }: {
   const category = BUSINESS_CATEGORIES.find((c) => c.value === site.business_type)?.label ?? site.business_type ?? '—';
   const connectionEntries = [connections.status.wordpress, connections.status.gsc, connections.status.ga4];
   const connected = connectionEntries.filter((c) => c?.ok).length;
-  const readiness = Math.round(((connected + (site.workspace_path ? 1 : 0) + (graph?.nodes ? 1 : 0)) / 5) * 100);
+  const readiness = portfolioSite?.setup_progress;
 
   return (
     <Tabs value={tab} onValueChange={changeTab} className='gap-5'>
@@ -102,18 +105,19 @@ export function SiteDetail({ site, connections, memory, graph, initialTab }: {
       </div>
 
       <TabsContent value='overview' className='space-y-5'>
+        <SiteMissionForm siteId={site.site_id} initial={mission} />
         <section className='overflow-hidden rounded-2xl border bg-gradient-to-bl from-sky-500/10 via-card to-card'>
           <div className='grid gap-5 p-5 lg:grid-cols-[1fr_auto] lg:items-center'>
             <div className='min-w-0'>
               <div className='flex flex-wrap items-center gap-2'>
                 <span className='rounded-xl bg-sky-500/10 p-2 text-sky-500'><IconWorld className='size-5' /></span>
                 <h2 className='text-xl font-semibold'>{site.name}</h2>
-                <Badge variant={readiness >= 80 ? 'default' : 'secondary'}>{readiness.toLocaleString('fa-IR')}٪ آماده</Badge>
+                <Badge variant={readiness != null && readiness >= 80 ? 'default' : 'secondary'}>{readiness == null ? 'آمادگی نامشخص' : `${readiness.toLocaleString('fa-IR')}٪ آمادگی داده`}</Badge>
               </div>
               <a href={site.canonical_url} target='_blank' rel='noreferrer' dir='ltr' className='mt-2 inline-flex max-w-full items-center gap-1 truncate text-sm text-muted-foreground hover:text-foreground'>
                 {site.canonical_url}<IconExternalLink className='size-3.5' />
               </a>
-              <p className='mt-3 max-w-2xl text-sm leading-7 text-muted-foreground'>سلامت داده‌ها، اتصال سرویس‌ها، عملیات در حال اجرا و حافظه اختصاصی این سایت را از یک نقطه مدیریت کنید.</p>
+              <p className='mt-3 max-w-2xl text-sm leading-7 text-muted-foreground'>{portfolioSite ? `قدم بعدی: ${portfolioSite.next_action}. ${portfolioSite.state_reason}` : 'سلامت داده‌ها، اتصال سرویس‌ها و عملیات این سایت را از اینجا بررسی کنید.'}</p>
             </div>
             <div className='grid grid-cols-3 gap-2 text-center'>
               <MiniMetric label='اتصال فعال' value={`${connected.toLocaleString('fa-IR')} از ۳`} />

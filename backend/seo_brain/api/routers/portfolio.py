@@ -15,6 +15,7 @@ from sqlalchemy import Engine, text
 
 from ...db.repositories.base import utcnow
 from ..deps import engine
+from .site_mission import _read as _mission_value
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
@@ -93,6 +94,9 @@ def overview(eng: Engine = Depends(engine)) -> dict[str, Any]:
         planned = _group_counts(cx, "content_items")
         new_links = _group_counts(cx, "link_suggestions", extra="WHERE status = 'new'")
         high_links = _group_counts(cx, "link_suggestions", extra="WHERE status = 'new' AND confidence = 'high'")
+        missions = {str(site_id): _mission_value(value) for site_id, value in cx.execute(text(
+            "SELECT site_id, value FROM site_settings WHERE key='mission'"
+        )).all()}
 
         connection_rows = cx.execute(text(
             "SELECT site_id, kind, status FROM site_connections ORDER BY tested_at DESC"
@@ -156,6 +160,7 @@ def overview(eng: Engine = Depends(engine)) -> dict[str, Any]:
             "state": state,
             "state_reason": state_reason,
             "next_action": next_action,
+            "mission": missions.get(sid, {"objective": "", "success_metric": ""}),
             "issues": issues,
             "setup_progress": sum(setup_steps) * 25,
             "setup_steps": {

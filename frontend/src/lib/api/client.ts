@@ -80,6 +80,7 @@ export type PortfolioActivity = {
 export type PortfolioSite = {
   site_id: string; name: string; canonical_url: string; wp_url: string | null; mode: 'manual' | 'assisted' | 'autopilot';
   state: PortfolioSiteState; state_reason: string; next_action: string;
+  mission: { objective: string; success_metric: string };
   issues: { kind: string; severity: 'blocking' | 'warning'; message: string }[];
   setup_progress: number; setup_steps: { wordpress_configured: boolean; content_synced: boolean; crawl_ready: boolean; graph_ready: boolean };
   connections: Record<string, string>; latest_sync: PortfolioActivity | null;
@@ -105,6 +106,7 @@ export type SiteMemory = {
   successful_patterns: Record<string, unknown>[];
   updated_at: string | null;
 };
+export type SiteMission = { site_id: string; objective: string; success_metric: string; updated_at: string | null };
 export type KnowledgeEvidence = { node_id: string; type: string; label: string; url: string | null; pagerank: number; community: number | null; facts: Record<string, unknown>; connections?: number };
 export type ContentKnowledgePack = {
   id: number; site_id: string; version: number; hash: string; status: string; rendered: string;
@@ -335,9 +337,11 @@ export const endpoints = {
   health: () => api<Health>('/health'),
   jobs: (limit = 50) => api<JobRun[]>(`/jobs?limit=${limit}`),
   job: (runId: string) => api<JobRun>(`/jobs/${encodeURIComponent(runId)}`),
-  portfolioOverview: () => api<PortfolioOverview>('/portfolio/overview', { cacheSeconds: 10 }),
+  portfolioOverview: () => api<PortfolioOverview>('/portfolio/overview'),
   sites: () => api<Site[]>('/sites', { cacheSeconds: 10 }),
   site: (id: string) => api<Site>(`/sites/${encodeURIComponent(id)}`, { cacheSeconds: 5 }),
+  siteMission: (id: string) => api<SiteMission>(`/sites/${encodeURIComponent(id)}/mission`),
+  putSiteMission: (id: string, body: Pick<SiteMission, 'objective' | 'success_metric'>) => api<SiteMission>(`/sites/${encodeURIComponent(id)}/mission`, { method: 'PUT', json: body }),
   urlInventory: (id: string, params: { search?: string; source?: 'all' | 'wordpress' | 'crawl' | 'gsc'; limit?: number; offset?: number } = {}) => {
     const query = new URLSearchParams();
     if (params.search) query.set('search', params.search);

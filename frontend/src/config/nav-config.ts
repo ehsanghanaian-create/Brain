@@ -19,7 +19,7 @@ export const hiddenNavUrls = new Set([
  */
 export const navGroups: NavGroup[] = [
   {
-    label: 'نمای کلی',
+    label: 'شروع و سایت‌ها',
     items: [
       { title: 'داشبورد', url: '/dashboard/overview', icon: 'dashboard', shortcut: ['d', 'd'], items: [],
         description: 'وضعیت کلی سایت‌ها، گراف دانش و سلامت سیستم' },
@@ -30,16 +30,16 @@ export const navGroups: NavGroup[] = [
     ]
   },
   {
-    label: 'دانش',
+    label: 'تحلیل سایت',
     items: [
-      { title: 'گراف دانش', url: '/dashboard/graph', icon: 'graph', shortcut: ['g', 'g'], items: [],
-        description: 'گراف صفحات، کوئری‌ها، موجودیت‌ها و اسکیما (فاز ۴)' },
+      { title: 'نقشه تصمیم', url: '/dashboard/graph', icon: 'graph', shortcut: ['g', 'g'], items: [],
+        description: 'هدف سایت، پرسش‌های سئو و مسیر اقدام از روی شواهد گراف' },
       { title: 'کلمات کلیدی', url: '/dashboard/keywords', icon: 'keywords', items: [],
         description: 'ورود، خوشه‌بندی و نقشه موضوعی کلمات کلیدی (فاز ۵)' }
     ]
   },
   {
-    label: 'محتوا',
+    label: 'برنامه و اجرا',
     items: [
       { title: 'تقویم محتوا', url: '/dashboard/calendar', icon: 'calendar', items: [],
         description: 'برنامه‌ریزی، نوشتن با هوش مصنوعی و انتشار زمان‌بندی‌شده در وردپرس — همه در یک تقویم' },
@@ -50,7 +50,7 @@ export const navGroups: NavGroup[] = [
     ]
   },
   {
-    label: 'هوش مصنوعی و لینک‌سازی',
+    label: 'فرصت‌ها و مسائل',
     items: [
       { title: 'آزمایش تولید محتوا', url: '/dashboard/ai-content-test', icon: 'flask', items: [],
         description: 'فضای موقت آزمایش تولید محتوا با Echo یا ارائه‌دهنده واقعی' },
@@ -67,7 +67,7 @@ export const navGroups: NavGroup[] = [
     ]
   },
   {
-    label: 'سیستم',
+    label: 'سنجش و تنظیمات',
     items: [
       { title: 'گزارش سایت', url: '/dashboard/reports', icon: 'reports', items: [],
         description: 'مرکز گزارش کامل هر سایت: کلمه کلیدی اصلی، جایگاه‌ها، مشکلات، بک‌لینک و رپورتاژ' },

@@ -7,7 +7,9 @@ import type { NodeDetails } from '@/lib/api/client';
 import { safeHref } from '@/lib/utils';
 import { RemediationAction } from '@/features/remediation/remediation-action';
 import { IconClick, IconFocus2, IconSearch } from '@tabler/icons-react';
+import Link from 'next/link';
 import { CONTENT_STATUS_FA, NODE_STYLE, RELATION_FA, SEVERITY_FA } from '../constants';
+import type { ToolbarState } from './graph-toolbar';
 
 const fa = new Intl.NumberFormat('fa-IR');
 const pct = (v: unknown) => (typeof v === 'number' ? `${(v * 100).toFixed(1)}٪` : '—');
@@ -15,8 +17,18 @@ const num = (v: unknown, d = 0) => (typeof v === 'number' ? fa.format(Number(v.t
 
 type Neighbor = { id: string; type: string; label: string; url?: string | null; relation: string; direction: 'in' | 'out' };
 
+function detailAction(type: string, siteId: string): { href: string; label: string } | null {
+  const root = `/dashboard/sites/${encodeURIComponent(siteId)}`;
+  if (type === 'SEO_PROBLEM') return { href: `${root}?tab=issues`, label: 'پیگیری در پرونده‌های سئو ←' };
+  if (type === 'PAGE' || type === 'POST' || type === 'CATEGORY') return { href: `${root}?tab=urls`, label: 'بررسی موجودی صفحات ←' };
+  if (type === 'CONTENT_PLAN') return { href: `/dashboard/content-planner?site=${encodeURIComponent(siteId)}`, label: 'بازکردن برنامه‌ریز محتوا ←' };
+  if (type === 'QUERY' || type === 'KEYWORD') return { href: `/dashboard/reports?site=${encodeURIComponent(siteId)}`, label: 'بررسی گزارش جست‌وجو ←' };
+  return null;
+}
+
 export function NodeDetailsPanel({
   siteId,
+  mode,
   details,
   loading,
   error,
@@ -24,6 +36,7 @@ export function NodeDetailsPanel({
   onFocus
 }: {
   siteId: string;
+  mode: ToolbarState['mode'];
   details: NodeDetails | null;
   loading: boolean;
   error: string | null;
@@ -33,8 +46,12 @@ export function NodeDetailsPanel({
   if (!details && !loading && !error) {
     return (
       <aside className='bg-card flex h-full w-full flex-col overflow-hidden rounded-xl border shadow-sm'>
-        <header className='border-b p-4'><h3 className='font-semibold'>راهنمای خواندن گراف</h3><p className='text-muted-foreground mt-1 text-xs leading-5'>لازم نیست همه گره‌ها را هم‌زمان بررسی کنید؛ از جست‌وجو یا یک گره مهم شروع کنید.</p></header>
+        <header className='border-b p-4'><h3 className='font-semibold'>از نقشه به تصمیم</h3><p className='text-muted-foreground mt-1 text-xs leading-5'>یک گره را انتخاب کنید تا شواهد و اقدام مرتبط با آن را ببینید.</p></header>
         <div className='flex-1 space-y-5 overflow-y-auto p-4 text-sm'>
+          <div className='rounded-xl border border-sky-500/20 bg-sky-500/[0.06] p-3'>
+            <strong className='text-xs'>{mode === 'seo' ? 'از یک صفحه یا مشکل شروع کنید' : mode === 'content' ? 'از یک دسته یا صفحه شروع کنید' : mode === 'links' ? 'از صفحهٔ بدون لینک یا کم‌لینک شروع کنید' : 'از یک برنامه محتوایی شروع کنید'}</strong>
+            <p className='text-muted-foreground mt-1 text-xs leading-5'>{mode === 'seo' ? 'رابطهٔ صفحه با کوئری و مشکل را بررسی کنید، سپس پروندهٔ سئو را باز کنید.' : mode === 'content' ? 'ببینید کدام صفحه در ساختار محتوا قرار گرفته و چه داده‌ای برای آن ثبت شده است.' : mode === 'links' ? 'جهت فلش از صفحهٔ لینک‌دهنده به مقصد است. نبودن یک یال در نمای محدود، نبودن لینک را اثبات نمی‌کند.' : 'رابطهٔ برنامه با کلمهٔ هدف و محتوای منتشرشده را بررسی کنید.'}</p>
+          </div>
           <ol className='space-y-3'>
             <li className='flex gap-3'><span className='flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-600'><IconSearch className='size-4' /></span><span><strong className='block text-sm'>۱. گره را پیدا کن</strong><span className='text-muted-foreground text-xs leading-5'>نام صفحه، URL یا کلمه کلیدی را جست‌وجو کن.</span></span></li>
             <li className='flex gap-3'><span className='flex size-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-600'><IconClick className='size-4' /></span><span><strong className='block text-sm'>۲. روی گره کلیک کن</strong><span className='text-muted-foreground text-xs leading-5'>فقط همسایه‌های مرتبط پررنگ می‌شوند و اطلاعات اینجا باز می‌شود.</span></span></li>
@@ -42,12 +59,13 @@ export function NodeDetailsPanel({
           </ol>
           <Separator />
           <section><h4 className='mb-2 text-xs font-semibold'>راهنمای رنگ‌ها</h4><div className='flex flex-wrap gap-1.5'>{['PAGE', 'QUERY', 'BRAND', 'SERVICE', 'SEO_PROBLEM', 'SEO_OPPORTUNITY'].map((type) => <Badge key={type} variant='outline' className='gap-1.5'><span className='size-2 rounded-full' style={{ background: NODE_STYLE[type]?.color }} />{NODE_STYLE[type]?.fa}</Badge>)}</div></section>
-          <p className='text-muted-foreground rounded-lg border bg-muted/25 p-3 text-xs leading-5'>رنگ فقط نوع داده را نشان می‌دهد؛ ضخیم‌شدن رابطه یعنی آن یال مستقیماً به گره انتخاب‌شده وصل است.</p>
+          <p className='text-muted-foreground rounded-lg border bg-muted/25 p-3 text-xs leading-5'>رنگ، نوع داده است. فلش، جهت رابطهٔ ثبت‌شده از مبدأ به مقصد را نشان می‌دهد؛ علت و معلول نیست. این نقشه ممکن است فقط بخشی از کل گراف را نمایش دهد.</p>
         </div>
       </aside>
     );
   }
   const st = details ? NODE_STYLE[details.type] : undefined;
+  const action = details ? detailAction(details.type, siteId) : null;
   return (
     <aside className='bg-card flex h-full w-full flex-col overflow-hidden rounded-lg border'>
       <header className='flex items-start justify-between gap-2 border-b p-3'>
@@ -72,6 +90,9 @@ export function NodeDetailsPanel({
       </header>
       <div className='flex-1 space-y-4 overflow-y-auto p-3 text-sm'>
         {error && <p className='text-destructive'>{error}</p>}
+        {action && <Link href={action.href} className='inline-flex rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10'>
+          {action.label}
+        </Link>}
         {details && <Body d={details} siteId={siteId} onFocus={onFocus} />}
       </div>
     </aside>

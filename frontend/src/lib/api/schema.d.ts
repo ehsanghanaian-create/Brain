@@ -1811,6 +1811,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/keywords/discover/gsc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Discover Gsc */
+        get: operations["discover_gsc_api_v1_sites__site_id__keywords_discover_gsc_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/keywords/discover/gsc/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decide Gsc Candidate */
+        post: operations["decide_gsc_candidate_api_v1_sites__site_id__keywords_discover_gsc_decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites/{site_id}/keywords/template.csv": {
         parameters: {
             query?: never;
@@ -5210,6 +5244,69 @@ export interface components {
             client_id: string;
             /** Client Secret */
             client_secret: string;
+        };
+        /** GscCandidateDecision */
+        GscCandidateDecision: {
+            /** Keyword */
+            keyword: string;
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "save" | "ignore";
+        };
+        /** GscKeywordCandidate */
+        GscKeywordCandidate: {
+            /** Keyword */
+            keyword: string;
+            /** Normalized */
+            normalized: string;
+            /**
+             * Source
+             * @constant
+             */
+            source: "gsc_query_page";
+            /** Clicks */
+            clicks: number;
+            /** Impressions */
+            impressions: number;
+            /** Ctr */
+            ctr: number;
+            /** Position */
+            position: number | null;
+            /** Top Page */
+            top_page: string | null;
+            /** Pages Count */
+            pages_count: number;
+            /** Period Start */
+            period_start: string | null;
+            /** Period End */
+            period_end: string | null;
+            /** Last Updated */
+            last_updated: string | null;
+        };
+        /** GscKeywordDiscovery */
+        GscKeywordDiscovery: {
+            /** Items */
+            items: components["schemas"]["GscKeywordCandidate"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "ready" | "no_gsc_data";
+            /**
+             * Coverage
+             * @constant
+             */
+            coverage: "gsc_top_rows_only";
+            /** Last Updated */
+            last_updated: string | null;
         };
         /** GscSyncStart */
         GscSyncStart: {
@@ -9920,6 +10017,82 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discover_gsc_api_v1_sites__site_id__keywords_discover_gsc_get: {
+        parameters: {
+            query?: {
+                min_impressions?: number;
+                limit?: number;
+                offset?: number;
+            };
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GscKeywordDiscovery"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decide_gsc_candidate_api_v1_sites__site_id__keywords_discover_gsc_decision_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GscCandidateDecision"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

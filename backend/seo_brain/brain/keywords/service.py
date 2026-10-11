@@ -12,13 +12,14 @@ from ...graph.model import GraphEdge, GraphNode
 from ...graph.store import get_graph_store
 from ...normalizer.url import normalize_url
 from .clustering import cluster_keywords
+from .normalize import normalize_keyword
 from .repository import Keyword, KeywordOpportunity, KeywordsRepository
 
 log = logging.getLogger("brain.keywords")
 
 # Expected CTR by position (rough industry curve) — used only to detect "title/CTR" opportunities.
 _EXPECTED_CTR = {1: 0.28, 2: 0.15, 3: 0.11, 4: 0.08, 5: 0.07, 6: 0.05, 7: 0.04, 8: 0.035, 9: 0.03, 10: 0.025}
-OPP_FA = {"improve_page": "بهبود صفحه", "create_content": "تولید محتوای جدید", "update_title": "به‌روزرسانی عنوان/متا", "add_internal_links": "افزودن لینک داخلی"}
+OPP_FA = {"improve_page": "بهبود صفحه", "create_content": "بررسی نیاز به صفحهٔ جدید", "update_title": "به‌روزرسانی عنوان/متا", "add_internal_links": "افزودن لینک داخلی"}
 
 
 def _expected_ctr(pos: float | None) -> float:
@@ -61,6 +62,39 @@ class KeywordService:
         opps, _ = self.repo.list_opportunities(site_id, keyword_id=kid, limit=20)
         d["opportunities"] = [{**o.to_dict(), "kind_fa": OPP_FA.get(o.kind, o.kind)} for o in opps]
         return d
+
+    def discover_gsc(self, site_id: str, min_impressions: int = 10, limit: int = 50, offset: int = 0) -> dict[str, Any]:
+        """Reviewable first-party candidates, never a claim about all market demand."""
+        observed = self.repo.gsc_by_normalized(site_id)
+        known = {k.normalized for k in self.repo.all(site_id)}
+        candidates = []
+        for normalized, row in observed.items():
+            if normalized in known or row["impressions"] < min_impressions:
+                continue
+            candidates.append({
+                "keyword": row["keyword"], "normalized": normalized, "source": "gsc_query_page",
+                "clicks": row["clicks"], "impressions": row["impressions"], "ctr": row["ctr"],
+                "position": row["position"], "top_page": unquote(row["top_page"]) if row["top_page"] else None,
+                "pages_count": row["pages_count"], "period_start": row["period_start"],
+                "period_end": row["period_end"], "last_updated": row["last_updated"],
+            })
+        candidates.sort(key=lambda x: (-x["impressions"], -x["clicks"], x["normalized"]))
+        return {
+            "items": candidates[offset:offset + limit], "total": len(candidates), "limit": limit, "offset": offset,
+            "state": "ready" if observed else "no_gsc_data", "coverage": "gsc_top_rows_only",
+            "last_updated": max((r["last_updated"] for r in observed.values() if r["last_updated"]), default=None),
+        }
+
+    def save_gsc_candidate(self, site_id: str, keyword: str, status: str = "new") -> Keyword:
+        """Save a currently observed query; ignored queries remain hidden from discovery."""
+        normalized = normalize_keyword(keyword)
+        row = self.repo.gsc_by_normalized(site_id).get(normalized)
+        if row is None:
+            raise LookupError("query not observed in the current GSC sample")
+        saved = self.repo.insert_if_absent(Keyword(site_id=site_id, keyword=row["keyword"], source="gsc", status=status))
+        if saved is None:
+            raise ValueError("keyword already saved")
+        return saved
 
     # ------------------------------------------------------------ clustering
     def run_clustering(self, site_id: str, threshold: float = 0.42) -> dict[str, Any]:
@@ -111,12 +145,18 @@ class KeywordService:
             target = k.target_url or top
             prio_w = {"high": 1.0, "medium": 0.7, "low": 0.4}.get(k.priority or "", 0.6)
             vol_w = min(1.0, (k.volume or 0) / 1000) if k.volume else 0.3
-            ev = {"position": pos, "impressions": imp, "clicks": clicks, "ctr": ctr, "top_page": top, "target_url": k.target_url, "volume": k.volume, "priority": k.priority}
-            # 1) create new content: no ranking page (no GSC data or position > 20) and nothing targeted
+            ev = {"position": pos, "impressions": imp if g else None, "clicks": clicks if g else None, "ctr": ctr if g else None,
+                  "top_page": top, "target_url": k.target_url, "volume": k.volume, "priority": k.priority}
+            # 1) Investigate a possible new page. GSC missing rows cannot prove absence from search.
             if (g is None or (pos is not None and pos > 20)) and not k.target_url:
                 score = round(0.35 + 0.35 * prio_w + 0.3 * vol_w, 3)
-                reason = ("این کلمه کلیدی هیچ صفحه‌ای در نتایج ندارد" if g is None else f"بهترین جایگاه {pos:.1f} است (فراتر از ۲۰)") + " و صفحه هدفی تعیین نشده؛ محتوای جدید بسازید"
-                opps.append(KeywordOpportunity(site_id, k.id, "create_content", score, reason, None, ev, run_id=run_id))  # type: ignore[arg-type]
+                if g is None:
+                    reason = "در نمونهٔ موجود GSC برای این عبارت داده‌ای دیده نشد و صفحهٔ هدفی تعیین نشده؛ پیش از تصمیم برای صفحهٔ جدید، تقاضا و صفحات موجود را بررسی کنید"
+                    ev["gsc_observation"] = "not_observed"
+                else:
+                    reason = f"میانگین جایگاه مشاهده‌شده {pos:.1f} است و صفحهٔ هدفی تعیین نشده؛ ابتدا صفحهٔ دیده‌شده و قصد جست‌وجو را بررسی کنید"
+                    ev["gsc_observation"] = "observed"
+                opps.append(KeywordOpportunity(site_id, k.id, "create_content", score, reason, target, ev, run_id=run_id))  # type: ignore[arg-type]
                 continue
             if g is None:
                 continue

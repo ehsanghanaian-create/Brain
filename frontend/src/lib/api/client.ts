@@ -195,6 +195,8 @@ export type KeywordRow = {
 export type KeywordDetail = KeywordRow & { gsc_pages: { page: string; clicks: number; impressions: number; position: number }[]; opportunities: KeywordOpportunity[] };
 export type KeywordCounts = { total: number; by_status: Record<string, number>; by_intent: Record<string, number>; clusters: number; with_target: number; opportunities_new: Record<string, number> };
 export type KeywordList = { items: KeywordRow[]; total: number; limit: number; offset: number; counts: KeywordCounts };
+export type GscKeywordCandidate = Schemas['GscKeywordCandidate'];
+export type GscKeywordDiscovery = Schemas['GscKeywordDiscovery'];
 export type KeywordCluster = { site_id: string; cluster_id: string; name: string; topic: string | null; keywords_count: number; method: string | null; created_at: string | null; updated_at: string | null };
 export type TopicMap = { clusters: (KeywordCluster & { members: KeywordRow[]; gsc: { impressions: number; clicks: number; avg_position: number | null; with_data: number }; targets: string[]; volume: number })[]; unclustered: KeywordRow[]; counts: KeywordCounts };
 export type KeywordOpportunity = { id: number; site_id: string; keyword_id: number; kind: string; kind_fa?: string; keyword?: string | null; keyword_status?: string | null; target_url: string | null; score: number; reason: string; evidence: Record<string, unknown>; status: string; run_id: string | null; created_at: string; updated_at: string };
@@ -385,6 +387,8 @@ export const endpoints = {
     return api<KeywordList>(`/sites/${encodeURIComponent(id)}/keywords?${q.toString()}`);
   },
   keyword: (id: string, kid: number) => api<KeywordDetail>(`/sites/${encodeURIComponent(id)}/keywords/${kid}`),
+  discoverGscKeywords: (id: string, minImpressions = 10, limit = 50, offset = 0) => api<GscKeywordDiscovery>(`/sites/${encodeURIComponent(id)}/keywords/discover/gsc?min_impressions=${minImpressions}&limit=${limit}&offset=${offset}`),
+  decideGscKeyword: (id: string, keyword: string, action: 'save' | 'ignore') => api<KeywordRow>(`/sites/${encodeURIComponent(id)}/keywords/discover/gsc/decision`, { method: 'POST', json: { keyword, action } }),
   createKeyword: (id: string, body: Record<string, unknown>) => api<KeywordRow>(`/sites/${encodeURIComponent(id)}/keywords`, { method: 'POST', json: body }),
   updateKeyword: (id: string, kid: number, body: Record<string, unknown>) => api<KeywordRow>(`/sites/${encodeURIComponent(id)}/keywords/${kid}`, { method: 'PATCH', json: body }),
   deleteKeyword: (id: string, kid: number) => api<{ deleted: number }>(`/sites/${encodeURIComponent(id)}/keywords/${kid}`, { method: 'DELETE' }),

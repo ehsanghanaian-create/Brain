@@ -13,6 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { INTENT_FA, KW_STATUS_FA, OPP_KIND_FA, OPP_STATUS_FA, PRIORITY_FA, num, pct } from '../constants';
 import { ImportDialog } from './import-dialog';
+import { GscDiscovery } from './gsc-discovery';
 import { KeywordEditor } from './keyword-editor';
 
 const PAGE = 25;
@@ -81,6 +82,7 @@ export function KeywordsPage({ sites, initialSiteId }: { sites: Site[]; initialS
       <Tabs value={tab} onValueChange={(v) => setTab(String(v))}>
         <TabsList>
           <TabsTrigger value='list'>کلمات کلیدی</TabsTrigger>
+          <TabsTrigger value='discover'>کشف از GSC</TabsTrigger>
           <TabsTrigger value='topics'>خوشه‌ها و نقشه موضوعی</TabsTrigger>
           <TabsTrigger value='opps'>فرصت‌ها {oppNew ? <Badge className='ms-1'>{oppNew}</Badge> : null}</TabsTrigger>
         </TabsList>
@@ -134,6 +136,10 @@ export function KeywordsPage({ sites, initialSiteId }: { sites: Site[]; initialS
           )}
         </TabsContent>
 
+        <TabsContent value='discover'>
+          <GscDiscovery key={siteId} siteId={siteId} onChanged={refreshAll} />
+        </TabsContent>
+
         <TabsContent value='topics'>
           {!topicMap ? <p className='text-muted-foreground text-sm'>در حال بارگذاری…</p> : topicMap.clusters.length === 0 ? (
             <p className='text-muted-foreground text-sm'>هنوز خوشه‌ای نیست — «خوشه‌بندی» را اجرا کنید (یا ستون خوشه/موضوع را در فایل ورودی پر کنید).</p>
@@ -159,7 +165,7 @@ export function KeywordsPage({ sites, initialSiteId }: { sites: Site[]; initialS
               <TableHeader><TableRow><TableHead>نوع</TableHead><TableHead>کلمه کلیدی</TableHead><TableHead>صفحه هدف</TableHead><TableHead>امتیاز</TableHead><TableHead>دلیل</TableHead><TableHead>شواهد</TableHead><TableHead>وضعیت</TableHead></TableRow></TableHeader>
               <TableBody>
                 {opps?.items.map((o) => {
-                  const ev = o.evidence as Record<string, number | null>;
+                  const ev = o.evidence;
                   return (
                     <TableRow key={o.id}>
                       <TableCell><Badge>{OPP_KIND_FA[o.kind] ?? o.kind}</Badge></TableCell>
@@ -167,7 +173,7 @@ export function KeywordsPage({ sites, initialSiteId }: { sites: Site[]; initialS
                       <TableCell className='max-w-56 truncate' dir='ltr' title={o.target_url ?? ''}>{o.target_url ?? '—'}</TableCell>
                       <TableCell className='tabular-nums'>{num(o.score, 2)}</TableCell>
                       <TableCell className='max-w-md text-xs'>{o.reason}</TableCell>
-                      <TableCell className='text-muted-foreground text-xs whitespace-nowrap' dir='ltr'>{ev.position != null ? `#${Number(ev.position).toFixed(1)} · ` : ''}{ev.impressions ?? 0} imp · {ev.clicks ?? 0} clk{ev.inbound_links != null ? ` · ${ev.inbound_links} in` : ''}</TableCell>
+                      <TableCell className='text-muted-foreground text-xs whitespace-nowrap' dir='ltr'>{typeof ev.position === 'number' ? `#${ev.position.toFixed(1)} · ` : ''}{num(ev.impressions)} imp · {num(ev.clicks)} clk{typeof ev.inbound_links === 'number' ? ` · ${ev.inbound_links} in` : ''}</TableCell>
                       <TableCell>
                         <div className='flex gap-1'>
                           {o.status === 'new' ? (<>

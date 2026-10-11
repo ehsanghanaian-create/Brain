@@ -58,6 +58,36 @@ class OppStatus(BaseModel):
     status: Literal["new", "accepted", "dismissed", "done"]
 
 
+class GscCandidateDecision(BaseModel):
+    keyword: str = Field(min_length=1, max_length=200)
+    action: Literal["save", "ignore"]
+
+
+class GscKeywordCandidate(BaseModel):
+    keyword: str
+    normalized: str
+    source: Literal["gsc_query_page"]
+    clicks: int
+    impressions: int
+    ctr: float
+    position: float | None
+    top_page: str | None
+    pages_count: int
+    period_start: str | None
+    period_end: str | None
+    last_updated: str | None
+
+
+class GscKeywordDiscovery(BaseModel):
+    items: list[GscKeywordCandidate]
+    total: int
+    limit: int
+    offset: int
+    state: Literal["ready", "no_gsc_data"]
+    coverage: Literal["gsc_top_rows_only"]
+    last_updated: str | None
+
+
 def svc(eng: Engine = Depends(engine)) -> KeywordService:
     return KeywordService(eng)
 
@@ -84,6 +114,23 @@ def create_keyword(site_id: str, body: KeywordCreate, s: KeywordService = Depend
 def meta() -> dict:
     return {"intents": list(INTENTS), "priorities": list(PRIORITIES), "statuses": list(STATUSES), "opportunity_kinds": [{"kind": k, "fa": OPP_FA[k]} for k in OPP_KINDS],
             "opportunity_statuses": list(OPP_STATUSES)}
+
+
+@router.get("/discover/gsc", response_model=GscKeywordDiscovery)
+def discover_gsc(site_id: str, min_impressions: int = Query(10, ge=0), limit: int = Query(50, ge=1, le=500),
+                 offset: int = Query(0, ge=0), s: KeywordService = Depends(svc)) -> dict:
+    return s.discover_gsc(site_id, min_impressions, limit, offset)
+
+
+@router.post("/discover/gsc/decision", status_code=201)
+def decide_gsc_candidate(site_id: str, body: GscCandidateDecision, s: KeywordService = Depends(svc)) -> dict:
+    try:
+        row = s.save_gsc_candidate(site_id, body.keyword, "ignored" if body.action == "ignore" else "new")
+    except LookupError:
+        raise ApiError(404, "این عبارت در دادهٔ فعلی GSC مشاهده نشد؛ فهرست را به‌روز کنید", code="not_found")
+    except ValueError:
+        raise ApiError(409, "این کلمه کلیدی قبلاً ثبت شده است", code="conflict")
+    return s.enrich(site_id, [row])[0]
 
 
 @router.get("/template.csv", response_class=PlainTextResponse)

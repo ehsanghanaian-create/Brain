@@ -143,6 +143,10 @@ def test_manual_sync_status_rebuild_and_guards(env):
     r2 = c.post(f"/api/v1/sites/{SID}/graph/rebuild"); assert r2.status_code == 202 and r2.json()["stage"] == "graph_only"
     st2 = c.get(f"/api/v1/sites/{SID}/wordpress/sync/status").json()
     assert st2["stage"] == "graph_only" and [s["key"] for s in st2["steps"]] == ["build_graph", "knowledge_pack"] and st2["status"] == "succeeded" and st2["counts"]["graph_by_type"].get("PAGE") == 1
+    assert st2["full_sync"]["run_id"] == st["run_id"] and st2["full_sync"]["status"] == "succeeded"
+    assert st2["graph_rebuild"]["run_id"] == st2["run_id"]
+    wp_integration = next(x for x in c.get(f"/api/v1/sites/{SID}/integrations").json()["integrations"] if x["kind"] == "wordpress")
+    assert wp_integration["sync"]["run_id"] == st["run_id"]
     # already-running guard (simulate a running state)
     orch = WordPressSyncOrchestrator(env["eng"]); stq = orch.create(SID); stq.status = "running"; orch._persist(stq)
     r3 = c.post(f"/api/v1/sites/{SID}/wordpress/sync", json={}).json(); assert r3["status"] == "already_running" and r3["run_id"] == stq.run_id
@@ -161,8 +165,14 @@ def test_failed_rest_is_reported_never_silent_and_credentials_never_leak(env):
     env["state"]["fail"] = True
     r = c.post(f"/api/v1/sites/{SID}/wordpress/sync", json={}); assert r.status_code == 202
     st = c.get(f"/api/v1/sites/{SID}/wordpress/sync/status").json()
-    assert st["status"] == "failed" and st["job"]["status"] == "failed" and any("REST unreachable" in e for e in st["errors"])
-    assert {s["key"]: s["status"] for s in st["steps"]}["categories"] == "failed" and next(s for s in st["steps"] if s["key"] == "build_graph")["status"] == "pending"
+    assert st["status"] == "completed_with_errors" and st["job"]["status"] == "succeeded" and any("REST unreachable" in e for e in st["errors"])
+    statuses = {s["key"]: s["status"] for s in st["steps"]}
+    assert statuses["categories"] == "failed" and statuses["category_intelligence"] == "skipped"
+    assert statuses["crawl"] == "done" and env["state"]["crawl_calls"] == 1
+    c.post(f"/api/v1/sites/{SID}/graph/rebuild")
+    separated = c.get(f"/api/v1/sites/{SID}/wordpress/sync/status").json()
+    assert separated["stage"] == "graph_only" and separated["status"] == "succeeded"
+    assert separated["full_sync"]["status"] == "completed_with_errors"
     blob = json.dumps(st, ensure_ascii=False)
     with env["eng"].connect() as cx:
         notes = " ".join(r_[0] or "" for r_ in cx.execute(text("SELECT notes FROM sync_runs WHERE site_id=:s"), {"s": SID}).all())

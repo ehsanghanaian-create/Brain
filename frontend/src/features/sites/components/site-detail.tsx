@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ApiError, endpoints, type ConnectionsStatus, type ContentKnowledgePack, type GraphSummary, type InitializeResult, type JobRun, type Site, type SiteMemory } from '@/lib/api/client';
+import { ApiError, endpoints, type ConnectionsStatus, type ContentKnowledgePack, type GraphSummary, type InitializeResult, type JobRun, type PortfolioSite, type Site, type SiteMemory, type SiteMission } from '@/lib/api/client';
 import { useQuery } from '@tanstack/react-query';
 import { IconActivity, IconAdjustments, IconBrain, IconCheck, IconClock, IconExternalLink, IconPhone, IconPlugConnected, IconRefresh, IconSettings, IconWorld } from '@tabler/icons-react';
 import { useRouter } from 'next/navigation';
@@ -16,24 +16,30 @@ import { BUSINESS_CATEGORIES, MODE_FA } from '../constants';
 import { AutoSyncLine } from './auto-sync-line';
 import { StatusBadge } from './connection-tester';
 import { PhoneTab } from './phone-tab';
+import { UrlInventoryTab } from './url-inventory-tab';
+import { IssueCasesTab } from './issue-cases-tab';
 import { SecurityCard } from './security-card';
 import { DeleteSiteButton } from './delete-site-button';
 import { Ga4IntegrationCard } from './ga4-integration-card';
 import { GoogleAccountCard } from './google-account-card';
 import { GscIntegrationCard } from './gsc-sync-card';
 import { SiteBrainForm } from './site-brain-form';
+import { SiteMissionForm } from './site-mission-form';
 import { WordPressIntegrationCard } from './wordpress-sync-card';
 
 const fa = new Intl.NumberFormat('fa-IR');
-type SiteTab = 'overview' | 'integrations' | 'automation' | 'phone' | 'brain' | 'settings';
-const validTabs = new Set<SiteTab>(['overview', 'integrations', 'automation', 'phone', 'brain', 'settings']);
+type SiteTab = 'overview' | 'urls' | 'issues' | 'integrations' | 'automation' | 'phone' | 'brain' | 'settings';
+const validTabs = new Set<SiteTab>(['overview', 'urls', 'issues', 'integrations', 'automation', 'phone', 'brain', 'settings']);
 
-export function SiteDetail({ site, connections, memory, graph, initialTab }: {
+export function SiteDetail({ site, connections, memory, graph, mission, portfolioSite, initialTab, initialCaseId }: {
   site: Site;
   connections: ConnectionsStatus;
   memory: SiteMemory;
   graph: GraphSummary | null;
+  mission: SiteMission;
+  portfolioSite: PortfolioSite | null;
   initialTab: string;
+  initialCaseId: number | null;
 }) {
   const router = useRouter();
   const [mode, setMode] = useState(site.mode);
@@ -82,13 +88,15 @@ export function SiteDetail({ site, connections, memory, graph, initialTab }: {
   const category = BUSINESS_CATEGORIES.find((c) => c.value === site.business_type)?.label ?? site.business_type ?? '—';
   const connectionEntries = [connections.status.wordpress, connections.status.gsc, connections.status.ga4];
   const connected = connectionEntries.filter((c) => c?.ok).length;
-  const readiness = Math.round(((connected + (site.workspace_path ? 1 : 0) + (graph?.nodes ? 1 : 0)) / 5) * 100);
+  const readiness = portfolioSite?.setup_progress;
 
   return (
     <Tabs value={tab} onValueChange={changeTab} className='gap-5'>
       <div className='sticky top-14 z-20 -mx-4 border-y bg-background/95 px-4 py-2 backdrop-blur md:-mx-6 md:px-6'>
         <TabsList variant='line' className='h-10 max-w-full justify-start overflow-x-auto'>
           <TabsTrigger value='overview'><IconActivity />نمای کلی</TabsTrigger>
+          <TabsTrigger value='urls'><IconWorld />صفحات سایت</TabsTrigger>
+          <TabsTrigger value='issues'><IconActivity />پرونده‌های سئو</TabsTrigger>
           <TabsTrigger value='integrations'><IconPlugConnected />اتصال‌ها</TabsTrigger>
           <TabsTrigger value='automation'><IconClock />عملیات و زمان‌بندی</TabsTrigger>
           <TabsTrigger value='phone'><IconPhone />شمارهٔ تماس</TabsTrigger>
@@ -98,18 +106,19 @@ export function SiteDetail({ site, connections, memory, graph, initialTab }: {
       </div>
 
       <TabsContent value='overview' className='space-y-5'>
+        <SiteMissionForm siteId={site.site_id} initial={mission} />
         <section className='overflow-hidden rounded-2xl border bg-gradient-to-bl from-sky-500/10 via-card to-card'>
           <div className='grid gap-5 p-5 lg:grid-cols-[1fr_auto] lg:items-center'>
             <div className='min-w-0'>
               <div className='flex flex-wrap items-center gap-2'>
                 <span className='rounded-xl bg-sky-500/10 p-2 text-sky-500'><IconWorld className='size-5' /></span>
                 <h2 className='text-xl font-semibold'>{site.name}</h2>
-                <Badge variant={readiness >= 80 ? 'default' : 'secondary'}>{readiness.toLocaleString('fa-IR')}٪ آماده</Badge>
+                <Badge variant={readiness != null && readiness >= 80 ? 'default' : 'secondary'}>{readiness == null ? 'آمادگی نامشخص' : `${readiness.toLocaleString('fa-IR')}٪ آمادگی داده`}</Badge>
               </div>
               <a href={site.canonical_url} target='_blank' rel='noreferrer' dir='ltr' className='mt-2 inline-flex max-w-full items-center gap-1 truncate text-sm text-muted-foreground hover:text-foreground'>
                 {site.canonical_url}<IconExternalLink className='size-3.5' />
               </a>
-              <p className='mt-3 max-w-2xl text-sm leading-7 text-muted-foreground'>سلامت داده‌ها، اتصال سرویس‌ها، عملیات در حال اجرا و حافظه اختصاصی این سایت را از یک نقطه مدیریت کنید.</p>
+              <p className='mt-3 max-w-2xl text-sm leading-7 text-muted-foreground'>{portfolioSite ? `قدم بعدی: ${portfolioSite.next_action}. ${portfolioSite.state_reason}` : 'سلامت داده‌ها، اتصال سرویس‌ها و عملیات این سایت را از اینجا بررسی کنید.'}</p>
             </div>
             <div className='grid grid-cols-3 gap-2 text-center'>
               <MiniMetric label='اتصال فعال' value={`${connected.toLocaleString('fa-IR')} از ۳`} />
@@ -138,6 +147,14 @@ export function SiteDetail({ site, connections, memory, graph, initialTab }: {
             </CardContent>
           </Card>
         </div>
+      </TabsContent>
+
+      <TabsContent value='urls' className='space-y-4'>
+        {tab === 'urls' && <UrlInventoryTab siteId={site.site_id} />}
+      </TabsContent>
+
+      <TabsContent value='issues' className='space-y-4'>
+        {tab === 'issues' && <IssueCasesTab siteId={site.site_id} initialCaseId={initialCaseId} />}
       </TabsContent>
 
       <TabsContent value='integrations' className='space-y-4'>

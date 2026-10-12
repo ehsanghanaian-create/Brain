@@ -41,6 +41,7 @@ export function SiteWizard() {
   // created site + step 2/3 state
   const [site, setSite] = useState<Site | null>(null);
   const [results, setResults] = useState<Partial<Record<'gsc' | 'ga4' | 'wordpress', ConnectionResult>>>({});
+  const [googleRefresh, setGoogleRefresh] = useState(0);
   const [init, setInit] = useState<InitializeResult | null>(null);
 
   const step1Valid = name.trim().length >= 2 && /^[a-z0-9][a-z0-9-]{1,62}$/.test(effectiveId) && normalizeUrl(domain).startsWith('http');
@@ -201,11 +202,11 @@ export function SiteWizard() {
             </CardDescription>
           </CardHeader>
           <CardContent className='grid gap-3'>
-            <GoogleAccountCard />
+            <GoogleAccountCard onChange={() => setGoogleRefresh((n) => n + 1)} />
             <ConnectionTester siteId={site.site_id} kind='gsc' label='Google Search Console' hint='sc-domain:example.com یا https://example.com/'
-              initialValue={site.gsc_property} onResult={(r) => setResults((s) => ({ ...s, gsc: r }))} />
+              initialValue={site.gsc_property} refreshKey={googleRefresh} onResult={(r) => setResults((s) => ({ ...s, gsc: r }))} />
             <ConnectionTester siteId={site.site_id} kind='ga4' label='Google Analytics 4' hint='انتخاب از فهرست' mode='simple'
-              initialValue={site.ga4_property} onResult={(r) => setResults((s) => ({ ...s, ga4: r }))} />
+              initialValue={site.ga4_property} refreshKey={googleRefresh} onResult={(r) => setResults((s) => ({ ...s, ga4: r }))} />
             <ConnectionTester siteId={site.site_id} kind='wordpress' label='آدرس سایت (وردپرس)' hint='https://example.com' mode='simple'
               initialValue={site.wp_url} onResult={(r) => setResults((s) => ({ ...s, wordpress: r }))} />
             <div className='flex justify-between gap-2'>

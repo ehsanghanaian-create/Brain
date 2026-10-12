@@ -52,7 +52,7 @@ def update_site(body: SiteUpdate, site: Site = Depends(require_site), repo: Site
 
 # tables that reference sites(site_id); a site with data is only deleted with ?force=true
 # dependency order: dependents first (entity_mentions→entities, post_terms→posts, gsc_query_page→queries, graph_edges→graph_nodes)
-_CHILD_TABLES = ("content_plan_generation_jobs", "content_plan_recommendations", "content_plan_sources", "content_plan_imports", "content_plan_events", "content_plan_keywords", "content_plans", "content_clusters", "content_categories", "content_knowledge_packs",
+_CHILD_TABLES = ("issue_case_observations", "issue_case_events", "issue_cases", "content_plan_generation_jobs", "content_plan_recommendations", "content_plan_sources", "content_plan_imports", "content_plan_events", "content_plan_keywords", "content_plans", "content_clusters", "content_categories", "content_knowledge_packs",
                  "generation_runs", "draft_feedback", "memory_snapshots", "link_suggestions", "link_page_stats", "link_patterns", "content_scores", "content_reviews", "content_drafts", "content_metrics", "content_insights", "site_settings", "content_briefs", "content_events", "content_items", "keyword_opportunities", "keywords", "keyword_clusters", "keyword_imports",
                  "entity_mentions", "post_terms", "links", "gsc_query_page", "gsc_daily", "graph_edges", "seo_problems",
                  "seo_opportunities", "media", "schemas", "entities", "queries", "pages", "posts", "categories", "tags",
@@ -199,7 +199,7 @@ def integrations(site_id: str, site: Site = Depends(require_site), eng: Engine =
     _ga4_pipe = _Ga4Pipeline(eng)
     out = [
         {"kind": "wordpress", "label": "وردپرس", "connection": connection("wordpress"),
-         "sync": sync_block(wp.latest(site_id), wp.counts(site_id)),
+         "sync": sync_block(wp.latest(site_id, "full"), wp.counts(site_id)),
          "configured": bool(site.wp_url), "property": site.wp_url,
          "actions": ["test"] + (["sync", "rebuild"] if site.wp_url else [])},
         {"kind": "gsc", "label": "Google Search Console", "connection": connection("gsc"),

@@ -103,15 +103,18 @@ class WordPressSyncOrchestrator:
                 cx.execute(text("INSERT INTO sync_runs(run_id, site_id, source, started_at, finished_at, status, rows_written, notes) VALUES(:r,:s,:src,:st,:f,:status,0,:n)"),
                            {"r": st.run_id, "s": st.site_id, "src": SOURCE, "st": st.started_at or utcnow(), "f": st.finished_at, "status": st.status, "n": payload})
 
-    def latest(self, site_id: str) -> dict[str, Any] | None:
+    def latest(self, site_id: str, stage: str | None = None) -> dict[str, Any] | None:
         with self.engine.connect() as cx:
-            r = cx.execute(text("SELECT notes FROM sync_runs WHERE site_id=:s AND source=:src ORDER BY started_at DESC, rowid DESC LIMIT 1"), {"s": site_id, "src": SOURCE}).first()
-        if not r or not r[0]:
-            return None
-        try:
-            return json.loads(r[0])
-        except ValueError:
-            return None
+            history = cx.execute(text("SELECT notes FROM sync_runs WHERE site_id=:s AND source=:src ORDER BY started_at DESC, rowid DESC"),
+                                 {"s": site_id, "src": SOURCE})
+            for row in history:
+                try:
+                    data = json.loads(row[0]) if row[0] else None
+                except ValueError:
+                    continue
+                if isinstance(data, dict) and (stage is None or data.get("stage", "full") == stage):
+                    return data
+        return None
 
     def counts(self, site_id: str) -> dict[str, Any]:
         """What the site currently has (from the real tables) — the UI counters."""
@@ -129,6 +132,8 @@ class WordPressSyncOrchestrator:
 
     def status(self, site_id: str, job_queue=None) -> dict[str, Any]:
         st = self.latest(site_id)
+        full = self.latest(site_id, "full")
+        graph = self.latest(site_id, "graph_only")
         live = None
         if st and job_queue is not None and st.get("job_id"):
             jr = job_queue.get(st["job_id"])
@@ -136,7 +141,14 @@ class WordPressSyncOrchestrator:
         return {"status": (st or {}).get("status", "never"), "step": (st or {}).get("step"), "step_fa": (st or {}).get("step_fa"), "progress": (st or {}).get("progress", 0),
                 "stage": (st or {}).get("stage"), "started_at": (st or {}).get("started_at"), "finished_at": (st or {}).get("finished_at"), "items": (st or {}).get("items", {}),
                 "errors": (st or {}).get("errors", []), "steps": (st or {}).get("steps", []), "run_id": (st or {}).get("run_id"), "job_id": (st or {}).get("job_id"), "job": live,
-                "counts": self.counts(site_id), "steps_fa": STEP_FA}
+                "counts": self.counts(site_id), "steps_fa": STEP_FA,
+                "full_sync": self._run_summary(full), "graph_rebuild": self._run_summary(graph)}
+
+    @staticmethod
+    def _run_summary(st: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not st:
+            return None
+        return {key: st.get(key) for key in ("run_id", "status", "started_at", "finished_at", "errors")}
 
     def is_running(self, site_id: str) -> bool:
         st = self.latest(site_id)
@@ -168,8 +180,14 @@ class WordPressSyncOrchestrator:
             self._persist(st)
             if stage == "full":
                 self._step(st, "resolve", lambda: self._resolve(site_id))
-                self._wordpress_steps(st, site_id)
-                self._step(st, "category_intelligence", lambda: self._category_intelligence(site_id))
+                try:
+                    self._wordpress_steps(st, site_id)
+                except Exception:
+                    # Public crawling can still collect current SEO evidence when
+                    # the WordPress REST endpoint is unavailable or times out.
+                    self._mark(st, "category_intelligence", "skipped", {"reason": "wordpress sync failed"})
+                else:
+                    self._step(st, "category_intelligence", lambda: self._category_intelligence(site_id))
                 if crawl:
                     self._step(st, "crawl", lambda: self._crawl(site_id, max_urls))
                 else:
@@ -386,6 +404,7 @@ class WordPressSyncOrchestrator:
 def _default_probe(url: str) -> int | None:
     import httpx
     try:
-        return httpx.get(url, timeout=10, follow_redirects=True, headers={"User-Agent": "SEO-Brain/0.2 (+local; read-only)"}).status_code
+        from .origin import wordpress_get
+        return wordpress_get(url, timeout=10).status_code
     except httpx.HTTPError:
         return None

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { autoSyncLine, intervalFa, nextSyncFa } from '../auto-sync';
+import { autoSyncLine, intervalFa, intervalMinutesFa, nextSyncFa } from '../auto-sync';
 
 const plan = (over: object = {}) => ({
   site_id: 's', enabled: true, interval_hours: 24,
@@ -18,6 +18,7 @@ describe('auto-sync helpers', () => {
     expect(intervalFa(24)).toBe('روزانه');
     expect(intervalFa(72)).toContain('روز');
     expect(intervalFa(6)).toContain('ساعت');
+    expect(intervalMinutesFa(10)).toBe('هر ۱۰ دقیقه');
   });
 
   it('nextSyncFa picks the soonest next_at; past → «در نوبت اجرا»', () => {
@@ -32,5 +33,15 @@ describe('auto-sync helpers', () => {
     expect(autoSyncLine(plan())).toContain('روزانه');
     expect(nextSyncFa(null)).toBeNull();
     expect(autoSyncLine(null)).toBe('');
+  });
+
+  it('shows the actual refresh and crawl cadence and a partial WordPress sync', () => {
+    const partial = plan({ interval_minutes: 10, sources: {
+      ...plan().sources,
+      wordpress: { ...plan().sources.wordpress, last_status: 'completed_with_errors', effective_interval_minutes: 1440 }
+    } });
+    expect(autoSyncLine(partial)).toContain('هر ۱۰ دقیقه');
+    expect(autoSyncLine(partial)).toContain('خزش سایت: روزانه');
+    expect(autoSyncLine(partial)).toContain('همگام‌سازی ناقص: وردپرس');
   });
 });

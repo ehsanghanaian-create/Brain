@@ -7,7 +7,7 @@ export const INTENT_FA: Record<string, string> = {
 };
 export const PRIORITY_FA: Record<string, string> = { high: 'بالا', medium: 'متوسط', low: 'کم' };
 export const KW_STATUS_FA: Record<string, string> = { new: 'جدید', planned: 'برنامه‌ریزی‌شده', in_progress: 'در حال انجام', published: 'منتشرشده', ignored: 'نادیده' };
-export const OPP_KIND_FA: Record<string, string> = { improve_page: 'بهبود صفحه', create_content: 'تولید محتوای جدید', update_title: 'به‌روزرسانی عنوان/متا', add_internal_links: 'افزودن لینک داخلی' };
+export const OPP_KIND_FA: Record<string, string> = { improve_page: 'بهبود صفحه', create_content: 'بررسی نیاز به صفحهٔ جدید', update_title: 'به‌روزرسانی عنوان/متا', add_internal_links: 'افزودن لینک داخلی' };
 export const OPP_STATUS_FA: Record<string, string> = { new: 'جدید', accepted: 'پذیرفته', dismissed: 'رد شده', done: 'انجام‌شده' };
 export const FIELD_FA: Record<string, string> = {
   keyword: 'کلمه کلیدی', intent: 'اینتنت', cluster: 'خوشه', topic: 'موضوع', volume: 'حجم', difficulty: 'سختی', priority: 'اولویت',

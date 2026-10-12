@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
-import type { GraphMode, GraphView, Site } from '@/lib/api/client';
+import type { GraphView, Site } from '@/lib/api/client';
 import {
   IconAdjustmentsHorizontal, IconArrowsMaximize, IconFocusCentered, IconLayoutBoard,
   IconRefresh, IconSearch, IconSparkles, IconX
@@ -13,6 +13,12 @@ import { NODE_STYLE, RELATION_FA, TYPE_FAMILIES } from '../constants';
 import { LAYOUT_FA, type Direction, type Grouping } from '../layout';
 
 const LAYOUTS = Object.keys(LAYOUT_FA) as Grouping[];
+const toggle = (set: Set<string>, key: string) => {
+  const next = new Set(set);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+};
 
 export type ToolbarState = {
   siteId: string;
@@ -29,11 +35,10 @@ export type ToolbarState = {
 };
 
 export function GraphToolbar({
-  sites, modes, view, state, onChange, onFit, onRelayout, onSearchSubmit, onResetFilters,
+  sites, view, state, onChange, onFit, onRelayout, onSearchSubmit, onResetFilters,
   loading, matches, selectedLabel, neighborCount
 }: {
   sites: Site[];
-  modes: GraphMode[];
   view: GraphView | null;
   state: ToolbarState;
   onChange: (patch: Partial<ToolbarState>) => void;
@@ -50,11 +55,6 @@ export function GraphToolbar({
   const familiesInMode = TYPE_FAMILIES.filter((family) => family.types.some((type) => modeTypes.has(type)));
   const relationsInMode = view?.mode.relation_types ?? [];
   const activeFilters = state.familyOff.size + state.relationOff.size;
-  const toggle = (set: Set<string>, key: string) => {
-    const next = new Set(set);
-    next.has(key) ? next.delete(key) : next.add(key);
-    return next;
-  };
 
   return (
     <section className='bg-card overflow-hidden rounded-xl border shadow-sm'>
@@ -64,23 +64,6 @@ export function GraphToolbar({
             <NativeSelect value={state.siteId} onChange={(event) => onChange({ siteId: event.target.value })} className='w-48' aria-label='سایت'>
               {sites.map((site) => <NativeSelectOption key={site.site_id} value={site.site_id}>{site.name}</NativeSelectOption>)}
             </NativeSelect>
-            <div className='flex overflow-x-auto rounded-lg border bg-muted/20 p-1' role='tablist' aria-label='نوع نقشه'>
-              {modes.map((mode) => (
-                <button key={mode.key} role='tab' aria-selected={state.mode === mode.key} title={mode.description_fa}
-                  onClick={() => onChange({ mode: mode.key })}
-                  className={`whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${state.mode === mode.key ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-                  {mode.title_fa}
-                </button>
-              ))}
-            </div>
-            <div className='flex overflow-x-auto rounded-lg border bg-muted/20 p-1' role='tablist' aria-label='چیدمان گراف' title='حالت نمایش گراف'>
-              {LAYOUTS.map((layout) => (
-                <button key={layout} role='tab' aria-selected={state.grouping === layout} onClick={() => onChange({ grouping: layout })}
-                  className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-all duration-200 ${state.grouping === layout ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-background/60'}`}>
-                  {LAYOUT_FA[layout]}
-                </button>
-              ))}
-            </div>
           </div>
 
           <form className='relative flex min-w-0 flex-1 items-center gap-1' onSubmit={(event) => { event.preventDefault(); onSearchSubmit(); }}>
@@ -93,17 +76,15 @@ export function GraphToolbar({
 
         <div className='flex flex-wrap items-center gap-2 border-t pt-3'>
           <div className='text-muted-foreground min-w-0 flex-1 text-xs leading-5'>
-            <span className='font-semibold text-foreground'>{view?.mode.title_fa ?? 'گراف دانش'}:</span>{' '}
-            {view?.mode.description_fa || 'برای بررسی جزئیات، یک گره را انتخاب کنید. گره‌های نامرتبط کم‌رنگ می‌شوند.'}
+            <span className='font-semibold text-foreground'>{selectedLabel ? 'گره انتخابی:' : 'راهنمای نقشه:'}</span>{' '}
+            {selectedLabel || 'یک گره را انتخاب کنید تا شواهد آن را ببینید؛ فلش جهت رابطهٔ ثبت‌شده است.'}
           </div>
           {selectedLabel && (
             <Button size='sm' variant={state.focusNeighbors ? 'default' : 'outline'} onClick={() => onChange({ focusNeighbors: !state.focusNeighbors })}>
               <IconFocusCentered /> {state.focusNeighbors ? 'نمایش کل گراف' : `فقط ارتباط‌های مستقیم (${neighborCount.toLocaleString('fa-IR')})`}
             </Button>
           )}
-          <Button size='sm' variant={state.flow ? 'default' : 'outline'} onClick={() => onChange({ flow: !state.flow })} title='ذرات متحرک روی همهٔ ارتباط‌ها (در گراف‌های کوچک)'><IconSparkles /> جریان ارتباط‌ها</Button>
           <Button size='sm' variant='outline' onClick={onFit}><IconArrowsMaximize /> جا دادن در صفحه</Button>
-          <Button size='sm' variant='outline' onClick={onRelayout}><IconRefresh /> چیدمان دوباره</Button>
           <Badge variant='secondary' className='h-8 px-3 tabular-nums'>
             {loading ? 'در حال بارگذاری…' : view ? `${view.nodes.length.toLocaleString('fa-IR')} گره · ${view.edges.length.toLocaleString('fa-IR')} رابطه${view.truncated ? ` از ${view.total_nodes.toLocaleString('fa-IR')}` : ''}` : 'بدون داده'}
           </Badge>
@@ -117,6 +98,15 @@ export function GraphToolbar({
           <span className='text-muted-foreground ms-auto'>برای نمای ساده نیازی به باز کردن این بخش نیست</span>
         </summary>
         <div className='space-y-3 border-t bg-muted/15 p-3'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <span className='text-muted-foreground text-xs'>چیدمان نقشه</span>
+            <div className='flex overflow-x-auto rounded-lg border bg-muted/20 p-1' role='tablist' aria-label='چیدمان گراف'>
+              {LAYOUTS.map((layout) => <button key={layout} type='button' role='tab' aria-selected={state.grouping === layout} onClick={() => onChange({ grouping: layout })}
+                className={`whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${state.grouping === layout ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'}`}>{LAYOUT_FA[layout]}</button>)}
+            </div>
+            <Button size='sm' variant='outline' onClick={onRelayout}><IconRefresh /> چیدمان دوباره</Button>
+            <Button size='sm' variant={state.flow ? 'default' : 'outline'} onClick={() => onChange({ flow: !state.flow })} title='فقط روی گراف کوچک فعال می‌شود'><IconSparkles /> نمایش حرکت یال‌ها</Button>
+          </div>
           <div className='flex flex-wrap items-center gap-2'>
             <IconLayoutBoard className='text-muted-foreground size-4' />
             <span className='text-muted-foreground text-xs'>چیدمان: {LAYOUT_FA[state.grouping]}</span>

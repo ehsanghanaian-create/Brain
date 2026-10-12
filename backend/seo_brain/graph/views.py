@@ -70,19 +70,71 @@ class GraphView:
 
 def graph_view(repo: GraphRepository, site_id: str, mode: str, types: Iterable[str] | None = None,
                relation_types: Iterable[str] | None = None, limit: int = 400, include_isolated: bool = True) -> GraphView:
-    """Nodes of the mode (optionally narrowed by `types`), ranked by PageRank, capped at `limit`;
-    then every edge of the mode's relation types whose both ends are in the set."""
+    """Return a bounded, connected slice rather than unrelated top-ranked pages.
+
+    PageRank is often populated only for PAGE nodes. Taking the first ``limit``
+    nodes therefore excluded SITE, QUERY and problem nodes, leaving a visually
+    impressive but entirely disconnected map. Seed across node types, then add
+    their actual neighbors. The result is a sample, never the whole site graph.
+    """
     m = MODES[mode]
     node_types = [t for t in (types or m.node_types) if t in m.node_types] or list(m.node_types)
     rel_types = [r for r in (relation_types or m.relation_types) if r in m.relation_types] or list(m.relation_types)
     total = sum(n for t, n in repo.counts(site_id)["by_node_type"].items() if t in node_types)
-    nodes = repo.list_nodes(site_id, node_types, limit=limit)
+    if total <= limit:
+        nodes = repo.list_nodes(site_id, node_types, limit=limit)
+        sampled = False
+    else:
+        sampled = True
+        seed_budget = min(limit, 40, max(8, limit // 3))
+        per_type = max(1, seed_budget // len(node_types))
+        seeds: dict[str, GraphNode] = {}
+        for node_type in node_types:
+            if len(seeds) >= seed_budget:
+                break
+            for node in repo.list_nodes(site_id, [node_type], limit=per_type):
+                if len(seeds) >= seed_budget:
+                    break
+                seeds.setdefault(node.id, node)
+        for node in repo.list_nodes(site_id, node_types, limit=seed_budget):
+            if len(seeds) >= seed_budget:
+                break
+            seeds.setdefault(node.id, node)
+        seed_ids = set(seeds)
+        candidates = repo.edges_of(site_id, seed_ids, rel_types, "both")
+        # SEO evidence beats generic containment, while a cap per seed and
+        # relation prevents one hub from using the entire viewport.
+        priority = {name: rank for rank, name in enumerate((
+            "HAS_PROBLEM", "HAS_OPPORTUNITY", "RANKS_FOR", "KEYWORD_TARGETS",
+            "LINK_OPPORTUNITY", "SUGGESTED_LINK", "LINKS_TO", "TARGETS",
+            "BELONGS_TO", "HAS_CATEGORY", "HAS_POST", "HAS_PAGE"))}
+        candidates.sort(key=lambda e: (priority.get(e.relation_type, 20), -e.weight, e.source, e.target))
+        chosen = set(seed_ids)
+        per_seed_relation: dict[tuple[str, str], int] = {}
+        for edge in candidates:
+            seed = edge.source if edge.source in seed_ids else edge.target if edge.target in seed_ids else None
+            if seed is None:
+                continue
+            other = edge.target if seed == edge.source else edge.source
+            if other in chosen or len(chosen) >= limit:
+                continue
+            key = (seed, edge.relation_type)
+            if per_seed_relation.get(key, 0) >= max(4, limit // 12):
+                continue
+            chosen.add(other)
+            per_seed_relation[key] = per_seed_relation.get(key, 0) + 1
+        nodes = list(seeds.values())
+        nodes.extend(n for n in repo.nodes_by_ids(site_id, sorted(chosen - seed_ids)) if n.type in node_types)
     ids = {n.id for n in nodes}
     edges = [e for e in repo.edges_of(site_id, ids, rel_types, "both") if e.source in ids and e.target in ids]
+    edge_count = len(edges)
+    if edge_count > 1200:
+        edges.sort(key=lambda e: (-e.weight, e.relation_type, e.source, e.target))
+        edges = edges[:1200]
     if not include_isolated and mode == "links":
         linked = {e.source for e in edges} | {e.target for e in edges}
         nodes = [n for n in nodes if n.id in linked]
-    stats = {"by_type": {}, "by_relation": {}}
+    stats = {"by_type": {}, "by_relation": {}, "sampled": sampled, "edges_truncated": edge_count > len(edges)}
     for n in nodes:
         stats["by_type"][n.type] = stats["by_type"].get(n.type, 0) + 1
     for e in edges:

@@ -8,6 +8,7 @@ from typing import Any
 class TaskKind(str, Enum):
     CONTENT_WRITING = "content_writing"
     SEO_ANALYSIS = "seo_analysis"
+    SEO_REMEDIATION = "seo_remediation"
     RESEARCH = "research"
     BRIEF = "brief"
     KEYWORD_ANALYSIS = "keyword_analysis"

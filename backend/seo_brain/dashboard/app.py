@@ -259,4 +259,10 @@ def api_opportunities(site: str | None = None, type: str | None = None):
 
 @app.get("/api/sites")
 def api_sites():
-    return JSONResponse([{"site_id": s.site_id, "name": s.name, "url": s.canonical_url} for s in load_sites()])
+    try:
+        sites = load_sites()
+    except ValueError as exc:  # A fresh install can have neither site.yaml nor database sites yet.
+        if not str(exc).startswith("no sites defined"):
+            raise
+        sites = []
+    return JSONResponse([{"site_id": s.site_id, "name": s.name, "url": s.canonical_url} for s in sites])

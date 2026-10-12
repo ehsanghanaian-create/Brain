@@ -59,7 +59,7 @@ export function Ga4IntegrationCard({ siteId, initialValue, initialResult, refres
       }
     >
       <ConnectionTester siteId={siteId} kind='ga4' label='GA4 Property ID' hint='123456789'
-        initialValue={initialValue} initialResult={initialResult} onResult={() => setRefresh((n) => n + 1)} />
+        initialValue={initialValue} initialResult={initialResult} refreshKey={refreshKey} onResult={() => setRefresh((n) => n + 1)} />
 
       <SyncCounters kind='ga4' items={view.counters} />
 

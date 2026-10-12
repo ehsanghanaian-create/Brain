@@ -13,9 +13,10 @@ export async function generateMetadata({ params }: { params: Promise<{ siteId: s
   return { title: site.data ? site.data.name : 'سایت' };
 }
 
-export default async function SitePage({ params, searchParams }: { params: Promise<{ siteId: string }>; searchParams: Promise<{ tab?: string }> }) {
+export default async function SitePage({ params, searchParams }: { params: Promise<{ siteId: string }>; searchParams: Promise<{ tab?: string; case?: string }> }) {
   const { siteId } = await params;
-  const { tab } = await searchParams;
+  const { tab, case: caseParam } = await searchParams;
+  const initialCaseId = caseParam && /^\d+$/.test(caseParam) ? Number(caseParam) : null;
   const site = await getSite(siteId);
   if (site.error?.status === 404) notFound();
   if (site.error) {
@@ -25,10 +26,12 @@ export default async function SitePage({ params, searchParams }: { params: Promi
       </PageContainer>
     );
   }
-  const [connections, memory, graph] = await Promise.all([
+  const [connections, memory, graph, mission, portfolio] = await Promise.all([
     settle(endpoints.connections(siteId)),
     settle(endpoints.memory(siteId)),
-    settle(endpoints.graphSummary(siteId))
+    settle(endpoints.graphSummary(siteId)),
+    settle(endpoints.siteMission(siteId)),
+    settle(endpoints.portfolioOverview())
   ]);
   return (
     <PageContainer pageTitle={site.data!.name} pageDescription={`مدیریت سایت، اتصال‌ها و مغز سایت — ${site.data!.canonical_url}`}>
@@ -38,7 +41,10 @@ export default async function SitePage({ params, searchParams }: { params: Promi
         connections={connections.data ?? { site_id: siteId, configured: { gsc: null, ga4: null, wordpress: null }, status: {} }}
         memory={memory.data ?? { site_id: siteId, business_rules: [], tone: {}, audience: {}, cta_rules: [], content_rules: [], forbidden_claims: [], successful_patterns: [], updated_at: null }}
         graph={graph.data ?? null}
+        mission={mission.data ?? { site_id: siteId, objective: '', success_metric: '', updated_at: null }}
+        portfolioSite={portfolio.data?.sites.find((item) => item.site_id === siteId) ?? null}
         initialTab={tab ?? 'overview'}
+        initialCaseId={initialCaseId}
       />
     </PageContainer>
   );

@@ -115,6 +115,28 @@ def test_portfolio_overview_is_one_consistent_snapshot(client):
     assert body["sites"][0]["issues"][0]["severity"] == "blocking"
 
 
+def test_portfolio_uses_latest_full_wordpress_run_not_graph_rebuild(client):
+    _seed(client)
+    with client.eng.begin() as cx:
+        cx.execute(text("INSERT INTO posts(site_id,wp_id,type,url,title,status) VALUES('demo',1,'post','https://demo.example/post','Post','publish')"))
+        cx.execute(text("""INSERT INTO sync_runs(run_id,site_id,source,started_at,finished_at,status,notes)
+                           VALUES('full-broken','demo','wordpress_pipeline','2026-10-10T10:00:00Z',
+                                  '2026-10-10T10:10:00Z','completed_with_errors',:notes)"""),
+                   {"notes": json.dumps({"stage": "full", "status": "succeeded", "progress": 1})})
+        cx.execute(text("""INSERT INTO sync_runs(run_id,site_id,source,started_at,finished_at,status,notes)
+                           VALUES('graph-ok','demo','wordpress_pipeline','2026-10-10T11:00:00Z',
+                                  '2026-10-10T11:01:00Z','succeeded',:notes)"""),
+                   {"notes": json.dumps({"stage": "graph_only", "status": "succeeded", "progress": 1})})
+    body = client.get("/api/v1/portfolio/overview").json()
+    site = body["sites"][0]
+    assert site["state"] == "attention"
+    assert site["latest_sync"]["run_id"] == "full-broken"
+    assert site["latest_sync"]["status"] == "completed_with_errors"
+    assert site["next_action"] == "بررسی خطای همگام‌سازی کامل"
+    assert any(item["kind"] == "wordpress_sync" for item in site["issues"])
+    assert [item["run_id"] for item in body["recent_activity"]] == ["full-broken"]
+
+
 def test_memory_and_ai_orchestrator_endpoints(client):
     _seed(client)
     m = client.get("/api/v1/sites/demo/memory").json()

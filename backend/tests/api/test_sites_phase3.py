@@ -84,6 +84,24 @@ def test_slugify_domain():
     assert slugify_domain("shop.example.co.uk") == "shop-example-co"
 
 
+def test_site_mission_is_explicit_and_scoped(env):
+    c = env["client"]
+    _create(c, "demo")
+    _create(c, "other")
+    empty = c.get("/api/v1/sites/demo/mission")
+    assert empty.status_code == 200 and empty.json()["objective"] == ""
+    saved = c.put("/api/v1/sites/demo/mission", json={
+        "objective": " افزایش کلیک ارگانیک صفحات دسته ",
+        "success_metric": "کلیک همین صفحات در GSC",
+    })
+    assert saved.status_code == 200 and saved.json()["objective"] == "افزایش کلیک ارگانیک صفحات دسته"
+    assert c.get("/api/v1/sites/other/mission").json()["objective"] == ""
+    by_site = {site["site_id"]: site for site in c.get("/api/v1/portfolio/overview").json()["sites"]}
+    assert by_site["demo"]["mission"]["success_metric"] == "کلیک همین صفحات در GSC"
+    assert by_site["other"]["mission"]["objective"] == ""
+    assert c.put("/api/v1/sites/demo/mission", json={"objective": "x" * 301}).status_code == 422
+
+
 def test_initialize_is_idempotent(env):
     c, root = env["client"], env["root"]
     _create(c)

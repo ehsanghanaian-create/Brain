@@ -17,14 +17,12 @@ import {
   IconExternalLink,
   IconFileText,
   IconLink,
-  IconNetwork,
   IconPlus,
   IconSearch,
   IconWorld
 } from '@tabler/icons-react';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { DeleteSiteButton } from './delete-site-button';
 
 type SiteView = PortfolioSite & { details?: Site };
 type StatusFilter = 'all' | PortfolioSiteState;
@@ -227,7 +225,7 @@ function SiteCard({ site }: { site: SiteView }) {
 
         <div className='space-y-2'>
           <div className='flex items-center justify-between gap-4 text-sm'>
-            <span className='text-muted-foreground'>آمادگی داده و ابزارها</span>
+            <span className='text-muted-foreground'>پیشرفت جمع‌آوری داده</span>
             <strong className='tabular-nums'>{fa.format(site.setup_progress)}٪</strong>
           </div>
           <Progress value={site.setup_progress} aria-label={`آمادگی ${site.name}`} className='[&_[data-slot=progress-track]]:h-2' />
@@ -235,6 +233,18 @@ function SiteCard({ site }: { site: SiteView }) {
       </CardHeader>
 
       <CardContent className='space-y-4 px-5 pb-5'>
+        <div className='grid gap-2 rounded-xl border border-sky-500/15 bg-sky-500/[0.05] p-3 sm:grid-cols-[1fr_auto] sm:items-center'>
+          <div className='min-w-0'>
+            <p className='text-muted-foreground text-[11px] font-medium'>هدف سایت</p>
+            <p className='mt-1 text-sm font-semibold leading-6'>{site.mission?.objective || 'هنوز هدف کاری ثبت نشده است'}</p>
+            {site.mission?.success_metric && <p className='text-muted-foreground mt-1 text-xs'>معیار: {site.mission.success_metric}</p>}
+          </div>
+          <Link href={`/dashboard/sites/${site.site_id}`} className='text-xs font-medium text-primary hover:underline'>{site.mission?.objective ? 'ویرایش هدف' : 'ثبت هدف'}</Link>
+        </div>
+        <div className='flex items-start gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs'>
+          <IconArrowLeft className='mt-0.5 size-4 shrink-0 text-primary' aria-hidden='true' />
+          <span><strong>قدم بعدی:</strong> {site.next_action}<span className='text-muted-foreground mt-1 block'>{site.state_reason}</span></span>
+        </div>
         {site.state === 'attention' && (
           <div className='flex gap-2.5 rounded-xl border border-rose-500/20 bg-rose-500/[0.07] p-3 text-rose-800 dark:text-rose-200'>
             <IconAlertTriangle className='mt-0.5 size-4 shrink-0' aria-hidden='true' />
@@ -248,7 +258,7 @@ function SiteCard({ site }: { site: SiteView }) {
         <div className='grid grid-cols-2 gap-2 sm:grid-cols-4'>
           <Metric label='محتوا' value={site.counts.content} icon={IconFileText} />
           <Metric label='خزش‌شده' value={site.counts.crawled} icon={IconChartBar} />
-          <Metric label='گره گراف' value={site.counts.graph_nodes} icon={IconNetwork} />
+          <Metric label='کلمات ثبت‌شده' value={site.counts.keywords} icon={IconSearch} />
           <Metric label='فرصت لینک' value={site.counts.new_link_suggestions} icon={IconLink} highlight />
         </div>
 
@@ -273,12 +283,15 @@ function SiteCard({ site }: { site: SiteView }) {
           آخرین اجرا: {formatDate(latestAt)}
         </span>
         <div className='flex gap-2'>
-          <DeleteSiteButton siteId={site.site_id} siteName={site.name} />
           {site.counts.new_link_suggestions > 0 && (
             <Link href={`/dashboard/internal-linking?site=${site.site_id}`} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
               فرصت‌ها
             </Link>
           )}
+          <Link href={`/dashboard/graph?site=${encodeURIComponent(site.site_id)}`} className={buttonVariants({ variant: 'secondary', size: 'sm' })}>
+            نقشه تصمیم
+            <IconArrowLeft aria-hidden='true' />
+          </Link>
           <Link href={`/dashboard/sites/${site.site_id}`} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
             مدیریت سایت
             <IconArrowLeft aria-hidden='true' />

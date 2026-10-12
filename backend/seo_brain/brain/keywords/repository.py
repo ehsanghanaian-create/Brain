@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable
 
 from sqlalchemy import and_, delete, func, or_, select, text
+from sqlalchemy.exc import IntegrityError
 
 from ...db.repositories.base import Repository, dumps, loads, utcnow
 from ...db.tables import keyword_clusters, keyword_imports, keyword_opportunities, keywords
@@ -120,6 +121,21 @@ class KeywordsRepository(Repository):
         with self.engine.connect() as cx:
             r = cx.execute(select(keywords).where(and_(keywords.c.site_id == site_id, keywords.c.normalized == normalized))).first()
         return _kw(r._mapping) if r else None
+
+    def insert_if_absent(self, kw: Keyword) -> Keyword | None:
+        """Create a reviewed discovery decision without overwriting an existing one."""
+        now = utcnow()
+        values = {k: v for k, v in kw.to_dict().items() if k not in ("id", "created_at", "updated_at")}
+        values.update(created_at=now, updated_at=now)
+        try:
+            with self.engine.begin() as cx:
+                res = cx.execute(keywords.insert().values(**values))
+                new_id = res.inserted_primary_key[0]
+        except IntegrityError:
+            if self.get_by_normalized(kw.site_id, kw.normalized):
+                return None
+            raise
+        return self.get(kw.site_id, new_id)
 
     def upsert(self, kw: Keyword, update_fields: Iterable[str] | None = None) -> tuple[Keyword, bool]:
         """Insert or update by (site_id, normalized). Returns (row, created)."""
@@ -271,18 +287,31 @@ class KeywordsRepository(Repository):
         """Aggregate gsc_query_page per normalized query: clicks, impressions, ctr, impression-weighted position, top page."""
         out: dict[str, dict[str, Any]] = {}
         with self.engine.connect() as cx:
-            rows = cx.execute(text("SELECT query, page, clicks, impressions, position FROM gsc_query_page WHERE site_id=:s"), {"s": site_id}).all()
-        for query, page, clicks, impressions, position in rows:
+            rows = cx.execute(text("SELECT query, page, clicks, impressions, position, date_from, date_to, updated_at FROM gsc_query_page WHERE site_id=:s"), {"s": site_id}).all()
+        for query, page, clicks, impressions, position, date_from, date_to, updated_at in rows:
             key = normalize_keyword(query)
-            a = out.setdefault(key, {"clicks": 0, "impressions": 0, "_pos_w": 0.0, "pages": []})
+            if not key:
+                continue
+            a = out.setdefault(key, {"keyword": query, "clicks": 0, "impressions": 0, "_pos_w": 0.0, "_best_imp": -1,
+                                     "period_start": None, "period_end": None, "last_updated": None, "pages": []})
             a["clicks"] += clicks or 0; a["impressions"] += impressions or 0; a["_pos_w"] += (position or 0) * (impressions or 0)
             a["pages"].append({"page": page, "clicks": clicks, "impressions": impressions, "position": position})
+            if (impressions or 0) > a["_best_imp"]:
+                a["keyword"] = query
+                a["_best_imp"] = impressions or 0
+            if date_from and (a["period_start"] is None or date_from < a["period_start"]):
+                a["period_start"] = date_from
+            if date_to and (a["period_end"] is None or date_to > a["period_end"]):
+                a["period_end"] = date_to
+            if updated_at and (a["last_updated"] is None or updated_at > a["last_updated"]):
+                a["last_updated"] = updated_at
         for key, a in out.items():
             imp = a["impressions"]
             a["position"] = round(a["_pos_w"] / imp, 1) if imp else None
             a["ctr"] = round(a["clicks"] / imp, 4) if imp else 0.0
             a["pages"].sort(key=lambda p: (-(p["impressions"] or 0), p["position"] or 99))
             a["top_page"] = a["pages"][0]["page"] if a["pages"] else None
-            a["pages_count"] = len(a["pages"])
+            a["pages_count"] = len({p["page"] for p in a["pages"]})
             del a["_pos_w"]
+            del a["_best_imp"]
         return out

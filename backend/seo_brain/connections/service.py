@@ -70,7 +70,7 @@ def _google_client_configured() -> bool:
 
 def _token_info() -> dict[str, Any]:
     """Read the cached OAuth token via the shared storage helper (SecretStore-first, legacy-file fallback)."""
-    from ..gsc.client import read_token_json
+    from ..gsc.client import known_invalid_grant, read_token_json
     raw = read_token_json()
     if not raw:
         return _merge_sa({"present": False, "oauth_present": False, "scopes": [], "oauth_scopes": [],
@@ -82,7 +82,9 @@ def _token_info() -> dict[str, Any]:
                           "expiry": None, "source": None})
     oauth_scopes = list(data.get("scopes") or [])
     oauth_present = bool(data.get("refresh_token"))
-    out = {"present": oauth_present, "oauth_present": oauth_present, "scopes": oauth_scopes,
+    oauth_invalid = known_invalid_grant(raw)
+    out = {"present": oauth_present and not oauth_invalid, "oauth_present": oauth_present,
+           "oauth_invalid": oauth_invalid, "scopes": oauth_scopes,
            "oauth_scopes": oauth_scopes, "expiry": data.get("expiry"), "source": "oauth"}
     return _merge_sa(out)
 
@@ -129,8 +131,8 @@ class ConnectionsService:
         self._gsc_factory = gsc_client_factory
         self._ga4_report = ga4_report_factory
         self._ga4_admin = ga4_admin_factory
-        from ..common.http import site_proxy
-        self._wp_fetch = wp_fetch or (lambda url: httpx.get(url, timeout=20, follow_redirects=True, proxy=site_proxy(), headers={"User-Agent": "SEO-Brain/0.2 (+local; read-only)"}))
+        from ..wordpress.origin import wordpress_get
+        self._wp_fetch = wp_fetch or (lambda url: wordpress_get(url))
         if wp_fetch_auth is not None:
             self._wp_fetch_auth = wp_fetch_auth  # type: ignore[method-assign]
 
@@ -464,5 +466,5 @@ class ConnectionsService:
 
     def _wp_fetch_auth(self, url: str, basic: tuple[str, str]) -> httpx.Response:
         """Authenticated GET (Basic = Application Password). Separate hook so tests can fake it; the password never reaches logs."""
-        from ..common.http import site_proxy
-        return httpx.get(url, timeout=20, follow_redirects=True, auth=basic, proxy=site_proxy(), headers={"User-Agent": "SEO-Brain/0.2 (+local; read-only)"})
+        from ..wordpress.origin import wordpress_get
+        return wordpress_get(url, auth=basic)

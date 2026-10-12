@@ -2,14 +2,11 @@ import { NavGroup } from '@/types';
 
 // Hidden from the sidebar and command palette for now; the pages stay reachable by URL.
 export const hiddenNavUrls = new Set([
-  '/dashboard/keywords',
   '/dashboard/content',
   '/dashboard/content-planner',
   '/dashboard/ai-content-test',
   '/dashboard/ai-studio',
-  '/dashboard/ai-models',
-  '/dashboard/internal-linking',
-  '/dashboard/opportunities'
+  '/dashboard/ai-models'
 ]);
 
 /**
@@ -19,7 +16,7 @@ export const hiddenNavUrls = new Set([
  */
 export const navGroups: NavGroup[] = [
   {
-    label: 'نمای کلی',
+    label: 'شروع و سایت‌ها',
     items: [
       { title: 'داشبورد', url: '/dashboard/overview', icon: 'dashboard', shortcut: ['d', 'd'], items: [],
         description: 'وضعیت کلی سایت‌ها، گراف دانش و سلامت سیستم' },
@@ -30,16 +27,18 @@ export const navGroups: NavGroup[] = [
     ]
   },
   {
-    label: 'دانش',
+    label: 'تحلیل سایت',
     items: [
-      { title: 'گراف دانش', url: '/dashboard/graph', icon: 'graph', shortcut: ['g', 'g'], items: [],
-        description: 'گراف صفحات، کوئری‌ها، موجودیت‌ها و اسکیما (فاز ۴)' },
+      { title: 'مسیر رشد فروش', url: '/dashboard/sales', icon: 'trendingUp', items: [],
+        description: 'صفحات تجاری، روند تقاضای ارگانیک، مسئله‌ها و شکاف سنجش سفارش' },
+      { title: 'نقشه تصمیم', url: '/dashboard/graph', icon: 'graph', shortcut: ['g', 'g'], items: [],
+        description: 'هدف سایت، پرسش‌های سئو و مسیر اقدام از روی شواهد گراف' },
       { title: 'کلمات کلیدی', url: '/dashboard/keywords', icon: 'keywords', items: [],
         description: 'ورود، خوشه‌بندی و نقشه موضوعی کلمات کلیدی (فاز ۵)' }
     ]
   },
   {
-    label: 'محتوا',
+    label: 'برنامه و اجرا',
     items: [
       { title: 'تقویم محتوا', url: '/dashboard/calendar', icon: 'calendar', items: [],
         description: 'برنامه‌ریزی، نوشتن با هوش مصنوعی و انتشار زمان‌بندی‌شده در وردپرس — همه در یک تقویم' },
@@ -50,7 +49,7 @@ export const navGroups: NavGroup[] = [
     ]
   },
   {
-    label: 'هوش مصنوعی و لینک‌سازی',
+    label: 'فرصت‌ها و مسائل',
     items: [
       { title: 'آزمایش تولید محتوا', url: '/dashboard/ai-content-test', icon: 'flask', items: [],
         description: 'فضای موقت آزمایش تولید محتوا با Echo یا ارائه‌دهنده واقعی' },
@@ -60,12 +59,14 @@ export const navGroups: NavGroup[] = [
         description: 'ارائه‌دهنده‌ها، مدل‌ها، مسیردهی، پرامپت‌ها، بودجه (فاز ۹)' },
       { title: 'لینک‌سازی داخلی', url: '/dashboard/internal-linking', icon: 'linking', items: [],
         description: 'پیشنهاد لینک داخلی و الگوهای یادگرفته‌شده (فاز ۱۳–۱۴)' },
-      { title: 'فرصت‌های سئو', url: '/dashboard/opportunities', icon: 'opportunities', items: [],
-        description: 'صفحات جایگاه ۵–۲۰، CTR پایین، شکاف محتوا (فاز ۱۵)' }
+      { title: 'مرکز فرصت‌های سئو', url: '/dashboard/opportunities', icon: 'opportunities', items: [],
+        description: 'پرونده‌های باز، فرصت‌های کلمه و پیشنهادهای لینک در یک صف با شواهد و مسیر تصمیم' },
+      { title: 'مشکلات سئو', url: '/dashboard/problems', icon: 'opportunities', items: [],
+        description: 'بررسی و رفع مرحله‌ای مشکلات سایت آزمایشی' }
     ]
   },
   {
-    label: 'سیستم',
+    label: 'سنجش و تنظیمات',
     items: [
       { title: 'گزارش سایت', url: '/dashboard/reports', icon: 'reports', items: [],
         description: 'مرکز گزارش کامل هر سایت: کلمه کلیدی اصلی، جایگاه‌ها، مشکلات، بک‌لینک و رپورتاژ' },

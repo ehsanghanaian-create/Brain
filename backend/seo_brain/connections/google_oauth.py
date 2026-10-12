@@ -4,10 +4,10 @@ Reuses everything from gsc/client.py: the OAuth client (_client_config → .env 
 token file format (`Credentials.to_json()` at GSC_TOKEN_PATH) — so the GSC/GA4 clients, the pipelines and the CLI
 keep working unchanged. Only the way consent is obtained changes: an /authorize URL + a /callback exchange instead
 of run_local_server(). `openid email` is added to the web consent so the UI can show which account is connected;
-the two data scopes stay exactly as before.
+the data scopes stay exactly as configured in the shared GSC/GA4 client.
 
-No plaintext DB storage: the refresh token stays in the git-ignored tokens/ file (same as always); the connected
-account label (email — not a secret) sits next to it in tokens/google_account.json.
+No plaintext DB storage: the refresh token is encrypted in SecretStore, with a legacy file fallback only when
+SecretStore is unavailable. The connected account label (email — not a secret) sits in tokens/google_account.json.
 """
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ import json
 import logging
 import secrets as _secrets
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,7 @@ from ..gsc.client import SCOPES, GscAuthError, _client_config, delete_token, rea
 log = logging.getLogger("google.oauth")
 
 WEB_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email", *SCOPES]
-_STATE_TTL = 600
+_STATE_TTL = 900
 _states: dict[str, dict[str, Any]] = {}
 
 
@@ -67,13 +68,25 @@ def account_path() -> Path:
 
 
 def default_redirect_uri() -> str:
-    # Desktop-type Google clients accept any loopback redirect without prior registration.
-    return env("GOOGLE_OAUTH_REDIRECT", "http://127.0.0.1:8000/api/v1/connections/google/callback")
+    configured = env("GOOGLE_OAUTH_REDIRECT")
+    if configured:
+        return configured
+    origin = env("FRONTEND_ORIGIN")
+    if origin:
+        return f"{origin.rstrip('/')}/api/v1/connections/google/callback"
+    # Local development only. A deployed web app must redirect to its public HTTPS origin.
+    return "http://127.0.0.1:8000/api/v1/connections/google/callback"
 
 
 def _flow(redirect_uri: str):
     from google_auth_oauthlib.flow import Flow
-    return Flow.from_client_config(_client_config(), scopes=WEB_SCOPES, redirect_uri=redirect_uri)
+    config = _client_config()
+    if redirect_uri.startswith("https://"):
+        # Production uses a web OAuth client. The shared config shape stays compatible
+        # with older CLI consumers, while this browser flow uses the web client type.
+        client = config.get("installed") or config.get("web")
+        config = {"web": {**client, "redirect_uris": [redirect_uri]}}
+    return Flow.from_client_config(config, scopes=WEB_SCOPES, redirect_uri=redirect_uri)
 
 
 def begin(redirect_uri: str | None = None) -> dict[str, Any]:
@@ -85,7 +98,10 @@ def begin(redirect_uri: str | None = None) -> dict[str, Any]:
     _load_states()
     for k in [k for k, record in _states.items() if float(record.get("expires_at", 0)) < now]:
         _states.pop(k, None)
-    url, _ = flow.authorization_url(access_type="offline", prompt="consent", include_granted_scopes="true", state=state)
+    # Let the operator choose the Google account explicitly. Re-consent is needed
+    # for an offline refresh token; omitting incremental authorization keeps old
+    # project grants (such as the retired Ads scope) out of the new token.
+    url, _ = flow.authorization_url(access_type="offline", prompt="select_account consent", state=state)
     # google-auth-oauthlib generates a PKCE verifier during authorization_url().
     # The callback creates a fresh Flow, so the verifier must survive that boundary;
     # otherwise Google correctly rejects the code exchange with invalid_grant.
@@ -119,7 +135,7 @@ def finish(code: str, state: str | None, redirect_uri: str | None = None) -> dic
     tp.parent.mkdir(parents=True, exist_ok=True)
     email = _email_from_id_token(getattr(creds, "id_token", None))
     account_path().write_text(json.dumps({"email": email, "scopes": list(creds.scopes or []),
-                                          "connected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, ensure_ascii=False), encoding="utf-8")
+                                          "connected_at": datetime.now(timezone.utc).isoformat(timespec="milliseconds")}, ensure_ascii=False), encoding="utf-8")
     log.info("Google account connected via web flow (token stored, git-ignored)")
     return {"connected": True, "email": email, "scopes": list(creds.scopes or [])}
 
@@ -138,7 +154,18 @@ def _email_from_id_token(id_token: str | None) -> str | None:
 
 def status() -> dict[str, Any]:
     from .service import GA4_SCOPE, _google_client_configured, _token_info
+    from ..gsc.client import get_credentials
     tok = _token_info()
+    authorization_state = "disconnected"
+    if tok.get("oauth_present"):
+        try:
+            get_credentials(interactive=False)
+            authorization_state = "valid"
+            tok = _token_info()  # an expired access token may just have been renewed
+        except (GscAuthError, ValueError, TypeError):
+            authorization_state = "needs_reconnect"
+        except RuntimeError:
+            authorization_state = "temporary_error"
     acct: dict[str, Any] = {}
     if account_path().exists():
         try:
@@ -146,13 +173,15 @@ def status() -> dict[str, Any]:
         except ValueError:
             acct = {}
     oauth_scopes = tok.get("oauth_scopes") or []
-    return {"connected": bool(tok.get("oauth_present")), "email": acct.get("email"),
+    return {"connected": authorization_state == "valid", "authorization_state": authorization_state,
+            "refresh_token_stored": bool(tok.get("oauth_present")), "email": acct.get("email"),
             "scopes": oauth_scopes, "expiry": tok.get("expiry"),
             "gsc_scope": any(s.endswith("webmasters.readonly") for s in oauth_scopes),
             "ga4_scope": GA4_SCOPE in oauth_scopes,
             "ads_scope": "https://www.googleapis.com/auth/adwords" in oauth_scopes,
             "client_configured": _google_client_configured() or _has_store_client(),
             "client_id_hint": client_hint(),
+            "redirect_uri": default_redirect_uri(),
             "connected_at": acct.get("connected_at")}
 
 
@@ -173,7 +202,7 @@ def save_client(client_id: str, client_secret: str) -> dict[str, Any]:
     from ..core.secrets import get_secret_store
     cid, csec = client_id.strip(), client_secret.strip()
     if not cid.endswith(".apps.googleusercontent.com"):
-        raise GscAuthError("Client ID باید به apps.googleusercontent.com ختم شود (OAuth Client از نوع Desktop بسازید)")
+        raise GscAuthError("Client ID باید به apps.googleusercontent.com ختم شود (برای پنل، OAuth Client از نوع Web application بسازید)")
     if len(csec) < 10:
         raise GscAuthError("Client Secret معتبر نیست")
     st = get_secret_store()

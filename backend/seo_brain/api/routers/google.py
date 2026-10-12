@@ -8,6 +8,7 @@ tiny Persian close-this-window page; it never echoes tokens.
 from __future__ import annotations
 
 import logging
+from html import escape
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
@@ -46,7 +47,7 @@ class GoogleClientBody(BaseModel):
 
 @router.put("/client")
 def google_client_save(body: GoogleClientBody) -> dict:
-    """Self-service setup: store the Google OAuth client (Desktop type) in the SecretStore — no .env editing.
+    """Self-service setup: store the Google OAuth web client in the SecretStore — no .env editing.
     The secret is never returned; only `configured` + a masked client id hint."""
     try:
         return google_oauth.save_client(body.client_id, body.client_secret)
@@ -65,7 +66,10 @@ def google_disconnect() -> dict:
 _PAGE = """<!doctype html><html dir="rtl" lang="fa"><head><meta charset="utf-8"><title>SEO Brain</title>
 <style>body{{font-family:Tahoma,system-ui;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}
 .card{{background:#1e293b;border-radius:12px;padding:32px 40px;text-align:center;max-width:26rem}}h1{{font-size:1.1rem;margin:0 0 8px}}p{{color:#94a3b8;font-size:.9rem;margin:0}}</style></head>
-<body><div class="card"><h1>{title}</h1><p>{body}</p></div><script>setTimeout(function(){{try{{window.close()}}catch(e){{}}}},2500)</script></body></html>"""
+<body><div class="card"><h1>{title}</h1><p>{body}</p></div><script>
+try{{new BroadcastChannel('seo-brain-google-oauth').postMessage({{result:'{result}'}})}}catch(e){{}}
+setTimeout(function(){{try{{window.close()}}catch(e){{}}}},2500)
+</script></body></html>"""
 
 
 @callback_router.get("/callback", response_class=HTMLResponse, include_in_schema=True)
@@ -74,13 +78,13 @@ def google_callback(code: str | None = Query(default=None), state: str | None = 
     """OAuth redirect target (no X-API-Token — Google's redirect cannot send it; the state nonce is the guard)."""
     if error or not code:
         log.warning(f"Google OAuth callback denied: {error or 'no code'}")
-        return HTMLResponse(_PAGE.format(title="اتصال انجام نشد", body="دسترسی رد شد یا کد دریافت نشد. این پنجره را ببندید و دوباره تلاش کنید."), status_code=400)
+        return HTMLResponse(_PAGE.format(title="اتصال انجام نشد", body="دسترسی رد شد یا کد دریافت نشد. این پنجره را ببندید و دوباره تلاش کنید.", result="error"), status_code=400)
     try:
         out = google_oauth.finish(code, state)
     except GscAuthError as e:
-        return HTMLResponse(_PAGE.format(title="اتصال انجام نشد", body=str(e)), status_code=400)
+        return HTMLResponse(_PAGE.format(title="اتصال انجام نشد", body=escape(str(e)), result="error"), status_code=400)
     except Exception as e:  # noqa: BLE001 — never leak token internals to the browser
         log.error(f"Google OAuth exchange failed: {e.__class__.__name__}")
-        return HTMLResponse(_PAGE.format(title="اتصال انجام نشد", body="تبادل کد با گوگل ناموفق بود؛ دوباره تلاش کنید."), status_code=400)
+        return HTMLResponse(_PAGE.format(title="اتصال انجام نشد", body="تبادل کد با گوگل ناموفق بود؛ دوباره تلاش کنید.", result="error"), status_code=400)
     who = out.get("email") or "حساب گوگل"
-    return HTMLResponse(_PAGE.format(title="✅ اتصال برقرار شد", body=f"{who} متصل شد. این پنجره به‌زودی بسته می‌شود — به SEO Brain برگردید."))
+    return HTMLResponse(_PAGE.format(title="✅ اتصال برقرار شد", body=f"{escape(who)} متصل شد. این پنجره به‌زودی بسته می‌شود — به SEO Brain برگردید.", result="success"))

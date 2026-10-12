@@ -119,6 +119,38 @@ def test_crud_and_list_filters(c):
     assert c.get(f"/api/v1/sites/{SID}/keywords/{kid}").status_code == 404
 
 
+def test_gsc_discovery_requires_review_and_preserves_provenance(c):
+    base = f"/api/v1/sites/{SID}/keywords"
+    empty = c.get(f"{base}/discover/gsc").json()
+    assert empty["state"] == "no_gsc_data" and empty["items"] == []
+
+    _seed_gsc_and_pages(c.eng)
+    with c.eng.begin() as cx:
+        cx.execute(text("INSERT INTO gsc_query_page(site_id,page,query,clicks,impressions,ctr,position,date_from,date_to) "
+                        "VALUES(:s,'https://demo.example/blog/','امداد خودرو MVM',0,5,0,10,'2026-09-01','2026-09-28')"), {"s": SID})
+    discovered = c.get(f"{base}/discover/gsc", params={"min_impressions": 10}).json()
+    assert discovered["state"] == "ready" and discovered["coverage"] == "gsc_top_rows_only"
+    assert discovered["total"] == 2  # normalized MVM variant is one candidate
+    first = discovered["items"][0]
+    assert first["normalized"] == normalize_keyword("امداد خودرو MVM")
+    assert first["impressions"] == 325 and first["top_page"] == "https://demo.example/mvm/"
+    assert first["pages_count"] == 2 and first["period_end"] == "2026-09-28"
+    assert c.get(f"{base}/discover/gsc", params={"min_impressions": 10, "limit": 1, "offset": 1}).json()["items"][0]["impressions"] == 60
+
+    saved = c.post(f"{base}/discover/gsc/decision", json={"keyword": "امداد خودرو MVM", "action": "save"})
+    assert saved.status_code == 201 and saved.json()["source"] == "gsc" and saved.json()["target_url"] is None
+    assert c.post(f"{base}/discover/gsc/decision", json={"keyword": first["keyword"], "action": "save"}).status_code == 409
+    assert c.post(f"{base}/discover/gsc/decision", json={"keyword": first["keyword"], "action": "ignore"}).status_code == 409
+    assert c.get(f"{base}/{saved.json()['id']}").json()["status"] == "new"
+    assert c.post(f"{base}/discover/gsc/decision", json={"keyword": "عبارت ناموجود", "action": "save"}).status_code == 404
+    assert c.get(f"{base}/discover/gsc", params={"min_impressions": 10}).json()["total"] == 1
+
+    remaining = c.get(f"{base}/discover/gsc", params={"min_impressions": 10}).json()["items"][0]
+    ignored = c.post(f"{base}/discover/gsc/decision", json={"keyword": remaining["keyword"], "action": "ignore"})
+    assert ignored.status_code == 201 and ignored.json()["status"] == "ignored"
+    assert c.get(f"{base}/discover/gsc", params={"min_impressions": 10}).json()["total"] == 0
+
+
 def test_clustering_idf_groups_by_discriminating_tokens():
     kws = [Keyword(SID, "امداد خودرو mvm", id=1), Keyword(SID, "امداد خودرو mvm تهران", id=2), Keyword(SID, "امداد خودرو mvm کرج", id=3),
            Keyword(SID, "امداد خودرو چری", id=4), Keyword(SID, "امداد خودرو چری تهران", id=5), Keyword(SID, "قیمت لنت ترمز", id=6),
@@ -152,6 +184,11 @@ def test_end_to_end_gsc_opportunities_topic_map_and_graph(c):
     assert ("امداد خودرو mvm", "update_title") in kinds            # ctr 0.6% vs ~3.5% expected
     assert ("شماره امداد خودرو", "create_content") in kinds        # no GSC data, no target
     assert ("خرابی خودرو در جاده", "create_content") in kinds      # position 35 > 20
+    unobserved = next(o for o in opps if o["keyword"] == "شماره امداد خودرو" and o["kind"] == "create_content")
+    assert unobserved["evidence"]["gsc_observation"] == "not_observed"
+    assert unobserved["evidence"]["impressions"] is None and unobserved["evidence"]["clicks"] is None
+    assert "هیچ صفحه‌ای در نتایج ندارد" not in unobserved["reason"]
+    assert unobserved["kind_fa"] == "بررسی نیاز به صفحهٔ جدید"
     assert ("امداد خودرو ام وی ام تهران", "add_internal_links") not in kinds  # target mvm has 5 inbound
     for o in opps:
         assert 0 < o["score"] <= 1 and o["reason"] and o["kind_fa"]

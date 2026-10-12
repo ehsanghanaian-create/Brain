@@ -80,6 +80,7 @@ export type PortfolioActivity = {
 export type PortfolioSite = {
   site_id: string; name: string; canonical_url: string; wp_url: string | null; mode: 'manual' | 'assisted' | 'autopilot';
   state: PortfolioSiteState; state_reason: string; next_action: string;
+  mission: { objective: string; success_metric: string };
   issues: { kind: string; severity: 'blocking' | 'warning'; message: string }[];
   setup_progress: number; setup_steps: { wordpress_configured: boolean; content_synced: boolean; crawl_ready: boolean; graph_ready: boolean };
   connections: Record<string, string>; latest_sync: PortfolioActivity | null;
@@ -93,6 +94,19 @@ export type PortfolioOverview = {
   sites: PortfolioSite[];
   recent_activity: PortfolioActivity[];
 };
+export type ActionInboxKind = 'all' | 'issue' | 'keyword' | 'link';
+export type ActionInboxItem = {
+  kind: Exclude<ActionInboxKind, 'all'>; source_id: number; site_id: string; site_name: string;
+  subtype: string; title: string; summary: string; url: string; related_url: string;
+  priority: 'high' | 'medium' | 'low'; score: number | null;
+  evidence: Record<string, unknown>; run_id: string | null; observed_at: string;
+};
+export type ActionInbox = {
+  generated_at: string; site_id: string | null; kind: ActionInboxKind;
+  counts: Record<Exclude<ActionInboxKind, 'all'>, number>;
+  total: number; limit: number; offset: number; items: ActionInboxItem[];
+  scope: string; ranking_note: string;
+};
 export type GraphSummary = { site_id: string; nodes: number; edges: number; by_node_type: Record<string, number>; by_relation_type: Record<string, number>; site: Record<string, unknown> };
 export type SiteMemory = {
   site_id: string;
@@ -105,6 +119,7 @@ export type SiteMemory = {
   successful_patterns: Record<string, unknown>[];
   updated_at: string | null;
 };
+export type SiteMission = { site_id: string; objective: string; success_metric: string; updated_at: string | null };
 export type KnowledgeEvidence = { node_id: string; type: string; label: string; url: string | null; pagerank: number; community: number | null; facts: Record<string, unknown>; connections?: number };
 export type ContentKnowledgePack = {
   id: number; site_id: string; version: number; hash: string; status: string; rendered: string;
@@ -132,6 +147,40 @@ export type WpSyncStatus = {
   step: string | null; step_fa: string | null; progress: number; stage: 'full' | 'graph_only' | null;
   started_at: string | null; finished_at: string | null; items: Record<string, unknown>; errors: string[]; steps: WpSyncStep[];
   run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null; counts: WpSyncCounts; steps_fa: Record<string, string>;
+  full_sync: { run_id: string; status: string; started_at: string | null; finished_at: string | null; errors: string[] } | null;
+  graph_rebuild: { run_id: string; status: string; started_at: string | null; finished_at: string | null; errors: string[] } | null;
+};
+export type UrlInventoryItem = {
+  url: string; title: string | null; sources: ('wordpress' | 'crawl' | 'gsc')[];
+  wordpress_type: string | null; wordpress_status: string | null;
+  crawl_status: string | null; status_code: number | null; indexable: number | null;
+  canonical: string | null; in_sitemap: number | null; last_crawled: string | null; crawl_run_id: string | null;
+  gsc_clicks: number | null; gsc_impressions: number | null; gsc_position: number | null;
+  gsc_date_from: string | null; gsc_date_to: string | null; gsc_updated_at: string | null;
+};
+export type UrlInventory = {
+  site_id: string; items: UrlInventoryItem[]; total: number; limit: number; offset: number;
+  coverage: { crawl: { run_id: string; status: string; started_at: string; finished_at: string | null; max_urls: number | null; urls_crawled: number; urls_failed: number } | null;
+    gsc_latest_date: string | null; gsc_scope: 'observed_top_rows_only'; missing_source_means_zero: false };
+};
+export type UrlDetail = {
+  site_id: string; url: string; inventory: UrlInventoryItem;
+  monthly_gsc: { month: string; clicks: number; impressions: number; position: number | null; date_from: string; date_to: string }[];
+  gsc_latest_date: string | null;
+  top_queries: { query: string; clicks: number; impressions: number; position: number | null }[];
+  issue_cases: { id: number; problem_type: string; severity: string; status: 'open' | 'resolved'; first_seen: string; last_seen: string }[];
+  new_keyword_opportunities: number; coverage: 'gsc_observed_top_rows_only'; missing_month_means_zero: false;
+};
+export type IssueCase = {
+  id: number; problem_type: string; url: string; related_url: string; severity: string;
+  status: 'open' | 'resolved'; detail: Record<string, unknown>; first_seen: string; last_seen: string;
+  last_run_id: string | null; seen_count: number; resolved_at: string | null;
+};
+export type IssueCases = { site_id: string; items: IssueCase[]; total: number; limit: number; offset: number;
+  counts: { open: number; resolved: number }; resolution_policy: 'complete_successful_crawl_only' };
+export type IssueCaseDetail = IssueCase & {
+  observations: { run_id: string; severity: string; detail: Record<string, unknown>; observed_at: string }[];
+  events: { run_id: string | null; event_type: 'opened' | 'reopened' | 'resolved'; created_at: string }[];
 };
 export type WpSyncQueued = { status: 'queued' | 'already_running' | 'not_queued' | string; job_id?: string | null; run_id?: string | null; stage?: string; step?: string | null; error?: string | null };
 export type GscSyncCoverage = { date_from: string | null; date_to: string | null; rows: number; queries: number; important_queries: number; pages: number; content_snapshots: number; keyword_opportunities?: number; last_gsc_sync?: string | null };
@@ -143,7 +192,7 @@ export type GscSyncStatus = {
   steps: WpSyncStep[]; run_id: string | null; job_id: string | null; job: { run_id: string; status: string; error?: string | null } | null;
   coverage: GscSyncCoverage; steps_fa: Record<string, string>;
 };
-export type GoogleAccountStatus = { connected: boolean; email: string | null; scopes: string[]; expiry: string | null; gsc_scope: boolean; ga4_scope: boolean; client_configured: boolean; client_id_hint?: string | null; connected_at?: string | null };
+export type GoogleAccountStatus = { connected: boolean; authorization_state?: 'valid' | 'needs_reconnect' | 'temporary_error' | 'disconnected'; refresh_token_stored?: boolean; email: string | null; scopes: string[]; expiry: string | null; gsc_scope: boolean; ga4_scope: boolean; client_configured: boolean; client_id_hint?: string | null; connected_at?: string | null; redirect_uri?: string | null };
 export type Ga4Property = { property_id: string; display_name: string | null; account: string | null; website_url?: string | null };
 export type Ga4Properties = { status: 'ok' | 'not_configured' | 'not_authorized' | 'error' | string; properties: Ga4Property[]; message?: string };
 export type Ga4SyncCoverage = { date_from: string | null; date_to: string | null; rows: number; pages: number; sessions: number; users: number; conversions: number; content_snapshots: number; last_ga4_sync?: string | null; top_pages: { path: string; sessions: number; conversions: number }[] };
@@ -158,8 +207,8 @@ export type Ga4SyncStatus = {
 export type SaGscProperty = { property: string; permission: string | null };
 export type SaGscStatus = { configured: boolean; service_account_email: string | null; accessible_properties: SaGscProperty[]; last_check: string | null };
 export type SaGscCheck = { status: 'ok' | 'not_configured' | 'error' | string; service_account_email: string | null; properties: SaGscProperty[]; message?: string; checked_at?: string };
-export type AutoSyncSource = { configured: boolean; last_success: string | null; next_at: string | null; due: boolean };
-export type AutoSyncPlan = { site_id: string; enabled: boolean; interval_hours: number; sources: Record<'wordpress' | 'gsc' | 'ga4', AutoSyncSource> };
+export type AutoSyncSource = { configured: boolean; last_success: string | null; last_finished?: string | null; last_status?: string | null; effective_interval_minutes?: number; next_at: string | null; due: boolean };
+export type AutoSyncPlan = { site_id: string; enabled: boolean; interval_minutes?: number; interval_hours: number; sources: Record<'wordpress' | 'gsc' | 'ga4', AutoSyncSource> };
 export type IntegrationBlock = {
   kind: 'wordpress' | 'gsc' | 'ga4' | string; label: string;
   connection: { status: string; tested_at: string | null; detail: Record<string, unknown> };
@@ -183,7 +232,24 @@ export type InitializeResult = {
 export type GraphNode = { id: string; site_id: string; type: string; metadata: { label?: string; url?: string | null; pagerank?: number | null; community?: number | null; vault_path?: string | null; props?: Record<string, unknown> } & Record<string, unknown> };
 export type GraphEdge = { source: string; target: string; relation_type: string; weight: number; metadata: { edge_id?: string; props?: Record<string, unknown> }; site_id: string };
 export type GraphMode = { key: 'seo' | 'content' | 'links' | 'planner'; title_fa: string; description_fa: string; layout: string; group_by: string; node_types: string[]; relation_types: string[] };
-export type GraphView = { mode: GraphMode; nodes: GraphNode[]; edges: GraphEdge[]; truncated: boolean; total_nodes: number; stats: { by_type: Record<string, number>; by_relation: Record<string, number> } };
+export type GraphView = { mode: GraphMode; nodes: GraphNode[]; edges: GraphEdge[]; truncated: boolean; total_nodes: number; stats: { by_type: Record<string, number>; by_relation: Record<string, number>; sampled?: boolean; edges_truncated?: boolean } };
+export type SalesPath = {
+  site_id: string; generated_at: string; days: number; latest_gsc_date: string | null;
+  window: { from: string; to: string } | null; previous_window: { from: string; to: string } | null;
+  coverage: 'gsc_observed_top_rows_only'; sales_measurement: 'unavailable'; previous_available: boolean; previous_total_clicks: number | null;
+  inventory: Record<'product' | 'category' | 'shop', number>;
+  stages: { kind: 'product' | 'category' | 'shop'; clicks: number; impressions: number; pages_observed: number }[];
+  daily: { date: string; product: number; category: number; shop: number }[];
+  top_pages: { url: string; kind: 'product' | 'category' | 'shop'; clicks: number; impressions: number; ctr: number | null; previous_clicks: number | null; open_issues: number; new_keyword_opportunities: number; new_link_suggestions: number }[];
+  priority_pages: { url: string; kind: 'product' | 'category' | 'shop'; clicks: number | null; impressions: number | null; open_issues: number; new_keyword_opportunities: number; new_link_suggestions: number }[];
+};
+export type SalesMeasurement = {
+  status: 'reported' | 'not_configured' | 'error'; source: 'ga4_data_api'; days: number;
+  currency?: string | null; property_time_zone?: string | null; tracking_verified: false;
+  channels: { channel: string; sessions: number; transactions: number; purchase_revenue: number }[];
+  organic_search: { channel: string; sessions: number; transactions: number; purchase_revenue: number } | null;
+  reason?: string;
+};
 export type NodeDetails = Record<string, unknown> & { id: string; type: string; label: string; url: string | null; pagerank: number | null; community: number | null; props: Record<string, unknown>; degree: number };
 // phase 5 — keywords
 export type KeywordGsc = { clicks: number; impressions: number; ctr: number; position: number | null; top_page: string | null; pages_count: number } | null;
@@ -195,6 +261,8 @@ export type KeywordRow = {
 export type KeywordDetail = KeywordRow & { gsc_pages: { page: string; clicks: number; impressions: number; position: number }[]; opportunities: KeywordOpportunity[] };
 export type KeywordCounts = { total: number; by_status: Record<string, number>; by_intent: Record<string, number>; clusters: number; with_target: number; opportunities_new: Record<string, number> };
 export type KeywordList = { items: KeywordRow[]; total: number; limit: number; offset: number; counts: KeywordCounts };
+export type GscKeywordCandidate = Schemas['GscKeywordCandidate'];
+export type GscKeywordDiscovery = Schemas['GscKeywordDiscovery'];
 export type KeywordCluster = { site_id: string; cluster_id: string; name: string; topic: string | null; keywords_count: number; method: string | null; created_at: string | null; updated_at: string | null };
 export type TopicMap = { clusters: (KeywordCluster & { members: KeywordRow[]; gsc: { impressions: number; clicks: number; avg_position: number | null; with_data: number }; targets: string[]; volume: number })[]; unclustered: KeywordRow[]; counts: KeywordCounts };
 export type KeywordOpportunity = { id: number; site_id: string; keyword_id: number; kind: string; kind_fa?: string; keyword?: string | null; keyword_status?: string | null; target_url: string | null; score: number; reason: string; evidence: Record<string, unknown>; status: string; run_id: string | null; created_at: string; updated_at: string };
@@ -307,9 +375,32 @@ export const endpoints = {
   health: () => api<Health>('/health'),
   jobs: (limit = 50) => api<JobRun[]>(`/jobs?limit=${limit}`),
   job: (runId: string) => api<JobRun>(`/jobs/${encodeURIComponent(runId)}`),
-  portfolioOverview: () => api<PortfolioOverview>('/portfolio/overview', { cacheSeconds: 10 }),
+  portfolioOverview: () => api<PortfolioOverview>('/portfolio/overview'),
+  actionInbox: (params: { siteId?: string; kind?: ActionInboxKind; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams({ kind: params.kind ?? 'all', limit: String(params.limit ?? 20), offset: String(params.offset ?? 0) });
+    if (params.siteId) query.set('site_id', params.siteId);
+    return api<ActionInbox>(`/portfolio/action-inbox?${query}`);
+  },
   sites: () => api<Site[]>('/sites', { cacheSeconds: 10 }),
   site: (id: string) => api<Site>(`/sites/${encodeURIComponent(id)}`, { cacheSeconds: 5 }),
+  siteMission: (id: string) => api<SiteMission>(`/sites/${encodeURIComponent(id)}/mission`),
+  salesPath: (id: string, days = 28) => api<SalesPath>(`/sites/${encodeURIComponent(id)}/commerce/path?days=${days}`),
+  salesMeasurement: (id: string, days = 28) => api<SalesMeasurement>(`/sites/${encodeURIComponent(id)}/commerce/measurement?days=${days}`),
+  putSiteMission: (id: string, body: Pick<SiteMission, 'objective' | 'success_metric'>) => api<SiteMission>(`/sites/${encodeURIComponent(id)}/mission`, { method: 'PUT', json: body }),
+  urlInventory: (id: string, params: { search?: string; source?: 'all' | 'wordpress' | 'crawl' | 'gsc'; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams();
+    if (params.search) query.set('search', params.search);
+    if (params.source && params.source !== 'all') query.set('source', params.source);
+    query.set('limit', String(params.limit ?? 50));
+    query.set('offset', String(params.offset ?? 0));
+    return api<UrlInventory>(`/sites/${encodeURIComponent(id)}/urls?${query}`);
+  },
+  urlDetail: (id: string, url: string) => api<UrlDetail>(`/sites/${encodeURIComponent(id)}/urls/detail?${new URLSearchParams({ url })}`),
+  issueCases: (id: string, params: { status?: 'open' | 'resolved' | 'all'; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams({ status: params.status ?? 'open', limit: String(params.limit ?? 50), offset: String(params.offset ?? 0) });
+    return api<IssueCases>(`/sites/${encodeURIComponent(id)}/issues?${query}`);
+  },
+  issueCase: (id: string, caseId: number) => api<IssueCaseDetail>(`/sites/${encodeURIComponent(id)}/issues/${caseId}`),
   graphSummary: (id: string) => api<GraphSummary>(`/sites/${encodeURIComponent(id)}/graph/summary`, { cacheSeconds: 10 }),
   memory: (id: string) => api<SiteMemory>(`/sites/${encodeURIComponent(id)}/memory`, { cacheSeconds: 5 }),
   // phase 3 — sites management
@@ -385,6 +476,8 @@ export const endpoints = {
     return api<KeywordList>(`/sites/${encodeURIComponent(id)}/keywords?${q.toString()}`);
   },
   keyword: (id: string, kid: number) => api<KeywordDetail>(`/sites/${encodeURIComponent(id)}/keywords/${kid}`),
+  discoverGscKeywords: (id: string, minImpressions = 10, limit = 50, offset = 0) => api<GscKeywordDiscovery>(`/sites/${encodeURIComponent(id)}/keywords/discover/gsc?min_impressions=${minImpressions}&limit=${limit}&offset=${offset}`),
+  decideGscKeyword: (id: string, keyword: string, action: 'save' | 'ignore') => api<KeywordRow>(`/sites/${encodeURIComponent(id)}/keywords/discover/gsc/decision`, { method: 'POST', json: { keyword, action } }),
   createKeyword: (id: string, body: Record<string, unknown>) => api<KeywordRow>(`/sites/${encodeURIComponent(id)}/keywords`, { method: 'POST', json: body }),
   updateKeyword: (id: string, kid: number, body: Record<string, unknown>) => api<KeywordRow>(`/sites/${encodeURIComponent(id)}/keywords/${kid}`, { method: 'PATCH', json: body }),
   deleteKeyword: (id: string, kid: number) => api<{ deleted: number }>(`/sites/${encodeURIComponent(id)}/keywords/${kid}`, { method: 'DELETE' }),

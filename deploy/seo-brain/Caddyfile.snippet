@@ -2,6 +2,50 @@
 seo.gearboxemdad.com {
 	encode zstd gzip
 
+	# Google redirects the browser here. The backend validates the one-time state.
+	@google_oauth_callback path /api/v1/connections/google/callback
+	log_skip @google_oauth_callback
+	handle @google_oauth_callback {
+		header Cache-Control "no-store, private, max-age=0"
+		header Referrer-Policy "no-referrer"
+		uri replace /api/v1/connections/google/callback /api/backend/connections/google/callback
+		reverse_proxy seo-brain-frontend:3000
+	}
+
+	# Public information pages for the OAuth consent screen.
+	@public_oauth_pages path /oauth-info /oauth-info/ /privacy /privacy/ /terms /terms/
+	handle @public_oauth_pages {
+		reverse_proxy seo-brain-frontend:3000
+	}
+
+	# Build assets contain no private dashboard data.
+	@public_assets path /_next/* /favicon.ico
+	handle @public_assets {
+		reverse_proxy seo-brain-frontend:3000
+	}
+
+	@ads_collector path /api/ads-data/collect
+	handle @ads_collector {
+		header Cache-Control "no-store, private, max-age=0"
+		reverse_proxy seo-brain-frontend:3000 {
+			header_up X-Collector-Client-IP {http.request.header.X-Real-IP}
+			header_up X-Collector-XFF {http.request.header.X-Forwarded-For}
+			header_up X-Collector-Proxy-IP {remote_host}
+		}
+	}
+
+	@tracker_beacon path /api/v1/track
+	handle @tracker_beacon {
+		header Cache-Control "no-store, private, max-age=0"
+		rewrite * /api/backend/track
+		reverse_proxy seo-brain-frontend:3000
+	}
+
+	handle_path /api/v1/track/* {
+		header Cache-Control "no-store, private, max-age=0"
+		rewrite * /api/backend/track{uri}
+		reverse_proxy seo-brain-frontend:3000
+	}
 
 	handle {
 		basic_auth {
@@ -17,8 +61,9 @@ seo.gearboxemdad.com {
 		Referrer-Policy strict-origin-when-cross-origin
 		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Robots-Tag "noindex, nofollow, noarchive"
 	}
+	@private_pages not path /oauth-info /oauth-info/ /privacy /privacy/ /terms /terms/
+	header @private_pages X-Robots-Tag "noindex, nofollow, noarchive"
 
 	log {
 		output stdout

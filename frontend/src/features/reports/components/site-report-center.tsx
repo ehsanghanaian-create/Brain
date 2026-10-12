@@ -196,21 +196,36 @@ export function SiteReportCenter({ sites, initialSiteId }: { sites: Site[]; init
                 <CardDescription dir='ltr' className='text-start'>{summary.site.canonical_url || summary.site.wp_url || siteId}</CardDescription>
               </div>
               <div className='text-center'>
-                <div className='text-3xl font-bold tabular-nums'>{fa.format(summary.score)}<span className='text-muted-foreground text-base'>/۱۰۰</span></div>
+                <div className='text-3xl font-bold tabular-nums'>{summary.score == null ? '—' : fa.format(summary.score)}<span className='text-muted-foreground text-base'>/۱۰۰</span></div>
                 <div className='text-muted-foreground text-xs' title={`جریمه مشکلات: ${summary.score_breakdown.problems_penalty} · جریمه اتصال‌ها: ${summary.score_breakdown.connections_penalty}`}>
-                  امتیاز سلامت سئو
+                  {summary.crawl_coverage.coverage_status === 'complete' ? 'امتیاز قواعد فنی بررسی‌شده؛ شامل رتبه و کیفیت محتوا نیست' : 'امتیاز پس از تکمیل خزش نمایش داده می‌شود'}
                 </div>
               </div>
             </CardHeader>
+            {summary.crawl_coverage.coverage_status !== 'complete' && (
+              <CardContent className='pb-3 pt-0'>
+                <div className='rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200'>
+                  {summary.crawl_coverage.coverage_status === 'not_started' ? (
+                    'هنوز خزشی برای این سایت ثبت نشده است؛ امتیاز و شمار مشکلات، تصویر کامل SEO سایت نیست.'
+                  ) : summary.crawl_coverage.status === 'running' || summary.crawl_coverage.status === 'queued' ? (
+                    <>خزش تازه در حال اجراست: {fa.format(summary.crawl_coverage.latest_crawled)} URL بررسی شده است. آخرین موجودی سایت‌مپ {fa.format(summary.crawl_coverage.sitemap_urls)} URL دارد. گزارش تا پایان خزش موقت است و امتیاز نمایش داده نمی‌شود.</>
+                  ) : summary.crawl_coverage.status === 'completed_capped' ? (
+                    <>خزش پس از {fa.format(summary.crawl_coverage.latest_crawled)} URL به سقف {fa.format(summary.crawl_coverage.max_urls ?? 0)} رسید. با اینکه {fa.format(summary.crawl_coverage.recent_crawled)} URL سایت‌مپ در {fa.format(summary.crawl_coverage.window_days)} روز اخیر بررسی شده‌اند، گراف لینک‌ها هنوز کامل نیست؛ امتیاز و هشدارهای وابسته به لینک ورودی نمایش داده نمی‌شوند.</>
+                  ) : (
+                    <>پوشش خزش هنوز کامل نیست: {fa.format(summary.crawl_coverage.recent_crawled)} URL سایت‌مپ در {fa.format(summary.crawl_coverage.window_days)} روز اخیر از {fa.format(summary.crawl_coverage.sitemap_urls)} URL شناخته‌شده بررسی شده‌اند. امتیاز و شمار مشکلات را نتیجهٔ قطعی کل سایت ندانید.</>
+                  )}
+                </div>
+              </CardContent>
+            )}
             <CardContent className='grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8'>
               <KpiCard label='ورودی ارگانیک' value={cur?.clicks ?? null} hint={prev ? undefined : `${days} روز اخیر GSC`} />
               <KpiCard label='نمایش (Impression)' value={cur?.impressions ?? null} />
               <KpiCard label='میانگین جایگاه' value={cur?.position != null ? Number(cur.position.toFixed(1)) : null} />
-              <KpiCard label='صفحات ایندکس‌پذیر' value={summary.counts.indexable_pages} />
+              <KpiCard label='قابل ایندکس در سایت‌مپ' value={summary.counts.indexable_pages} hint='فقط URLهای خزیده‌شدهٔ سایت‌مپ؛ وضعیت ایندکس گوگل نیست' />
               <KpiCard label='کوئری‌های GSC' value={summary.counts.gsc_queries} />
               <KpiCard label='بک‌لینک‌ها' value={summary.counts.backlinks} />
               <KpiCard label='دامنه‌های ارجاع‌دهنده' value={summary.counts.referring_domains} />
-              <KpiCard label='مشکلات سئو' value={summary.counts.problems.total} hint={`${fa.format(summary.counts.problems.high)} بحرانی`} />
+              <KpiCard label={summary.crawl_coverage.coverage_status === 'complete' ? 'مشکلات سئو' : 'یافته‌های خزش فعلی'} value={summary.counts.problems.total} hint={`${fa.format(summary.counts.problems.high)} بحرانی`} />
             </CardContent>
             {(cur || prev) && (
               <CardContent className='text-muted-foreground flex flex-wrap gap-4 pt-0 text-xs'>

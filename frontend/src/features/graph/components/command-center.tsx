@@ -4,7 +4,7 @@ import '@xyflow/react/dist/style.css';
 
 import { BackendError } from '@/components/seo-brain/backend-error';
 import { Badge } from '@/components/ui/badge';
-import { ApiError, endpoints, type GraphMode, type GraphView, type NodeDetails, type Site } from '@/lib/api/client';
+import { ApiError, endpoints, type GraphView, type NodeDetails, type PortfolioOverview, type Site } from '@/lib/api/client';
 import {
   Background,
   Controls,
@@ -19,38 +19,33 @@ import {
   type OnSelectionChangeFunc
 } from '@xyflow/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTheme } from 'next-themes';
 import { TYPE_FAMILIES } from '../constants';
 import { layoutCircle, layoutForce, layoutGrouped, layoutLayered, layoutRadial, toFlowEdges, toFlowNodes } from '../layout';
 import { useManualLayout } from '../use-manual-layout';
 import { GlowEdge } from './glow-edge';
 import { GraphToolbar, type ToolbarState } from './graph-toolbar';
+import { GraphMission } from './graph-mission';
 import { NodeDetailsPanel } from './node-details-panel';
 import { GroupNode, SeoNode } from './seo-node';
 
 const nodeTypes = { seo: SeoNode, group: GroupNode };
 const edgeTypes = { glow: GlowEdge };
 const FLOW_EDGE_CAP = 160;   // «جریان ارتباط‌ها»: particles on every edge only while the graph is small enough to stay smooth
-const MAIN_EDGE_CAP = 70;    // always-on flow for the strongest relations (by weight), so link direction reads at a glance
-const DEFAULT_MODES: GraphMode[] = [
-  { key: 'seo', title_fa: 'نقشه سئو', description_fa: '', layout: 'force', group_by: 'type', node_types: [], relation_types: [] },
-  { key: 'content', title_fa: 'نقشه محتوا', description_fa: '', layout: 'layered', group_by: 'type', node_types: [], relation_types: [] },
-  { key: 'links', title_fa: 'نقشه لینک داخلی', description_fa: '', layout: 'force', group_by: 'community', node_types: [], relation_types: [] }
-];
-
-export function CommandCenter({ sites, initialSiteId, initialMode = 'seo', focusNodeId }: { sites: Site[]; initialSiteId: string; initialMode?: ToolbarState['mode']; focusNodeId?: string | null }) {
+export function CommandCenter({ sites, portfolio, initialSiteId, initialMode = 'seo', focusNodeId }: { sites: Site[]; portfolio?: PortfolioOverview | null; initialSiteId: string; initialMode?: ToolbarState['mode']; focusNodeId?: string | null }) {
   return (
     <ReactFlowProvider>
-      <CommandCenterInner sites={sites} initialSiteId={initialSiteId} initialMode={initialMode} focusNodeId={focusNodeId} />
+      <CommandCenterInner sites={sites} portfolio={portfolio ?? null} initialSiteId={initialSiteId} initialMode={initialMode} focusNodeId={focusNodeId} />
     </ReactFlowProvider>
   );
 }
 
-function CommandCenterInner({ sites, initialSiteId, initialMode = 'seo', focusNodeId }: { sites: Site[]; initialSiteId: string; initialMode?: ToolbarState['mode']; focusNodeId?: string | null }) {
+function CommandCenterInner({ sites, portfolio, initialSiteId, initialMode = 'seo', focusNodeId }: { sites: Site[]; portfolio: PortfolioOverview | null; initialSiteId: string; initialMode?: ToolbarState['mode']; focusNodeId?: string | null }) {
   const rf = useReactFlow();
+  const { resolvedTheme } = useTheme();
   const [state, setState] = useState<ToolbarState>({
-    siteId: initialSiteId, mode: initialMode, query: '', familyOff: new Set(), relationOff: new Set(), grouping: 'none', direction: 'TB', hideIsolated: true, focusNeighbors: false, limit: 160, flow: false
+    siteId: initialSiteId, mode: initialMode, query: '', familyOff: new Set(), relationOff: new Set(), grouping: 'none', direction: 'TB', hideIsolated: false, focusNeighbors: false, limit: 160, flow: false
   });
-  const [modes, setModes] = useState<GraphMode[]>(DEFAULT_MODES);
   const [view, setView] = useState<GraphView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -66,23 +61,30 @@ function CommandCenterInner({ sites, initialSiteId, initialMode = 'seo', focusNo
   const detailsCache = useRef<Map<string, NodeDetails>>(new Map());
 
   const patch = useCallback((p: Partial<ToolbarState>) => setState((s) => ({ ...s, ...p })), []);
-
-  // modes (once per site)
-  useEffect(() => {
-    endpoints.graphModes(state.siteId).then(setModes).catch(() => setModes(DEFAULT_MODES));
-  }, [state.siteId]);
+  const navigateGraph = useCallback((p: Partial<ToolbarState>) => {
+    if (p.siteId || p.mode) {
+      const url = new URL(window.location.href);
+      if (p.siteId) url.searchParams.set('site', p.siteId);
+      if (p.mode) url.searchParams.set('mode', p.mode);
+      window.history.replaceState(window.history.state, '', url);
+    }
+    patch(p);
+  }, [patch]);
 
   // load view when site / mode / hideIsolated changes
   useEffect(() => {
     let alive = true;
     setLoading(true);
+    setView(null);
     setError(null);
+    setSelectedId(null);
+    setDetails(null);
     endpoints
       .graphView(state.siteId, { mode: state.mode, limit: state.limit, include_isolated: !(state.mode === 'links' && state.hideIsolated) })
       .then((v) => {
         if (!alive) return;
         setView(v);
-        setSelectedId(null);
+        setSelectedId(state.siteId === initialSiteId && state.mode === initialMode && focusNodeId && v.nodes.some((node) => node.id === focusNodeId) ? focusNodeId : null);
         setDetails(null);
         detailsCache.current.clear();
         // default grouping/direction per mode
@@ -93,7 +95,7 @@ function CommandCenterInner({ sites, initialSiteId, initialMode = 'seo', focusNo
     return () => {
       alive = false;
     };
-  }, [state.siteId, state.mode, state.hideIsolated, state.limit]);
+  }, [state.siteId, state.mode, state.hideIsolated, state.limit, initialSiteId, initialMode, focusNodeId]);
 
   // filtered + laid-out flow elements
   const hiddenTypes = useMemo(() => new Set(TYPE_FAMILIES.filter((f) => state.familyOff.has(f.key)).flatMap((f) => f.types)), [state.familyOff]);
@@ -116,11 +118,6 @@ function CommandCenterInner({ sites, initialSiteId, initialMode = 'seo', focusNo
     return { laidNodes: laid, baseEdges: flowEdges };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, hiddenTypes, state.relationOff, state.grouping, state.direction, layoutTick, manual.apply, manual.version]);
-
-  const mainEdgeIds = useMemo(() => {
-    const weight = (e: Edge) => Number((e.data as { weight?: number } | undefined)?.weight ?? 0);
-    return new Set([...baseEdges].sort((a, b) => weight(b) - weight(a)).slice(0, MAIN_EDGE_CAP).map((e) => e.id));
-  }, [baseEdges]);
 
   // Search and focus only restyle the existing layout; no expensive Dagre pass.
   const { nodes, edges, matches, neighborCount } = useMemo(() => {
@@ -163,7 +160,6 @@ function CommandCenterInner({ sites, initialSiteId, initialMode = 'seo', focusNo
         };
       });
     const scoped = baseEdges.filter((edge) => !focusIds || (focusIds.has(edge.source) && focusIds.has(edge.target)));
-    const calm = !neighborIds && !hoverIds;                       // nothing selected/hovered → ambient flow on the main relations
     const flowAll = state.flow && scoped.length <= FLOW_EDGE_CAP;
     const visibleEdges = scoped
       .map((edge) => {
@@ -171,7 +167,7 @@ function CommandCenterInner({ sites, initialSiteId, initialMode = 'seo', focusNo
         const hovered = !!hoverId && (edge.source === hoverId || edge.target === hoverId);
         const glow = hovered ? colorOf.get(hoverId!) : connected ? colorOf.get(selectedId!) : undefined;
         const baseOpacity = neighborIds ? (connected ? 1 : 0.08) : Number(edge.style?.opacity ?? 0.72);
-        const active = hovered || connected || (calm && (flowAll || mainEdgeIds.has(edge.id)));
+        const active = hovered || connected || flowAll;
         return {
           ...edge,
           data: { ...edge.data, active, strong: hovered || connected, color: glow ?? (typeof edge.style?.stroke === 'string' ? edge.style.stroke : undefined), particles: hovered || connected ? 3 : 2, speed: hovered || connected ? 3.6 : 5 },
@@ -188,7 +184,7 @@ function CommandCenterInner({ sites, initialSiteId, initialMode = 'seo', focusNo
     // hand-dragged positions are re-applied here (cheap pass) so a drag never triggers the expensive layout memo
     return { nodes: manual.apply(visibleNodes), edges: visibleEdges, matches: matchIds.size, neighborCount: Math.max((neighborIds?.size ?? 1) - 1, 0) };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [laidNodes, baseEdges, mainEdgeIds, q, selectedId, hoverId, state.focusNeighbors, state.flow, manual.apply, manual.tick]);
+  }, [laidNodes, baseEdges, q, selectedId, hoverId, state.focusNeighbors, state.flow, manual.apply, manual.tick]);
 
   // React Flow owns the node list while the user drags; we push our styled/laid-out nodes into it whenever they change
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState<Node>([]);
@@ -202,7 +198,8 @@ function CommandCenterInner({ sites, initialSiteId, initialMode = 'seo', focusNo
 
   useEffect(() => {
     setAnimating(true);
-    const t = setTimeout(() => rf.fitView({ padding: 0.15, duration: 500 }), 60);
+    const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 500;
+    const t = setTimeout(() => rf.fitView({ padding: 0.15, duration }), 60);
     const t2 = setTimeout(() => setAnimating(false), 750);
     return () => { clearTimeout(t); clearTimeout(t2); };
   }, [view, state.grouping, state.direction, state.focusNeighbors, layoutTick, rf]);
@@ -245,7 +242,7 @@ function CommandCenterInner({ sites, initialSiteId, initialMode = 'seo', focusNo
       setSelectedId(id);
       patch({ focusNeighbors: false });
       const n = rf.getNode(id);
-      if (n) rf.fitView({ nodes: [{ id }], duration: 400, maxZoom: 1.4 });
+      if (n) rf.fitView({ nodes: [{ id }], duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 400, maxZoom: 1.4 });
     },
     [rf, patch]
   );
@@ -256,20 +253,22 @@ function CommandCenterInner({ sites, initialSiteId, initialMode = 'seo', focusNo
   }, [q, nodes, focusNode]);
 
   return (
-    <div className='flex h-[calc(100vh-10rem)] min-h-[620px] flex-col gap-3'>
-      <GraphToolbar sites={sites} modes={modes} view={view} state={state} onChange={patch} loading={loading} matches={matches}
+    <div className='flex flex-col gap-3'>
+      <GraphMission site={portfolio?.sites.find((site) => site.site_id === state.siteId) ?? null} siteId={state.siteId} mode={state.mode} view={view} onModeChange={(mode) => navigateGraph({ mode })} />
+      <GraphToolbar sites={sites} view={view} state={state} onChange={navigateGraph} loading={loading} matches={matches}
         onFit={() => rf.fitView({ padding: 0.15, duration: 300 })}
         onRelayout={() => { manual.reset(); setLayoutTick((t) => t + 1); }}
         onSearchSubmit={onSearchSubmit}
         onResetFilters={() => patch({ familyOff: new Set(), relationOff: new Set() })}
         selectedLabel={selectedLabel} neighborCount={neighborCount} />
       {error && <BackendError error={error} />}
-      <div className='grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1fr)_380px]'>
+      <div className='grid min-h-[590px] gap-3 xl:h-[min(75vh,800px)] xl:grid-cols-[minmax(0,1fr)_380px]'>
         <div className={`bg-card relative min-h-[460px] overflow-hidden rounded-xl border shadow-sm ${animating ? 'graph-animating' : ''}`} dir='ltr'>
-          <div className='pointer-events-none absolute top-3 left-3 z-10 flex items-center gap-2 rounded-lg border bg-background/90 px-2.5 py-1.5 text-[11px] shadow-sm backdrop-blur' dir='rtl'>
+          {view && view.nodes.length > 0 && <div className='pointer-events-none absolute top-3 left-3 z-10 flex items-center gap-2 rounded-lg border bg-background/90 px-2.5 py-1.5 text-[11px] shadow-sm backdrop-blur' dir='rtl'>
             <span><strong>{nodes.filter((node) => node.type === 'seo').length.toLocaleString('fa-IR')}</strong> گره نمایان</span>
             <span className='text-muted-foreground'>•</span>
             <span><strong>{edges.length.toLocaleString('fa-IR')}</strong> رابطه</span>
+            <span className='text-muted-foreground'>• فلش: از مبدأ به مقصد</span>
             {state.focusNeighbors && <Badge variant='secondary'>نمای متمرکز</Badge>}
             {manual.count > 0 ? (
               <>
@@ -285,8 +284,8 @@ function CommandCenterInner({ sites, initialSiteId, initialMode = 'seo', focusNo
                 <span className='text-muted-foreground'>گره‌ها را بکشید تا چیدمان دلخواه بسازید</span>
               </>
             )}
-          </div>
-          <ReactFlow
+          </div>}
+          {view?.nodes.length ? <ReactFlow
             nodes={flowNodes}
             onNodesChange={onNodesChange}
             edges={edges}
@@ -305,16 +304,21 @@ function CommandCenterInner({ sites, initialSiteId, initialMode = 'seo', focusNo
             maxZoom={2.5}
             nodesConnectable={false}
             proOptions={{ hideAttribution: true }}
-            colorMode='dark'
+            colorMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
             onlyRenderVisibleElements
           >
             <Background gap={24} size={1} />
             <Controls position='bottom-left' showInteractive={false} />
             <MiniMap pannable zoomable position='bottom-right' nodeColor={(n) => ((n.data as { color?: string })?.color ?? '#64748b')} maskColor='rgba(0,0,0,0.5)' />
-          </ReactFlow>
+          </ReactFlow> : <div className='flex h-full min-h-[460px] flex-col items-center justify-center p-8 text-center' dir='rtl'>
+            <span className='text-muted-foreground mb-3 text-4xl' aria-hidden='true'>◇</span>
+            <h3 className='font-semibold'>{loading ? 'در حال ساختن نمای نقشه…' : 'هنوز داده‌ای برای این نمای سایت دیده نمی‌شود'}</h3>
+            <p className='text-muted-foreground mt-2 max-w-sm text-sm leading-6'>برای تحلیل رابطهٔ صفحه‌ها و کوئری‌ها، دادهٔ سایت را وصل و پردازش کنید. نبود داده در این نما به معنی نبود مشکل یا فرصت نیست.</p>
+            <a href={`/dashboard/sites/${encodeURIComponent(state.siteId)}?tab=integrations`} className='mt-4 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/10'>بررسی اتصال‌ها و داده‌ها ←</a>
+          </div>}
         </div>
         <div className='min-h-[320px] xl:min-h-0'>
-          <NodeDetailsPanel details={details} loading={detailsLoading} error={detailsError} onClose={() => { setSelectedId(null); patch({ focusNeighbors: false }); }} onFocus={focusNode} />
+          <NodeDetailsPanel siteId={state.siteId} mode={state.mode} details={details} loading={detailsLoading} error={detailsError} onClose={() => { setSelectedId(null); patch({ focusNeighbors: false }); }} onFocus={focusNode} />
         </div>
       </div>
     </div>

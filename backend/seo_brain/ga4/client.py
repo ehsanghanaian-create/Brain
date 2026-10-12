@@ -25,6 +25,7 @@ RETRYABLE = {429, 500, 502, 503, 504}
 DIMENSIONS = {"page": "pagePath", "landing": "landingPage"}
 METRICS = ["sessions", "totalUsers", "screenPageViews", "engagementRate", "averageSessionDuration", "keyEvents"]
 _METRICS_LEGACY = ["sessions", "totalUsers", "screenPageViews", "engagementRate", "averageSessionDuration", "conversions"]
+ACQUISITION_METRICS = ["sessions", "engagedSessions", "transactions", "purchaseRevenue"]
 
 
 class Ga4Client:
@@ -59,6 +60,54 @@ class Ga4Client:
 
     def run_report(self, property_id: str, body: dict) -> dict:
         return self._execute(self.svc.properties().runReport(property=f"properties/{property_id}", body=body), "runReport") or {}
+
+    def ai_acquisition(self, property_id: str, start: date, end: date) -> dict:
+        """Return identifiable AI referral rows, with commerce metrics nullable on incompatible properties."""
+        from .ai_referrals import AI_SOURCE_PLATFORMS
+
+        source_values = sorted(set(AI_SOURCE_PLATFORMS) | {"www." + s for s in AI_SOURCE_PLATFORMS})
+        metrics = ACQUISITION_METRICS
+        offset = 0
+        rows: list[dict[str, Any]] = []
+        currency = None
+        while True:
+            body = {
+                "dateRanges": [{"startDate": start.isoformat(), "endDate": end.isoformat()}],
+                "dimensions": [{"name": n} for n in
+                               ("date", "sessionSource", "sessionMedium", "landingPagePlusQueryString")],
+                "metrics": [{"name": n} for n in metrics],
+                "dimensionFilter": {"filter": {"fieldName": "sessionSource",
+                                               "inListFilter": {"values": source_values, "caseSensitive": False}}},
+                "limit": MAX_ROWS_PER_REQUEST, "offset": offset,
+            }
+            try:
+                data = self.run_report(property_id, body)
+            except Exception as exc:
+                message = str(exc)
+                if metrics is ACQUISITION_METRICS and any(name in message for name in ("transactions", "purchaseRevenue")):
+                    metrics = ACQUISITION_METRICS[:2]
+                    offset = 0
+                    rows = []
+                    continue
+                raise
+            currency = currency or (data.get("metadata") or {}).get("currencyCode")
+            batch = data.get("rows") or []
+            for item in batch:
+                dv = [v.get("value", "") for v in item.get("dimensionValues", [])]
+                mv = [v.get("value", "0") for v in item.get("metricValues", [])]
+                if len(dv) < 4 or len(mv) < 2:
+                    continue
+                rows.append({
+                    "date": f"{dv[0][:4]}-{dv[0][4:6]}-{dv[0][6:8]}" if len(dv[0]) == 8 else dv[0],
+                    "session_source": dv[1], "session_medium": dv[2], "landing_page": dv[3],
+                    "sessions": int(float(mv[0] or 0)), "engaged_sessions": int(float(mv[1] or 0)),
+                    "transactions": float(mv[2] or 0) if len(mv) > 2 else None,
+                    "purchase_revenue": float(mv[3] or 0) if len(mv) > 3 else None,
+                })
+            offset += len(batch)
+            if not batch or offset >= int(data.get("rowCount") or 0):
+                break
+        return {"rows": rows, "commerce_available": len(metrics) == 4, "currency": currency}
 
     # ------------------------------------------------------------------ daily rows (date x path), paginated
     def daily(self, property_id: str, start: date, end: date, dimension: str = "pagePath", row_limit: int = MAX_ROWS_PER_REQUEST) -> Iterator[dict[str, Any]]:

@@ -15,7 +15,7 @@ from ..automation import get_job_queue
 from ..common.config import env
 from .deps import require_token
 from .errors import install_error_handlers
-from .routers import action_inbox, ads_data, ai, ai_config, ai_gateway, ai_workspace, commerce, content, content_plans, generation, graph, health, ip_graph, issue_cases, jobs, keywords, knowledge, links, memory, network, ops, portfolio, remediation, reports, site_media, site_mission, site_security, sites, tracker, traffic, url_inventory
+from .routers import action_inbox, ads_data, ai, ai_config, ai_gateway, ai_visibility, ai_workspace, commerce, content, content_plans, generation, graph, health, ip_graph, issue_cases, jobs, keywords, knowledge, links, memory, network, ops, portfolio, remediation, reports, site_media, site_mission, site_security, sites, tracker, traffic, url_inventory
 
 API_PREFIX = "/api/v1"
 
@@ -165,7 +165,7 @@ def create_app() -> FastAPI:
     from .routers import google as google_router_mod
     app.include_router(google_router_mod.callback_router, prefix=API_PREFIX)     # Google's browser redirect cannot send X-API-Token; guarded by the state nonce
     app.include_router(tracker.router, prefix=API_PREFIX)   # عمومی — امنیتش با write-key سایت است، نه X-API-Token
-    for r in (portfolio.router, action_inbox.router, ads_data.router, sites.router, sites.gsc_router, google_router_mod.router, graph.router, remediation.router, memory.router, knowledge.router, site_mission.router, site_security.router, site_media.router, network.router, ip_graph.router, ops.router, ai.router, ai_config.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router, reports.router, traffic.router, url_inventory.router, commerce.router, issue_cases.router):
+    for r in (portfolio.router, action_inbox.router, ads_data.router, sites.router, sites.gsc_router, google_router_mod.router, graph.router, remediation.router, memory.router, knowledge.router, site_mission.router, site_security.router, site_media.router, network.router, ip_graph.router, ops.router, ai.router, ai_config.router, ai_visibility.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router, reports.router, traffic.router, url_inventory.router, commerce.router, issue_cases.router):
         app.include_router(r, prefix=API_PREFIX, dependencies=deps)
 
     # legacy dashboard (v0.1) mounted read-only until UI parity

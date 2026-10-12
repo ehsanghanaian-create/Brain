@@ -1773,6 +1773,166 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/ai-visibility/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Summary */
+        get: operations["summary_api_v1_sites__site_id__ai_visibility_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/ai-visibility/prompts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Prompts */
+        get: operations["list_prompts_api_v1_sites__site_id__ai_visibility_prompts_get"];
+        put?: never;
+        /** Create Prompt */
+        post: operations["create_prompt_api_v1_sites__site_id__ai_visibility_prompts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/ai-visibility/prompt-suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Prompt Suggestions
+         * @description Recent GSC queries are candidates, not proof of AI demand or visibility.
+         */
+        get: operations["prompt_suggestions_api_v1_sites__site_id__ai_visibility_prompt_suggestions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/ai-visibility/prompts/{prompt_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Prompt */
+        patch: operations["update_prompt_api_v1_sites__site_id__ai_visibility_prompts__prompt_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/ai-visibility/observations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Observations */
+        get: operations["list_observations_api_v1_sites__site_id__ai_visibility_observations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/ai-visibility/prompts/{prompt_id}/observations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Observation */
+        post: operations["create_observation_api_v1_sites__site_id__ai_visibility_prompts__prompt_id__observations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/ai-visibility/prompts/{prompt_id}/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Prompt Probe
+         * @description One explicit, billable API sample; never presented as consumer ChatGPT reach.
+         */
+        post: operations["run_prompt_probe_api_v1_sites__site_id__ai_visibility_prompts__prompt_id__probe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/ai-visibility/observations/{observation_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Review Observation */
+        patch: operations["review_observation_api_v1_sites__site_id__ai_visibility_observations__observation_id__review_patch"];
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/ai-visibility/official-import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Import Official */
+        post: operations["import_official_api_v1_sites__site_id__ai_visibility_official_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs": {
         parameters: {
             query?: never;
@@ -4789,6 +4949,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sites/{site_id}/commerce/measurement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sales Measurement
+         * @description GA4-reported session-channel commerce, with explicit tracking uncertainty.
+         */
+        get: operations["sales_measurement_api_v1_sites__site_id__commerce_measurement_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sites/{site_id}/commerce/path": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sales Path
+         * @description Separate observed commercial search demand from unmeasured sales.
+         */
+        get: operations["sales_path_api_v1_sites__site_id__commerce_path_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites/{site_id}/issues": {
         parameters: {
             query?: never;
@@ -5103,6 +5303,22 @@ export interface components {
             parent_id?: number | null;
             /** Description */
             description?: string | null;
+        };
+        /** CitationInput */
+        CitationInput: {
+            /**
+             * Url
+             * Format: uri
+             */
+            url: string;
+            /**
+             * Kind
+             * @default source
+             * @enum {string}
+             */
+            kind: "inline" | "source" | "other";
+            /** Position */
+            position?: number | null;
         };
         /** ClusterBody */
         ClusterBody: {
@@ -5582,6 +5798,68 @@ export interface components {
             /** Enabled */
             enabled?: boolean | null;
         };
+        /** ObservationCreate */
+        ObservationCreate: {
+            /** Provider */
+            provider: string;
+            /**
+             * Model
+             * @default
+             */
+            model: string;
+            /**
+             * Observed At
+             * Format: date
+             */
+            observed_at: string;
+            /** Answer Text */
+            answer_text: string;
+            /** Brand Mentioned */
+            brand_mentioned?: boolean | null;
+            /** Competitors */
+            competitors?: string[];
+            /** Citations */
+            citations?: components["schemas"]["CitationInput"][];
+            /**
+             * Run Status
+             * @default complete
+             * @enum {string}
+             */
+            run_status: "complete" | "partial";
+        };
+        /** ObservationReview */
+        ObservationReview: {
+            /** Brand Mentioned */
+            brand_mentioned: boolean;
+            /** Competitors */
+            competitors?: string[];
+        };
+        /** OfficialImport */
+        OfficialImport: {
+            /** Source Label */
+            source_label: string;
+            /** Rows */
+            rows: components["schemas"]["OfficialRow"][];
+        };
+        /** OfficialRow */
+        OfficialRow: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /**
+             * Platform
+             * @enum {string}
+             */
+            platform: "google_ai_search" | "google_ai_discover" | "bing_ai";
+            /** Page Url */
+            page_url?: string | null;
+            /** Impressions */
+            impressions?: number | null;
+            /** Citations */
+            citations?: number | null;
+        };
         /** OppStatus */
         OppStatus: {
             /**
@@ -5691,28 +5969,6 @@ export interface components {
             /** Source */
             source?: string | null;
         };
-        /** PromptCreate */
-        PromptCreate: {
-            /** Key */
-            key: string;
-            /**
-             * Scope
-             * @enum {string}
-             */
-            scope: "system" | "site" | "agent" | "task";
-            /** Title */
-            title: string;
-            /** Template */
-            template: string;
-            /** Site Id */
-            site_id?: string | null;
-            /** Description */
-            description?: string | null;
-            /** Model Hints */
-            model_hints?: {
-                [key: string]: unknown;
-            } | null;
-        };
         /** PromptTestBody */
         PromptTestBody: {
             /** Site Id */
@@ -5740,6 +5996,11 @@ export interface components {
             human_rating: number;
             /** Notes */
             notes?: string | null;
+        };
+        /** PromptUpdate */
+        PromptUpdate: {
+            /** Active */
+            active: boolean;
         };
         /** ProviderCreate */
         ProviderCreate: {
@@ -6315,6 +6576,56 @@ export interface components {
             crawl: boolean;
             /** Max Urls */
             max_urls?: number | null;
+        };
+        /** PromptCreate */
+        seo_brain__api__routers__ai_gateway__PromptCreate: {
+            /** Key */
+            key: string;
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "system" | "site" | "agent" | "task";
+            /** Title */
+            title: string;
+            /** Template */
+            template: string;
+            /** Site Id */
+            site_id?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Model Hints */
+            model_hints?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** PromptCreate */
+        seo_brain__api__routers__ai_visibility__PromptCreate: {
+            /** Question */
+            question: string;
+            /**
+             * Topic
+             * @default
+             */
+            topic: string;
+            /** Target Url */
+            target_url?: string | null;
+            /**
+             * Intent
+             * @default commercial
+             * @enum {string}
+             */
+            intent: "informational" | "commercial" | "transactional";
+            /**
+             * Locale
+             * @default fa-IR
+             */
+            locale: string;
+            /**
+             * Market
+             * @default IR
+             */
+            market: string;
         };
     };
     responses: never;
@@ -10045,6 +10356,384 @@ export interface operations {
             };
         };
     };
+    summary_api_v1_sites__site_id__ai_visibility_summary_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_prompts_api_v1_sites__site_id__ai_visibility_prompts_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_prompt_api_v1_sites__site_id__ai_visibility_prompts_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["seo_brain__api__routers__ai_visibility__PromptCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    prompt_suggestions_api_v1_sites__site_id__ai_visibility_prompt_suggestions_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_prompt_api_v1_sites__site_id__ai_visibility_prompts__prompt_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+                prompt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_observations_api_v1_sites__site_id__ai_visibility_observations_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_observation_api_v1_sites__site_id__ai_visibility_prompts__prompt_id__observations_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+                prompt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObservationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_prompt_probe_api_v1_sites__site_id__ai_visibility_prompts__prompt_id__probe_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+                prompt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_observation_api_v1_sites__site_id__ai_visibility_observations__observation_id__review_patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+                observation_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObservationReview"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_official_api_v1_sites__site_id__ai_visibility_official_import_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OfficialImport"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_runs_api_v1_jobs_get: {
         parameters: {
             query?: {
@@ -13057,7 +13746,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PromptCreate"];
+                "application/json": components["schemas"]["seo_brain__api__routers__ai_gateway__PromptCreate"];
             };
         };
         responses: {
@@ -17558,6 +18247,80 @@ export interface operations {
         parameters: {
             query: {
                 url: string;
+            };
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sales_measurement_api_v1_sites__site_id__commerce_measurement_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: {
+                "x-api-token"?: string | null;
+            };
+            path: {
+                site_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sales_path_api_v1_sites__site_id__commerce_path_get: {
+        parameters: {
+            query?: {
+                days?: number;
             };
             header?: {
                 "x-api-token"?: string | null;

@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 
 type Form = { title: string; primary_keyword: string; secondary_keywords: string; category_id: string; publish_date: string | null; publish_time: string; seo_title: string; meta_description: string; provider: string; model: string; tone: string; word_count: string; prompt: string };
 import type { EditorTarget } from './article-editor-sheet';
+import { PlanPublicationReadiness } from './plan-publication-readiness';
 
 type Props = { siteId: string; pid: number | 'new' | null; defaultDate: string | null; categories: PlanCategory[]; opts: WsOptions | null; onClose: () => void; onChanged: () => void; onOpenEditor: (target: EditorTarget) => void };
 
@@ -83,7 +84,8 @@ export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClo
 
   async function persist(): Promise<number> {
     if (!f.title.trim()) throw new Error('عنوان مقاله لازم است');
-    const body = toBody(f, p);
+    const current = id === null ? null : await endpoints.plan(siteId, id);
+    const body = toBody(f, current);
     if (id === null) { const created = await endpoints.planCreate(siteId, body); setId(created.id); return created.id; }
     await endpoints.planPatch(siteId, id, body);
     return id;
@@ -200,6 +202,8 @@ export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClo
               <div className='grid gap-1 md:col-span-2'><Label>دستور اضافه برای نویسنده</Label><Textarea rows={3} value={f.prompt} onChange={set('prompt')} placeholder='مثلاً: از مثال‌های واقعی تهران استفاده کن؛ شماره تماس را در پاراگراف اول بیاور…' /></div>
             </div>
           </details>
+
+          {p && <PlanPublicationReadiness siteId={siteId} plan={p} />}
 
           {note && <p className='text-muted-foreground animate-pulse text-xs'>{note}</p>}
 

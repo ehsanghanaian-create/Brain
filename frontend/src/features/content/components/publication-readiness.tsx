@@ -47,10 +47,13 @@ export function PublicationReadiness({ siteId, cid, categoryId, onReadyChange }:
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [canonicalUrl, setCanonicalUrl] = useState('');
+  const [capability, setCapability] = useState<{ can_publish: boolean; message: string } | null>(null);
+  const [capabilityError, setCapabilityError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     setLoading(true); setItem(null); setDraft(null); setError(null);
+    setCapability(null); setCapabilityError(null);
     (async () => {
       try {
         const [detail, site] = await Promise.all([endpoints.content(siteId, cid), endpoints.site(siteId)]);
@@ -63,10 +66,17 @@ export function PublicationReadiness({ siteId, cid, categoryId, onReadyChange }:
     return () => { active = false; };
   }, [siteId, cid]);
 
+  useEffect(() => {
+    let active = true;
+    endpoints.wpPublishCapability(siteId).then((result) => { if (active) setCapability(result); })
+      .catch((e) => { if (active) setCapabilityError(e instanceof ApiError ? e.message : String(e)); });
+    return () => { active = false; };
+  }, [siteId, cid]);
+
   const saved = (item?.metadata?.publication_review ?? {}) as SavedReview;
   const checks = publicationChecks(item, draft, categoryId, canonicalUrl);
   const manual = saved.draft_id === draft?.id ? saved.checks ?? {} : {};
-  const ready = !loading && !error && checks.filter((x) => x.required).every((x) => x.passed) && MANUAL.every(([key]) => manual[key]);
+  const ready = !loading && !error && capability?.can_publish === true && checks.filter((x) => x.required).every((x) => x.passed) && MANUAL.every(([key]) => manual[key]);
   useEffect(() => { onReadyChange?.(!!ready); }, [ready, onReadyChange]);
 
   async function toggle(key: ManualKey) {
@@ -85,6 +95,10 @@ export function PublicationReadiness({ siteId, cid, categoryId, onReadyChange }:
       <div><h3 className='font-semibold'>آمادگی انتشار و سئو</h3><p className='text-muted-foreground text-xs'>بررسی‌ها به آخرین نسخهٔ ذخیره‌شدهٔ مقاله وابسته‌اند. با تغییر متن، تأییدهای دستی دوباره لازم می‌شوند.</p></div>
       <Badge variant={ready ? 'default' : 'secondary'}>{loading ? 'در حال بررسی…' : ready ? 'آمادهٔ انتشار' : `${checks.filter((x) => x.required && x.passed).length}/${checks.filter((x) => x.required).length} بررسی خودکار`}</Badge>
     </div>
+    <p className={`mt-3 rounded-md border px-3 py-2 text-xs ${capability?.can_publish ? 'border-emerald-500/30 text-emerald-700' : 'border-amber-500/30 text-amber-700'}`}>
+      {capabilityError ? `وضعیت اتصال وردپرس قابل بررسی نیست: ${capabilityError}` : capability ? (capability.can_publish ? 'اتصال انتشار وردپرس آماده است.' : capability.message) : 'در حال بررسی مجوز انتشار وردپرس…'}
+      {capability && !capability.can_publish && <> · <Link className='underline' href={`/dashboard/sites/${encodeURIComponent(siteId)}`}>تنظیم اتصال سایت</Link></>}
+    </p>
     {error ? <p className='text-destructive mt-3 text-xs'>بررسی انجام نشد: {error}</p> : <div className='mt-3 grid gap-4 md:grid-cols-2'>
       <div><p className='mb-2 text-xs font-medium'>بررسی خودکار</p><ul className='space-y-1.5'>{checks.map((check) => <li key={check.label} className='rounded-md border px-2 py-1.5 text-xs'><span className={check.passed ? 'text-emerald-600' : check.required ? 'text-amber-600' : 'text-muted-foreground'}>{check.passed ? '✓' : check.required ? '○' : '◇'} </span>{check.label}{!check.required && <span className='text-muted-foreground'> · پیشنهادی</span>}{check.detail && <p className='text-muted-foreground mt-0.5 ps-4'>{check.detail}</p>}</li>)}</ul></div>
       <div><p className='mb-2 text-xs font-medium'>تأیید سردبیر · نسخه {draft?.version ?? '—'}</p><ul className='space-y-1.5'>{MANUAL.map(([key, label]) => <li key={key}><label className='flex cursor-pointer items-start gap-2 rounded-md border px-2 py-2 text-xs'><input type='checkbox' className='mt-0.5' checked={!!manual[key]} disabled={!draft || saving} onChange={() => toggle(key)} /><span>{label}</span></label></li>)}</ul><p className='text-muted-foreground mt-2 text-[11px]'>پس از انتشار، URL عمومی، canonical، Schema و وضعیت ایندکس را روی خروجی واقعی دوباره بررسی کنید.</p>{item?.url && <Link className='mt-2 inline-block text-xs underline' href={`/dashboard/ai-visibility?site=${encodeURIComponent(siteId)}`}>پایش دیده‌شدن در جست‌وجوی AI ←</Link>}</div>

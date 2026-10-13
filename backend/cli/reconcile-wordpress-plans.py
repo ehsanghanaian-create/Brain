@@ -26,6 +26,7 @@ def main() -> None:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--expect-published", type=int)
     parser.add_argument("--expect-brief", type=int)
+    parser.add_argument("--expect-linked-published", type=int)
     args = parser.parse_args()
     engine = get_engine()
     with engine.connect() as cx:
@@ -62,9 +63,10 @@ def main() -> None:
     print({"site": args.site, "wordpress_posts": len(posts), "actions": counts, "mode": "apply" if args.apply else "preview"})
     if not args.apply:
         return
-    if args.expect_published is None or args.expect_brief is None:
-        raise SystemExit("--apply requires both expected counts")
-    expected = {"published": args.expect_published, "brief": args.expect_brief}
+    if any(value is None for value in (args.expect_published, args.expect_brief, args.expect_linked_published)):
+        raise SystemExit("--apply requires all three expected counts")
+    expected = {"published": args.expect_published, "brief": args.expect_brief,
+                "linked_published": args.expect_linked_published}
     if any(counts.get(key) != value for key, value in expected.items()):
         raise RuntimeError(f"Preview counts changed: expected {expected}; found {counts}")
     db_path = Path(engine.url.database or "")

@@ -48,13 +48,14 @@ def plan_actions(engine: Engine, site_id: str, live_posts: list[dict], live_body
             raise ValueError(f"plan {plan['id']} has a missing, foreign, or duplicate target URL")
         seen.add(slug)
         post = by_slug.get(slug)
-        if plan["content_item_id"]:
-            actions.append({"kind": "existing_link", "plan": plan, "post": post})
-            continue
         if not post:
             if plan["status"] == "published":
                 raise ValueError(f"plan {plan['id']} claims published but has no live WordPress post")
-            actions.append({"kind": "brief", "plan": plan, "slug": slug})
+            actions.append({"kind": "existing_link", "plan": plan, "post": None} if plan["content_item_id"]
+                           else {"kind": "brief", "plan": plan, "slug": slug})
+            continue
+        if plan["content_item_id"] and plan["status"] == "published":
+            actions.append({"kind": "existing_link", "plan": plan, "post": post})
             continue
         local = cached.get(slug)
         if local and local["wp_id"] == post["id"] and (local["modified_gmt"] or "")[:19] == (post.get("modified_gmt") or "")[:19]:
@@ -72,14 +73,16 @@ def plan_actions(engine: Engine, site_id: str, live_posts: list[dict], live_body
         structure, plain = parse_draft(body, "html")
         if len(body) < 300 or structure.word_count < 300:
             raise ValueError(f"WordPress post {post['id']} has no substantial article body")
-        actions.append({"kind": "published", "plan": plan, "post": post, "slug": slug,
+        actions.append({"kind": "linked_published" if plan["content_item_id"] else "published",
+                        "plan": plan, "post": post, "slug": slug,
                         "body": body, "body_text": plain, "structure": structure.to_dict(),
                         "title": title, "excerpt": excerpt})
     return actions
 
 
 def action_counts(actions: list[dict]) -> dict[str, int]:
-    return {kind: sum(a["kind"] == kind for a in actions) for kind in ("published", "brief", "existing_link")}
+    return {kind: sum(a["kind"] == kind for a in actions)
+            for kind in ("published", "brief", "linked_published", "existing_link")}
 
 
 def apply_actions(engine: Engine, site_id: str, actions: list[dict], *, expected: dict[str, int] | None = None) -> dict[str, int]:
@@ -97,7 +100,7 @@ def apply_actions(engine: Engine, site_id: str, actions: list[dict], *, expected
                 raise ValueError(f"plan {pid} changed since preview")
             if action["kind"] == "existing_link":
                 continue
-            published = action["kind"] == "published"
+            published = action["kind"] in ("published", "linked_published")
             post = action.get("post") or {}
             status = "published" if published else "brief_ready"
             meta = {"plan_id": pid, "source": "wordpress_reconciliation" if published else "content_plan",
@@ -105,18 +108,34 @@ def apply_actions(engine: Engine, site_id: str, actions: list[dict], *, expected
             if published:
                 meta["wordpress_publication"] = {"wp_post_id": post["id"], "status": "publish", "url": plan["url"],
                                                  "wordpress_permalink": post.get("link"), "imported_at": now}
-            result = cx.execute(text("""INSERT INTO content_items
-                (site_id,title,slug,target_keyword_id,target_keyword,topic,cluster_id,intent,status,priority,
-                 publish_date,publish_time,url,wp_post_id,metadata,created_at,updated_at,review_status)
-                VALUES (:s,:title,:slug,:kw_id,:kw,:topic,:cluster,:intent,:status,:priority,
-                        :date,:time,:url,:wp_id,:meta,:now,:now,'none')"""),
-                {"s": site_id, "title": plan["title"], "slug": action["slug"], "kw_id": plan["primary_keyword_id"],
-                 "kw": plan["primary_keyword"], "topic": plan["topic_id"], "cluster": plan["cluster_id"],
-                 "intent": plan["intent"], "status": status, "priority": plan["priority"],
-                 "date": plan["publish_date"], "time": plan["publish_time"],
-                 "url": plan["url"] if published else None, "wp_id": post.get("id"),
-                 "meta": json.dumps(meta, ensure_ascii=False), "now": now})
-            cid = int(result.lastrowid)
+            previous_status = None
+            if action["kind"] == "linked_published":
+                cid = int(plan["content_item_id"])
+                item = cx.execute(text("""SELECT status,wp_post_id,current_draft_id,metadata FROM content_items
+                    WHERE site_id=:s AND id=:c"""), {"s": site_id, "c": cid}).first()
+                draft_count = cx.execute(text("SELECT COUNT(*) FROM content_drafts WHERE site_id=:s AND content_id=:c"),
+                                         {"s": site_id, "c": cid}).scalar()
+                if not item or item[0] != "brief_ready" or item[1] or item[2] or draft_count:
+                    raise ValueError(f"linked content {cid} changed or has a draft; manual review required")
+                previous_status = item[0]
+                meta = {**_json(item[3], {}), **meta}
+                cx.execute(text("""UPDATE content_items SET status='published',url=:url,wp_post_id=:wp_id,
+                    metadata=:meta,review_status='none',updated_at=:now WHERE site_id=:s AND id=:c"""),
+                    {"url": plan["url"], "wp_id": post["id"], "meta": json.dumps(meta, ensure_ascii=False),
+                     "now": now, "s": site_id, "c": cid})
+            else:
+                result = cx.execute(text("""INSERT INTO content_items
+                    (site_id,title,slug,target_keyword_id,target_keyword,topic,cluster_id,intent,status,priority,
+                     publish_date,publish_time,url,wp_post_id,metadata,created_at,updated_at,review_status)
+                    VALUES (:s,:title,:slug,:kw_id,:kw,:topic,:cluster,:intent,:status,:priority,
+                            :date,:time,:url,:wp_id,:meta,:now,:now,'none')"""),
+                    {"s": site_id, "title": plan["title"], "slug": action["slug"], "kw_id": plan["primary_keyword_id"],
+                     "kw": plan["primary_keyword"], "topic": plan["topic_id"], "cluster": plan["cluster_id"],
+                     "intent": plan["intent"], "status": status, "priority": plan["priority"],
+                     "date": plan["publish_date"], "time": plan["publish_time"],
+                     "url": plan["url"] if published else None, "wp_id": post.get("id"),
+                     "meta": json.dumps(meta, ensure_ascii=False), "now": now})
+                cid = int(result.lastrowid)
             if published:
                 structure = action["structure"]
                 draft = cx.execute(text("""INSERT INTO content_drafts
@@ -153,8 +172,9 @@ def apply_actions(engine: Engine, site_id: str, actions: list[dict], *, expected
                 pub = plan["publishing"] or "{}"
             cx.execute(text("UPDATE content_plans SET content_item_id=:c,status=:status,publishing=:pub,updated_at=:now WHERE site_id=:s AND id=:p"),
                        {"c": cid, "status": status, "pub": pub, "now": now, "s": site_id, "p": pid})
-            cx.execute(text("INSERT INTO content_events(site_id,content_id,from_status,to_status,actor,note,created_at) VALUES(:s,:c,NULL,:status,'system:reconcile',:note,:now)"),
-                       {"s": site_id, "c": cid, "status": status, "note": "Linked to existing WordPress post" if published else "Brief linked from content plan", "now": now})
+            cx.execute(text("INSERT INTO content_events(site_id,content_id,from_status,to_status,actor,note,created_at) VALUES(:s,:c,:from_status,:status,'system:reconcile',:note,:now)"),
+                       {"s": site_id, "c": cid, "from_status": previous_status, "status": status,
+                        "note": "Linked to existing WordPress post" if published else "Brief linked from content plan", "now": now})
             cx.execute(text("INSERT INTO content_plan_events(site_id,content_plan_id,event,actor,from_value,to_value,payload,created_at) VALUES(:s,:p,:event,'system:reconcile',:from_status,:status,:payload,:now)"),
                        {"s": site_id, "p": pid, "event": "wordpress_reconciled" if published else "brief_linked",
                         "from_status": plan["status"], "status": status,

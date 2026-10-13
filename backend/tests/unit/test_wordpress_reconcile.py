@@ -26,7 +26,7 @@ def test_reconcile_live_article_and_unpublished_brief_without_wordpress_write(tm
         return {**post, "title": {"raw": "Published guide"}, "content": {"raw": "<h2>Useful guide</h2><p>" + "word " * 340 + "</p>"}, "excerpt": {"raw": "Summary"}}
 
     actions = plan_actions(engine, "demo", [post], fetch)
-    assert action_counts(actions) == {"published": 1, "brief": 1, "existing_link": 0}
+    assert action_counts(actions) == {"published": 1, "brief": 1, "linked_published": 0, "existing_link": 0}
     assert reads == [77]
     with pytest.raises(ValueError, match="unexpected reconciliation counts"):
         apply_actions(engine, "demo", actions, expected={"published": 2})
@@ -42,3 +42,25 @@ def test_reconcile_live_article_and_unpublished_brief_without_wordpress_write(tm
     assert items[1][0] == "brief_ready" and items[1][3]
     assert drafts[0][0:3] == ("html", "wordpress:import", "none") and drafts[0][3] >= 300
     assert action_counts(plan_actions(engine, "demo", [post], fetch))["existing_link"] == 2
+
+    new_post = {"id": 78, "slug": "guide-b", "status": "publish",
+                "link": "https://demo.example/2026/guide-b/", "modified_gmt": "2026-10-13T08:30:00"}
+
+    def fetch_new(post_id):
+        assert post_id == 78
+        return {**new_post, "title": {"raw": "Future guide"},
+                "content": {"raw": "<h2>New live guide</h2><p>" + "word " * 340 + "</p>"},
+                "excerpt": {"raw": "New summary"}}
+
+    update = plan_actions(engine, "demo", [post, new_post], fetch_new)
+    assert action_counts(update) == {"published": 0, "brief": 0, "linked_published": 1, "existing_link": 1}
+    assert apply_actions(engine, "demo", update, expected={"linked_published": 1})["linked_published"] == 1
+    with engine.connect() as cx:
+        updated = cx.execute(text("SELECT status,content_item_id,publishing FROM content_plans WHERE id=2")).one()
+        item = cx.execute(text("SELECT status,wp_post_id,current_draft_id,brief_id FROM content_items WHERE id=:i"),
+                          {"i": updated[1]}).one()
+        draft_count = cx.execute(text("SELECT COUNT(*) FROM content_drafts WHERE content_id=:i"),
+                                 {"i": updated[1]}).scalar()
+    assert updated[0] == "published" and json.loads(updated[2])["wp_post_id"] == 78
+    assert item[0] == "published" and item[1] == 78 and item[2] and item[3]
+    assert draft_count == 1

@@ -116,6 +116,10 @@ def _register_builtin_jobs() -> None:
         from ..brain.planner.generation import generate_for_plan
         from ..integrations.wordpress import WordPressWriter
         eng2 = _engine()
+        writer = WordPressWriter(eng2)
+        existing = writer.existing_post(payload["site_id"], payload["plan_id"])
+        if existing:
+            return existing
         if payload.get("generate_if_missing"):
             from sqlalchemy import text as _text
             with eng2.connect() as cx:
@@ -123,7 +127,7 @@ def _register_builtin_jobs() -> None:
                                  {"s": payload["site_id"], "p": payload["plan_id"]}).scalar()
             if not cid:
                 return generate_for_plan(eng2, payload["site_id"], payload["plan_id"], then_publish=True, actor=payload.get("actor", "scheduler"))
-        return WordPressWriter(eng2).publish_plan(payload["site_id"], payload["plan_id"], actor=payload.get("actor", "human"))
+        return writer.publish_plan(payload["site_id"], payload["plan_id"], actor=payload.get("actor", "human"))
 
     for name, fn in (("sync_wordpress", _run_sync_wordpress), ("build_graph", _run_build_graph), ("noop", _noop), ("links_analyze", _run_links_analyze), ("generation_run", _run_generation), ("content_automation", _run_content_automation), ("planner_analyze", _run_planner_analyze),
                      ("wordpress_sync", _run_wordpress_pipeline), ("gsc_sync", _run_gsc_sync), ("ga4_sync", _run_ga4_sync),

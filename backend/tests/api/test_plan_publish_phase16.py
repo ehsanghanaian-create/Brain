@@ -172,6 +172,35 @@ def test_publish_plan_future_date_schedules_inside_wordpress(c, monkeypatch):
     assert s["date"] == "2026-01-15T09:00:00" and s["date_gmt"] == "2026-01-15T05:30:00" and s["future"] is False
 
 
+def test_existing_wordpress_post_blocks_duplicate_publish(c, monkeypatch):
+    monkeypatch.setattr("seo_brain.integrations.wordpress.writer.resolve_auth", lambda sid: WpAuth("editor", "app-pass", "test"))
+    pid = _mk_plan(c, url="https://demo.example/blog/existing-story")
+    seen = []
+
+    def existing(method, url, auth=None, **kw):
+        seen.append((method, url))
+        return httpx.Response(200, json=[{"id": 321, "slug": "existing-story", "status": "publish", "link": "https://demo.example/2026/01/existing-story/"}],
+                              request=httpx.Request(method, url))
+
+    writer = WordPressWriter(c.eng, http=existing)
+    result = writer.publish_plan(SID, pid)
+    assert result["status"] == "already_published" and result["wp_post_id"] == 321
+    assert seen == [("GET", "https://demo.example/wp-json/wp/v2/posts?slug=existing-story&_fields=id,slug,status,link")]
+
+
+def test_duplicate_check_fails_closed_when_wordpress_unavailable(c, monkeypatch):
+    monkeypatch.setattr("seo_brain.integrations.wordpress.writer.resolve_auth", lambda sid: WpAuth("editor", "app-pass", "test"))
+    pid = _mk_plan(c, url="https://demo.example/blog/new-story")
+    seen = []
+
+    def unavailable(method, url, auth=None, **kw):
+        seen.append(method)
+        return httpx.Response(503, json={"code": "unavailable"}, request=httpx.Request(method, url))
+
+    result = WordPressWriter(c.eng, http=unavailable).publish_plan(SID, pid)
+    assert result["status"] == "existing_post_check_failed" and seen == ["GET"]
+
+
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 
 

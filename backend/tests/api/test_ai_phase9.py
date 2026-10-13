@@ -496,25 +496,25 @@ def test_claude_provider_setup_routes_and_workspace_default(c):
 
 
 def test_gemini_provider_setup_routes_env_fallback_and_workspace(c, monkeypatch):
-    """Gemini 3.6 Flash as a first-class provider: kind metadata + setup, catalog seeding, recommended routes,
+    """Gemini as a first-class provider: kind metadata + setup, catalog seeding, recommended routes,
     workspace generation through the gateway (fake google transport), and the optional GEMINI_API_KEY env fallback."""
     _seed_content(c)
     kinds = {k["kind"]: k for k in c.get("/api/v1/ai/provider-kinds").json()}
     g = kinds["google"]
-    assert g["models"][0] == "gemini-3.5-flash" and g["setup"]["console_url"].startswith("https://aistudio.google.com")
+    assert g["models"][0] == "gemini-3.5-flash-lite" and g["setup"]["console_url"].startswith("https://aistudio.google.com")
     assert "content_generation" in g["capabilities"] and g["env_key"] == "GEMINI_API_KEY"
     # registry drives the UI: Gemini needs NO base URL from the user; only Cloudflare/custom truly do
     assert g["requires_base_url"] is False and g["supports_model_discovery"] is True and g["auth_type"] == "api_key"
     assert kinds["cloudflare"]["requires_base_url"] is True and kinds["custom"]["requires_base_url"] is True
     assert kinds["ollama"]["auth_type"] == "optional_api_key"
     p = _add_provider(c, "gemini", "google", "AIzaTestKey12345678")
-    assert p["has_key"] and p["default_model"] == "gemini-3.5-flash" and "api_key" not in json.dumps(p) and "secret_ref" not in p
+    assert p["has_key"] and p["default_model"] == "gemini-3.5-flash-lite" and "api_key" not in json.dumps(p) and "secret_ref" not in p
     models = {m["model_id"]: m for m in c.get(f"/api/v1/ai/models?provider_id={p['id']}").json()}
     assert {"gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash-lite"} <= set(models)
     assert models["gemini-3.6-flash"]["tier"] == "balanced" and models["gemini-3.6-flash"]["context_tokens"] == 1000000
     t = c.post(f"/api/v1/ai/provider-configs/{p['id']}/test").json()
     assert t["ok"] and "AIzaTest" not in json.dumps(t)
-    # recommended routes: heavy tasks fall back to 2.5 Pro, light tasks to 2.5 Flash — applying stays a human action
+    # Recommended routes use Flash for heavy tasks and Flash-Lite for light tasks; applying stays a user action.
     rec = {r["task_kind"]: r for r in c.get(f"/api/v1/ai/provider-configs/{p['id']}/recommended-routes").json()["routes"]}
     assert rec["article_long"]["model"] == "gemini-3.5-flash" and rec["article_long"]["fallback_model"] == "gemini-3.5-flash-lite"
     assert rec["faq"]["model"] == "gemini-3.5-flash-lite" and rec["faq"]["fallback_model"] == "gemini-3.5-flash"

@@ -1,9 +1,11 @@
 import json
+import sqlite3
 
+import httpx
 import pytest
 from sqlalchemy import text
 
-from seo_brain.brain.planner.wordpress_reconcile import action_counts, apply_actions, plan_actions
+from seo_brain.brain.planner.wordpress_reconcile import action_counts, apply_actions, apply_with_backup, live_actions, plan_actions
 from seo_brain.db.engine import make_engine
 from seo_brain.db.migrate import migrate
 
@@ -28,6 +30,20 @@ def test_reconcile_live_article_and_unpublished_brief_without_wordpress_write(tm
     actions = plan_actions(engine, "demo", [post], fetch)
     assert action_counts(actions) == {"published": 1, "brief": 1, "linked_published": 0, "existing_link": 0}
     assert reads == [77]
+    requests = []
+
+    def wordpress_get(request):
+        requests.append((request.method, request.url.path))
+        if request.url.path.endswith("/posts"):
+            return httpx.Response(200, json=[post], headers={"x-wp-totalpages": "1"})
+        if request.url.path.endswith("/posts/77"):
+            return httpx.Response(200, json=fetch(77))
+        return httpx.Response(404)
+
+    with httpx.Client(transport=httpx.MockTransport(wordpress_get)) as client:
+        live, post_count = live_actions(engine, "demo", client)
+    assert post_count == 1 and action_counts(live) == action_counts(actions)
+    assert requests == [("GET", "/wp-json/wp/v2/posts"), ("GET", "/wp-json/wp/v2/posts/77")]
     with pytest.raises(ValueError, match="unexpected reconciliation counts"):
         apply_actions(engine, "demo", actions, expected={"published": 2})
     assert apply_actions(engine, "demo", actions, expected={"published": 1, "brief": 1})["brief"] == 1
@@ -54,7 +70,11 @@ def test_reconcile_live_article_and_unpublished_brief_without_wordpress_write(tm
 
     update = plan_actions(engine, "demo", [post, new_post], fetch_new)
     assert action_counts(update) == {"published": 0, "brief": 0, "linked_published": 1, "existing_link": 1}
-    assert apply_actions(engine, "demo", update, expected={"linked_published": 1})["linked_published"] == 1
+    applied = apply_with_backup(engine, "demo", update, tmp_path / "backups")
+    assert applied["actions"]["linked_published"] == 1 and applied["applied"] == 1
+    with sqlite3.connect(applied["backup"]) as snapshot:
+        assert snapshot.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+        assert snapshot.execute("SELECT status FROM content_plans WHERE id=2").fetchone()[0] == "brief_ready"
     with engine.connect() as cx:
         updated = cx.execute(text("SELECT status,content_item_id,publishing FROM content_plans WHERE id=2")).one()
         item = cx.execute(text("SELECT status,wp_post_id,current_draft_id,brief_id FROM content_items WHERE id=:i"),
@@ -64,3 +84,5 @@ def test_reconcile_live_article_and_unpublished_brief_without_wordpress_write(tm
     assert updated[0] == "published" and json.loads(updated[2])["wp_post_id"] == 78
     assert item[0] == "published" and item[1] == 78 and item[2] and item[3]
     assert draft_count == 1
+    assert apply_with_backup(engine, "demo", plan_actions(engine, "demo", [post, new_post], fetch_new),
+                             tmp_path / "backups")["backup"] is None

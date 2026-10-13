@@ -75,7 +75,7 @@ def env(tmp_path, monkeypatch):
     app = create_app(); app.dependency_overrides[deps.engine] = lambda: eng; app.dependency_overrides[deps.job_queue] = lambda: q
     wp_ok = httpx.Response(200, json={"name": "Demo", "namespaces": ["wp/v2"]}, request=httpx.Request("GET", "https://demo.example/wp-json/"))
     app.dependency_overrides[sites_router.connections_service] = lambda: ConnectionsService(eng, wp_fetch=lambda url: wp_ok)
-    state = {"fail": False, "crawl_calls": 0}
+    state = {"fail": False, "crawl_calls": 0, "reconcile": None}
     wp_sync, calls = _fake_wp_sync(eng)
     wp_sync_fail, _ = _fake_wp_sync(eng, fail=True)
 
@@ -86,7 +86,7 @@ def env(tmp_path, monkeypatch):
         return {"ok": 1, "crawled": 1}
 
     def make_orch():
-        return WordPressSyncOrchestrator(eng, crawler_factory=crawler, wp_sync=(wp_sync_fail if state["fail"] else wp_sync), graph_build=_real_graph_build(dbfile), probe=lambda url: 200 if url.startswith("https://") else None)
+        return WordPressSyncOrchestrator(eng, crawler_factory=crawler, wp_sync=(wp_sync_fail if state["fail"] else wp_sync), graph_build=_real_graph_build(dbfile), probe=lambda url: 200 if url.startswith("https://") else None, reconcile=state["reconcile"])
     q.register("wordpress_sync", lambda payload: make_orch().run(payload["site_id"], run_id=payload.get("run_id"), stage=payload.get("stage", "full"), crawl=payload.get("crawl", True), max_urls=payload.get("max_urls"), job_id=payload.get("job_id")))
     c = TestClient(app)
     r = c.post("/api/v1/sites", json={"site_id": SID, "name": "Demo", "canonical_url": "https://demo.example/", "wp_url": "http://demo.example/"}); assert r.status_code == 201, r.text
@@ -104,6 +104,7 @@ def test_successful_wordpress_connection_queues_sync_job_and_pipeline_runs(env):
     assert env["calls"]["n"] == 1 and env["calls"]["progress"] == ["taxonomies", "categories", "pages", "posts", "media"] and env["state"]["crawl_calls"] == 1
     # items + counters: categories, pages, posts imported; graph nodes created
     assert st["items"]["categories"] == 2 and st["items"]["pages"] == 1 and st["items"]["posts"] == 1 and st["counts"]["graph_nodes"] >= 5
+    assert next(s for s in st["steps"] if s["key"] == "reconcile_content")["status"] == "skipped"
     by = st["counts"]["graph_by_type"]
     assert by.get("SITE") == 1 and by.get("PAGE") == 1 and by.get("POST") == 1 and by.get("CATEGORY") == 2
     # relations: CONTENT BELONGS_TO CATEGORY, site HAS_PAGE/HAS_POST, category tree
@@ -127,6 +128,39 @@ def test_canonical_url_one_resolver_for_sync_crawl_graph(env):
     with env["eng"].connect() as cx:
         urls = [r_[0] for r_ in cx.execute(text("SELECT url FROM graph_nodes WHERE site_id=:s AND node_type IN ('PAGE','POST')"), {"s": SID}).all()]
     assert all(u.startswith("https://demo.example/") for u in urls)
+
+
+def test_full_sync_reconciles_plans_before_graph_and_graph_only_does_not(env):
+    c = env["client"]
+    with env["eng"].begin() as cx:
+        cx.execute(text("INSERT INTO content_plans(site_id,title,url,status,created_at,updated_at) VALUES(:s,'Guide','https://demo.example/blog/guide','review','now','now')"), {"s": SID})
+    calls = []
+
+    def reconcile(site_id):
+        calls.append(site_id)
+        return {"wordpress_posts": 1, "applied": 1}
+
+    env["state"]["reconcile"] = reconcile
+    assert c.post(f"/api/v1/sites/{SID}/wordpress/sync", json={"crawl": False}).status_code == 202
+    st = c.get(f"/api/v1/sites/{SID}/wordpress/sync/status").json()
+    step = next(s for s in st["steps"] if s["key"] == "reconcile_content")
+    assert st["status"] == "succeeded" and step["status"] == "done"
+    assert step["items"]["applied"] == 1 and calls == [SID]
+    assert c.post(f"/api/v1/sites/{SID}/graph/rebuild").status_code == 202
+    assert calls == [SID]
+
+
+def test_content_reconcile_is_skipped_without_wordpress_credentials(env):
+    with env["eng"].begin() as cx:
+        cx.execute(text("INSERT INTO content_plans(site_id,title,url,status,created_at,updated_at) VALUES(:s,'Guide','https://demo.example/blog/guide','review','now','now')"), {"s": SID})
+    c = env["client"]
+    assert c.post(f"/api/v1/sites/{SID}/wordpress/sync", json={"crawl": False}).status_code == 202
+    st = c.get(f"/api/v1/sites/{SID}/wordpress/sync/status").json()
+    step = next(s for s in st["steps"] if s["key"] == "reconcile_content")
+    assert st["status"] == "succeeded" and step["status"] == "skipped"
+    assert step["items"]["reason"] == "WordPress Application Password missing"
+    with env["eng"].connect() as cx:
+        assert cx.execute(text("SELECT status FROM content_plans WHERE site_id=:s"), {"s": SID}).scalar() == "review"
 
 
 def test_manual_sync_status_rebuild_and_guards(env):

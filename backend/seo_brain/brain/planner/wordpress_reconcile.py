@@ -6,11 +6,19 @@ no live post receive a brief and a content item, never a fabricated article draf
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
+import httpx
 from sqlalchemy import Engine, text
 
+from ...common.config import PROJECT_ROOT
+from ...common.http import site_proxy
+from ...common.urls import wp_rest_v2
+from ...wordpress.auth import resolve_auth
+from ...wordpress.origin import wordpress_rest_transport
 from ..content.drafts import parse_draft
 
 
@@ -83,6 +91,81 @@ def plan_actions(engine: Engine, site_id: str, live_posts: list[dict], live_body
 def action_counts(actions: list[dict]) -> dict[str, int]:
     return {kind: sum(a["kind"] == kind for a in actions)
             for kind in ("published", "brief", "linked_published", "existing_link")}
+
+
+def live_actions(engine: Engine, site_id: str, client: httpx.Client | None = None) -> tuple[list[dict], int]:
+    """Plan against an authenticated live post listing, never a potentially stale local snapshot.
+
+    The optional client permits a read-only mock transport in tests. Production
+    requests use the same pinned WordPress origin as the regular sync.
+    """
+    with engine.connect() as cx:
+        row = cx.execute(text("SELECT wp_url FROM sites WHERE site_id=:s"), {"s": site_id}).first()
+    if not row or not row[0]:
+        raise ValueError("WordPress URL missing")
+    root = wp_rest_v2(row[0]).rstrip("/")
+    owned = client is None
+    if owned:
+        credentials = resolve_auth(site_id)
+        if not credentials:
+            raise ValueError("WordPress Application Password missing")
+        transport = wordpress_rest_transport(root)
+        client = httpx.Client(auth=credentials.basic, transport=transport,
+                              proxy=None if transport else site_proxy(),
+                              headers={"User-Agent": "SEO-Brain-Writer/1.0"},
+                              follow_redirects=True, timeout=35)
+    assert client is not None
+    try:
+        posts = []
+        for page in range(1, 21):
+            response = client.get(root + "/posts", params={"context": "edit", "per_page": 100, "page": page,
+                                                           "_fields": "id,slug,status,link,modified_gmt"})
+            if response.status_code != 200 or not isinstance(response.json(), list):
+                raise RuntimeError(f"WordPress listing failed on page {page}: HTTP {response.status_code}")
+            posts.extend(response.json())
+            if page >= int(response.headers.get("x-wp-totalpages") or 1):
+                break
+        else:
+            raise RuntimeError("WordPress listing exceeded the safety page limit")
+
+        def full_post(post_id: int) -> dict:
+            response = client.get(root + f"/posts/{post_id}", params={"context": "edit",
+                "_fields": "id,slug,status,link,modified_gmt,title,content,excerpt"})
+            if response.status_code != 200 or not isinstance(response.json(), dict):
+                raise RuntimeError(f"WordPress post {post_id} could not be read: HTTP {response.status_code}")
+            return response.json()
+
+        return plan_actions(engine, site_id, posts, full_post), len(posts)
+    finally:
+        if owned:
+            client.close()
+
+
+def apply_with_backup(engine: Engine, site_id: str, actions: list[dict],
+                      backup_root: Path | None = None) -> dict:
+    """Back up SQLite before an atomic SEO Brain import; never write to WordPress."""
+    counts = action_counts(actions)
+    changes = sum(counts[k] for k in ("published", "brief", "linked_published"))
+    if not changes:
+        return {"actions": counts, "applied": 0, "backup": None}
+    if engine.dialect.name != "sqlite" or not engine.url.database:
+        raise RuntimeError("Automatic reconciliation requires a SQLite backup target")
+    db_path = Path(engine.url.database)
+    if not db_path.is_file():
+        raise RuntimeError("SQLite database path is unavailable")
+    root = backup_root or PROJECT_ROOT / "backups"
+    backup_dir = root / ("pre-plan-reconcile-" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f"))
+    backup_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+    backup_path = backup_dir / "seo.db"
+    with sqlite3.connect(db_path) as source, sqlite3.connect(backup_path) as target:
+        source.backup(target)
+        check = target.execute("PRAGMA quick_check").fetchone()[0]
+    backup_path.chmod(0o600)
+    if check != "ok":
+        raise RuntimeError("Database backup failed quick_check")
+    result = apply_actions(engine, site_id, actions, expected={k: counts[k] for k in
+        ("published", "brief", "linked_published")})
+    return {"actions": result, "applied": changes, "backup": str(backup_path)}
 
 
 def apply_actions(engine: Engine, site_id: str, actions: list[dict], *, expected: dict[str, int] | None = None) -> dict[str, int]:

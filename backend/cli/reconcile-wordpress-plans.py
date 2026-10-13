@@ -13,6 +13,7 @@ from pathlib import Path
 import httpx
 
 from seo_brain.brain.planner.wordpress_reconcile import action_counts, apply_actions, plan_actions
+from seo_brain.brain.content import ContentService
 from seo_brain.common.config import PROJECT_ROOT
 from seo_brain.common.urls import wp_rest_v2
 from seo_brain.db.engine import get_engine
@@ -83,6 +84,9 @@ def main() -> None:
         raise RuntimeError("Database backup failed quick_check")
     print({"backup": str(backup_path), "quick_check": quick_check})
     print({"applied": apply_actions(engine, args.site, actions, expected=expected)})
+    # Imported articles must appear in the operational graph immediately. This
+    # is idempotent, so rerunning --apply also repairs an interrupted graph sync.
+    print({"content_graph": ContentService(engine).sync_graph(args.site)})
 
 
 if __name__ == "__main__":

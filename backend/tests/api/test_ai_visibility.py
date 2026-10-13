@@ -165,6 +165,8 @@ def test_openai_probe_keeps_raw_citations_and_requires_search(monkeypatch):
     assert requests[0][0] == "https://api.openai.com/v1/responses"
     assert requests[0][1]["json"]["tool_choice"] == "required"
     assert requests[0][1]["json"]["store"] is False
+    assert "What should I buy?" in requests[0][1]["json"]["input"]
+    assert "{question}" not in requests[0][1]["json"]["input"]
     monkeypatch.setattr(probe.httpx, "post", lambda *a, **kw: SimpleNamespace(
         raise_for_status=lambda: None, json=lambda: {"output": [{"type": "message", "content": [
             {"type": "output_text", "text": "No web search", "annotations": []}]}]}))

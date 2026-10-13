@@ -19,7 +19,7 @@ def probe_openai(question: str, locale: str, market: str, model: str, api_key: s
         "model": model,
         "input": f"Answer this buyer question naturally in {locale} for market {market}. "
                  "Use the web to verify current information and cite sources. "
-                 "Do not favor any brand. Question: {question}",
+                 f"Do not favor any brand. Question: {question}",
         "tools": [{"type": "web_search", "search_context_size": "low"}],
         "tool_choice": "required",
         "max_output_tokens": 1800,

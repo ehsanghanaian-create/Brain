@@ -434,8 +434,13 @@ class GeminiAdapter(HttpAdapter):
     def default_base_url(self) -> str:
         return "https://generativelanguage.googleapis.com/v1beta"
 
+    def _headers(self) -> dict[str, str]:
+        # API keys in URLs can escape into proxy/access logs. Google accepts
+        # auth keys and legacy keys through this header on both endpoints.
+        return {**super()._headers(), "x-goog-api-key": self.api_key or ""}
+
     def list_models(self) -> list[str]:
-        r = self._get(f"{self.base_url}/models?key={self.api_key}")
+        r = self._get(f"{self.base_url}/models")
         if r.status_code in (400, 401, 403):
             raise ProviderError("unauthorized", retryable=False)
         if r.status_code != 200:
@@ -455,7 +460,7 @@ class GeminiAdapter(HttpAdapter):
             body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}
-        data = self._post(f"{self.base_url}/models/{request.model}:generateContent?key={self.api_key}", body)
+        data = self._post(f"{self.base_url}/models/{request.model}:generateContent", body)
         cands = data.get("candidates") or []
         text = "".join(p.get("text", "") for c in cands[:1] for p in ((c.get("content") or {}).get("parts") or []))
         u = data.get("usageMetadata") or {}

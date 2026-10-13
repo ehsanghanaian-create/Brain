@@ -455,9 +455,13 @@ class GeminiAdapter(HttpAdapter):
             contents[-1]["parts"][0]["text"] += _json_instruction(request.json_schema)
         body: dict[str, Any] = {"contents": contents, "generationConfig": {"temperature": request.temperature, "maxOutputTokens": request.max_tokens, **({"responseMimeType": "application/json"} if request.json_schema else {})}}
         if "flash" in request.model.lower():
-            # Flash models "think" by default and the thoughts are billed against maxOutputTokens: a 1200-word Persian
-            # article lost ~2300 tokens to thinking and came back truncated mid-JSON. Writing needs the budget for text.
-            body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": 0}
+            # Gemini 3.x rejects the old numeric thinkingBudget=0. Keep light
+            # writing calls responsive without consuming the output budget on
+            # hidden thoughts; 2.x retains the legacy setting.
+            body["generationConfig"]["thinkingConfig"] = (
+                {"thinkingLevel": "minimal"} if request.model.startswith("gemini-3")
+                else {"thinkingBudget": 0}
+            )
         if system:
             body["systemInstruction"] = {"parts": [{"text": system}]}
         data = self._post(f"{self.base_url}/models/{request.model}:generateContent", body)

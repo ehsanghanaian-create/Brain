@@ -93,7 +93,7 @@ def test_gemini_key_stays_out_of_request_urls():
     seen = []
 
     def handler(req: httpx.Request) -> httpx.Response:
-        seen.append((str(req.url), req.headers.get("x-goog-api-key")))
+        seen.append((str(req.url), req.headers.get("x-goog-api-key"), json.loads(req.content or b"{}")))
         if req.method == "GET":
             return httpx.Response(200, json={"models": [{"name": "models/gemini-3.5-flash-lite"}]})
         return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": "OK"}]}}]})
@@ -102,7 +102,8 @@ def test_gemini_key_stays_out_of_request_urls():
     adapter.list_models()
     adapter.complete(AIRequest(model="gemini-3.5-flash-lite", messages=[AIMessage("user", "Hello")], max_tokens=64, temperature=0))
     assert len(seen) == 2
-    assert all("AQ.example-secret" not in url and key == "AQ.example-secret" for url, key in seen)
+    assert all("AQ.example-secret" not in url and key == "AQ.example-secret" for url, key, _ in seen)
+    assert seen[1][2]["generationConfig"]["thinkingConfig"] == {"thinkingLevel": "minimal"}
 
 
 def test_cloudflare_uses_token_verify_and_catalog_for_connection_probe():

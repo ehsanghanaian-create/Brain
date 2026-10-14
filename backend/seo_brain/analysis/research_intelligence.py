@@ -233,6 +233,9 @@ def overview(engine: Engine, site_id: str, days: int = 28) -> dict:
             row["h2"] = _json_list(row.pop("h2_json"))
             row["own_page"] = ({**dict(own), "h1": _json_list(own["h1"]), "h2": _json_list(own["h2"])}
                                if own else None)
+            own_headings = {normalize_keyword(value) for value in row["own_page"]["h2"]} if own else set()
+            row["review_headings"] = [value for value in row["h2"]
+                                      if normalize_keyword(value) not in own_headings][:8]
         daily: list[dict] = []
         candidates: list[dict] = []
         observed_questions: list[dict] = []

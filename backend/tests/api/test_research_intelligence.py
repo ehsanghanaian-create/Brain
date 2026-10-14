@@ -101,6 +101,7 @@ def test_competitor_queue_comparison_and_safe_host_validation(tmp_path, monkeypa
     tracked = client.get(base + "/overview").json()["competitors"]["tracked_pages"][0]
     assert tracked["title"] == "Rival title" and tracked["own_page"]["title"] == "Our title"
     assert tracked["h1"] == ["Rival H1"] and tracked["own_page"]["h1"] == ["Our H1"]
+    assert tracked["review_headings"] == ["Rival H2"]
     assert client.get("/api/v1/sites/other/research/overview").json()["competitors"]["tracked_pages"] == []
     assert client.delete(f"/api/v1/sites/other/research/competitors/{page_id}").status_code == 404
     assert client.delete(base + f"/competitors/{page_id}").json() == {"deleted": page_id}

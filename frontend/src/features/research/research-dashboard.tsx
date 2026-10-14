@@ -52,6 +52,7 @@ type CompetitorPage = {
   meta_description: string;
   h1: string[];
   h2: string[];
+  review_headings: string[];
   canonical: string;
   word_count: number | null;
   last_checked_at: string | null;
@@ -183,9 +184,12 @@ export function ResearchDashboard({
     return () => window.clearInterval(timer);
   }, [data, load]);
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible') void load();
-    }, 10 * 60 * 1000);
+    const timer = window.setInterval(
+      () => {
+        if (document.visibilityState === 'visible') void load();
+      },
+      10 * 60 * 1000
+    );
     return () => window.clearInterval(timer);
   }, [load]);
 
@@ -767,47 +771,63 @@ export function ResearchDashboard({
                         </p>
                       )}
                       {row.status === 'ready' && (
-                        <div className='grid gap-3 rounded-lg border p-3 sm:grid-cols-2'>
-                          <div>
-                            <strong>صفحهٔ رقیب</strong>
-                            <p className='text-muted-foreground mt-2'>
-                              عنوان: {row.title || 'ثبت نشده'}
-                            </p>
-                            <p className='text-muted-foreground'>
-                              H1: {row.h1.join('، ') || 'ثبت نشده'}
-                            </p>
-                            <p className='text-muted-foreground'>
-                              H2: {n(row.h2.length)} · واژهٔ تقریبی: {n(row.word_count)}
-                            </p>
-                            <p className='text-muted-foreground line-clamp-3'>
-                              توضیح: {row.meta_description || 'ثبت نشده'}
-                            </p>
-                          </div>
-                          <div>
-                            <strong>صفحهٔ خودمان</strong>
-                            {row.own_page ? (
-                              <>
-                                <p className='text-muted-foreground mt-2'>
-                                  عنوان: {row.own_page.title || 'ثبت نشده'}
-                                </p>
-                                <p className='text-muted-foreground'>
-                                  H1: {row.own_page.h1.join('، ') || 'ثبت نشده'}
-                                </p>
-                                <p className='text-muted-foreground'>
-                                  H2: {n(row.own_page.h2.length)} · واژهٔ تقریبی:{' '}
-                                  {n(row.own_page.word_count)}
-                                </p>
-                                <p className='text-muted-foreground line-clamp-3'>
-                                  توضیح: {row.own_page.meta_description || 'ثبت نشده'}
-                                </p>
-                              </>
-                            ) : (
+                        <>
+                          <div className='grid gap-3 rounded-lg border p-3 sm:grid-cols-2'>
+                            <div>
+                              <strong>صفحهٔ رقیب</strong>
                               <p className='text-muted-foreground mt-2'>
-                                صفحهٔ خودی تعیین نشده یا هنوز خزش نشده است.
+                                عنوان: {row.title || 'ثبت نشده'}
                               </p>
-                            )}
+                              <p className='text-muted-foreground'>
+                                H1: {row.h1.join('، ') || 'ثبت نشده'}
+                              </p>
+                              <p className='text-muted-foreground'>
+                                H2: {n(row.h2.length)} · واژهٔ تقریبی: {n(row.word_count)}
+                              </p>
+                              <p className='text-muted-foreground line-clamp-3'>
+                                توضیح: {row.meta_description || 'ثبت نشده'}
+                              </p>
+                            </div>
+                            <div>
+                              <strong>صفحهٔ خودمان</strong>
+                              {row.own_page ? (
+                                <>
+                                  <p className='text-muted-foreground mt-2'>
+                                    عنوان: {row.own_page.title || 'ثبت نشده'}
+                                  </p>
+                                  <p className='text-muted-foreground'>
+                                    H1: {row.own_page.h1.join('، ') || 'ثبت نشده'}
+                                  </p>
+                                  <p className='text-muted-foreground'>
+                                    H2: {n(row.own_page.h2.length)} · واژهٔ تقریبی:{' '}
+                                    {n(row.own_page.word_count)}
+                                  </p>
+                                  <p className='text-muted-foreground line-clamp-3'>
+                                    توضیح: {row.own_page.meta_description || 'ثبت نشده'}
+                                  </p>
+                                </>
+                              ) : (
+                                <p className='text-muted-foreground mt-2'>
+                                  صفحهٔ خودی تعیین نشده یا هنوز خزش نشده است.
+                                </p>
+                              )}
+                            </div>
                           </div>
-                        </div>
+                          {!!row.review_headings.length && (
+                            <div className='rounded-lg border border-primary/20 bg-primary/[0.035] p-3'>
+                              <strong>تیترهای رقیب برای بررسی</strong>
+                              <p className='text-muted-foreground mt-1 text-xs'>
+                                این تیترها در H2 صفحهٔ خودمان با همین متن دیده نشدند؛ پیش از افزودن
+                                به محتوا، ارتباطشان با نیاز خریدار را بررسی کنید.
+                              </p>
+                              <ul className='mt-2 list-inside list-disc space-y-1 text-xs'>
+                                {row.review_headings.map((heading) => (
+                                  <li key={heading}>{heading}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </>
                       )}
                       <div className='flex flex-wrap gap-2'>
                         <Button

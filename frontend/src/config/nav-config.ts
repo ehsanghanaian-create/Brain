@@ -36,7 +36,9 @@ export const navGroups: NavGroup[] = [
       { title: 'کلمات کلیدی', url: '/dashboard/keywords', icon: 'keywords', items: [],
         description: 'ورود، خوشه‌بندی و نقشه موضوعی کلمات کلیدی (فاز ۵)' },
       { title: 'پژوهش بازار و رقبا', url: '/dashboard/research', icon: 'keywords', items: [],
-        description: 'عبارت‌های تازه از GSC، پرسش‌های خریدار و پایش صفحات رقیب با منبع روشن' }
+        description: 'عبارت‌های تازه از GSC، پرسش‌های خریدار و پایش صفحات رقیب با منبع روشن' },
+      { title: 'پایش روزانهٔ رتبه', url: '/dashboard/rank-tracking', icon: 'trendingUp', items: [],
+        description: 'رتبهٔ مشاهده‌شده در SERP، روند روزانه و اقدام پیشنهادی برای هر کلمه' }
     ]
   },
   {

@@ -324,10 +324,30 @@ def run_tick(engine: Engine, queue, max_sites: int = 2, stale_after_minutes: int
             competitor_queued += 1
         except Exception as e:  # noqa: BLE001 — one bad page must not stop other syncs
             log.error(f"scheduler: competitor refresh enqueue failed: {e.__class__.__name__}")
-    if queued or content_queued or competitor_queued:
-        log.info(f"scheduler tick: recovered={recovered}, queued={queued}, content={content_queued}, competitors={competitor_queued}")
+    from ..analysis import serp_rank
+    rank_queued = 0
+    for sid in site_ids:
+        try:
+            if not serp_rank.due(engine, sid):
+                continue
+            rank_run = serp_rank.create_run(engine, sid)
+            if rank_run["status"] != "queued":
+                continue
+            try:
+                queue.enqueue(_Job(type="serp_rank_daily",
+                                   payload={"site_id": sid, "run_id": rank_run["run_id"]}, site_id=sid))
+                rank_queued += 1
+            except Exception:
+                with engine.begin() as cx:
+                    cx.execute(text("UPDATE serp_rank_runs SET status='blocked',error_code='queue_unavailable' WHERE id=:i"),
+                               {"i": rank_run["run_id"]})
+                raise
+        except Exception as e:  # noqa: BLE001 — other scheduled jobs must continue
+            log.error(f"scheduler: rank enqueue for {sid} failed: {e.__class__.__name__}")
+    if queued or content_queued or competitor_queued or rank_queued:
+        log.info(f"scheduler tick: recovered={recovered}, queued={queued}, content={content_queued}, competitors={competitor_queued}, rank={rank_queued}")
     return {"recovered": recovered, "queued": queued, "content_queued": content_queued,
-            "competitor_queued": competitor_queued, "sites_started": started_sites}
+            "competitor_queued": competitor_queued, "rank_queued": rank_queued, "sites_started": started_sites}
 
 
 class SyncScheduler:

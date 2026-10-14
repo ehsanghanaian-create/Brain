@@ -153,6 +153,9 @@ def fetch_serp(keyword: str, cfg: dict) -> SerpResult:
         meta = data.get("meta") or {}
         if not isinstance(rows, list):
             raise ProviderError("provider_missing_organic_results")
+        if meta.get("parse_quality") == "empty":
+            # A provider returning no SERP cannot establish that our site is outside the top N.
+            raise ProviderError("provider_empty_results")
         if meta.get("parse_quality") not in (None, "ok"):
             raise ProviderError("provider_incomplete_response")
         organic = [{"position": item["position"], "absolute_position": item["position"],
@@ -272,8 +275,18 @@ def execute_run(engine: Engine, site_id: str, run_id: int, fetch=fetch_serp) -> 
           ORDER BY COALESCE((SELECT MAX(o.checked_at) FROM serp_rank_observations o
                              WHERE o.site_id=keywords.site_id AND o.keyword_id=keywords.id), ''), id"""),
           {"s": site_id, "r": run_id}).mappings().all()
-    stopped = None
+    with engine.connect() as cx:
+        recent = cx.execute(text("""SELECT status FROM serp_rank_observations
+          WHERE run_id=:r ORDER BY id DESC LIMIT 3"""), {"r": run_id}).scalars().all()
+    consecutive_errors = 0
+    for status in recent:
+        if status != "provider_error":
+            break
+        consecutive_errors += 1
+    stopped = "provider_repeated_errors" if consecutive_errors >= 3 else None
     for row in keywords:
+        if stopped:
+            break
         with engine.connect() as cx:
             requests = cx.execute(text("SELECT provider_requests FROM serp_rank_runs WHERE id=:i"),
                                   {"i": run_id}).scalar() or 0
@@ -292,12 +305,16 @@ def execute_run(engine: Engine, site_id: str, run_id: int, fetch=fetch_serp) -> 
                       "ranking_url": best["url"] if best else None,
                       "count": len(snapshot.organic), "competitors": json.dumps(competitors, ensure_ascii=False),
                       "task_id": snapshot.task_id, "error": None}
+            consecutive_errors = 0
         except ProviderError as error:
             values = {"status": "provider_error", "position": None, "absolute": None,
                       "ranking_url": None, "count": 0, "competitors": "[]", "task_id": None,
                       "error": error.code}
+            consecutive_errors += 1
             if error.stop_run:
                 stopped = error.code
+            elif consecutive_errors >= 3:
+                stopped = "provider_repeated_errors"
         with engine.begin() as cx:
             cx.execute(text("""INSERT OR IGNORE INTO serp_rank_observations
               (run_id,site_id,keyword_id,keyword,status,organic_position,absolute_position,

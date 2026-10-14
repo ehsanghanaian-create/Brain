@@ -119,6 +119,47 @@ def test_valid_observation_survives_later_provider_block(tmp_path, monkeypatch):
     assert view["keywords"][1]["organic_position"] is None
 
 
+def test_three_provider_errors_stop_the_batch_and_resume_without_more_calls(tmp_path, monkeypatch):
+    engine = _engine(tmp_path)
+    monkeypatch.setenv("SERPKITE_API_KEY", "test-only")
+    monkeypatch.setattr(serp_rank.time, "sleep", lambda _: None)
+    run = serp_rank.create_run(engine, "s", datetime(2026, 10, 14, 3, 0, tzinfo=timezone.utc))
+    calls = []
+
+    def empty(_keyword, _cfg):
+        calls.append(_keyword)
+        raise serp_rank.ProviderError("provider_empty_results")
+
+    result = serp_rank.execute_run(engine, "s", run["run_id"], fetch=empty)
+    assert result["status"] == "blocked"
+    assert result["error_code"] == "provider_repeated_errors"
+    assert len(calls) == 3
+    assert result["failed"] == 3
+    assert serp_rank.execute_run(engine, "s", run["run_id"], fetch=empty)["status"] == "blocked"
+    assert len(calls) == 3
+
+
+def test_resumed_run_with_three_prior_errors_does_not_call_provider(tmp_path, monkeypatch):
+    engine = _engine(tmp_path)
+    monkeypatch.setenv("SERPKITE_API_KEY", "test-only")
+    run = serp_rank.create_run(engine, "s", datetime(2026, 10, 14, 3, 0, tzinfo=timezone.utc))
+    with engine.begin() as cx:
+        for keyword_id, keyword in cx.execute(text("SELECT id,keyword FROM keywords WHERE site_id='s'")):
+            cx.execute(text("""INSERT INTO serp_rank_observations
+              (run_id,site_id,keyword_id,keyword,status,checked_at,error_code)
+              VALUES(:r,'s',:k,:keyword,'provider_error','2026-10-14T03:00:00Z','provider_empty_results')"""),
+              {"r": run["run_id"], "k": keyword_id, "keyword": keyword})
+        cx.execute(text("UPDATE serp_rank_runs SET status='running',keywords_checked=3,keywords_failed=3 WHERE id=:r"),
+                   {"r": run["run_id"]})
+
+    def should_not_run(_keyword, _cfg):
+        raise AssertionError("provider called after repeated errors")
+
+    result = serp_rank.execute_run(engine, "s", run["run_id"], fetch=should_not_run)
+    assert result["status"] == "blocked"
+    assert result["error_code"] == "provider_repeated_errors"
+
+
 def test_serpkite_contract_uses_unmodified_google_organic_results(monkeypatch):
     monkeypatch.setenv("SERPKITE_API_KEY", "test-only")
     captured = {}
@@ -139,6 +180,15 @@ def test_serpkite_contract_uses_unmodified_google_organic_results(monkeypatch):
                                 "fields": "results.position,results.link,results.domain"}
     assert [row["position"] for row in result.organic] == [1, 3]
     assert result.task_id == "sample"
+
+
+def test_empty_provider_page_is_not_reported_as_a_missing_rank(monkeypatch):
+    monkeypatch.setenv("SERPKITE_API_KEY", "test-only")
+    monkeypatch.setattr(serp_rank, "_fetch_json", lambda _: {
+        "results": [], "meta": {"parse_quality": "empty", "credits_used": 0}})
+    with pytest.raises(serp_rank.ProviderError) as caught:
+        serp_rank.fetch_serp("لباس مردانه", {"provider": "serpkite", "device": "mobile", "depth": 10})
+    assert caught.value.code == "provider_empty_results"
 
 
 def test_key_monthly_limit_is_reported_as_quota_not_bad_credentials(monkeypatch):

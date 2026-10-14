@@ -15,7 +15,7 @@ from ..automation import get_job_queue
 from ..common.config import env
 from .deps import require_token
 from .errors import install_error_handlers
-from .routers import action_inbox, ads_data, ai, ai_config, ai_gateway, ai_visibility, ai_workspace, commerce, content, content_plans, generation, graph, health, ip_graph, issue_cases, jobs, keywords, knowledge, links, memory, network, ops, portfolio, remediation, reports, site_media, site_mission, site_security, sites, tracker, traffic, url_inventory
+from .routers import action_inbox, ads_data, ai, ai_config, ai_gateway, ai_visibility, ai_workspace, commerce, content, content_plans, generation, graph, health, ip_graph, issue_cases, jobs, keywords, knowledge, links, memory, network, ops, portfolio, remediation, reports, research, site_media, site_mission, site_security, sites, tracker, traffic, url_inventory
 
 API_PREFIX = "/api/v1"
 
@@ -97,6 +97,11 @@ def _register_builtin_jobs() -> None:
         from ..gsc.pipeline import GscPipeline
         return GscPipeline(_engine()).run(payload["site_id"], run_id=payload.get("run_id"), days=payload.get("days"), job_id=payload.get("job_id"))
 
+    def _run_competitor_refresh(payload: dict):
+        from ..analysis.research_intelligence import refresh_competitor
+        from .deps import engine as _engine
+        return refresh_competitor(_engine(), payload["site_id"], int(payload["competitor_id"]))
+
     def _run_ga4_sync(payload: dict):
         """GA4 → snapshot → graph/opportunities, one job; state persisted in sync_runs (see ga4/pipeline.py)."""
         from .deps import engine as _engine
@@ -131,6 +136,7 @@ def _register_builtin_jobs() -> None:
 
     for name, fn in (("sync_wordpress", _run_sync_wordpress), ("build_graph", _run_build_graph), ("noop", _noop), ("links_analyze", _run_links_analyze), ("generation_run", _run_generation), ("content_automation", _run_content_automation), ("planner_analyze", _run_planner_analyze),
                      ("wordpress_sync", _run_wordpress_pipeline), ("gsc_sync", _run_gsc_sync), ("ga4_sync", _run_ga4_sync),
+                     ("competitor_refresh", _run_competitor_refresh),
                      ("plan_generate", _run_plan_generate), ("plan_publish", _run_plan_publish), ("seo_remediation", _run_seo_remediation),
                      ("seo_proposal", _run_seo_proposal)):
         try:
@@ -169,7 +175,7 @@ def create_app() -> FastAPI:
     from .routers import google as google_router_mod
     app.include_router(google_router_mod.callback_router, prefix=API_PREFIX)     # Google's browser redirect cannot send X-API-Token; guarded by the state nonce
     app.include_router(tracker.router, prefix=API_PREFIX)   # عمومی — امنیتش با write-key سایت است، نه X-API-Token
-    for r in (portfolio.router, action_inbox.router, ads_data.router, sites.router, sites.gsc_router, google_router_mod.router, graph.router, remediation.router, memory.router, knowledge.router, site_mission.router, site_security.router, site_media.router, network.router, ip_graph.router, ops.router, ai.router, ai_config.router, ai_visibility.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router, reports.router, traffic.router, url_inventory.router, commerce.router, issue_cases.router):
+    for r in (portfolio.router, action_inbox.router, ads_data.router, sites.router, sites.gsc_router, google_router_mod.router, graph.router, remediation.router, memory.router, knowledge.router, site_mission.router, site_security.router, site_media.router, network.router, ip_graph.router, ops.router, ai.router, ai_config.router, ai_visibility.router, research.router, jobs.router, keywords.router, content.router, links.router, ai_gateway.router, generation.router, content_plans.router, ai_workspace.router, reports.router, traffic.router, url_inventory.router, commerce.router, issue_cases.router):
         app.include_router(r, prefix=API_PREFIX, dependencies=deps)
 
     # legacy dashboard (v0.1) mounted read-only until UI parity

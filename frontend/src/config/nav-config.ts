@@ -34,7 +34,9 @@ export const navGroups: NavGroup[] = [
       { title: 'نقشه تصمیم', url: '/dashboard/graph', icon: 'graph', shortcut: ['g', 'g'], items: [],
         description: 'هدف سایت، پرسش‌های سئو و مسیر اقدام از روی شواهد گراف' },
       { title: 'کلمات کلیدی', url: '/dashboard/keywords', icon: 'keywords', items: [],
-        description: 'ورود، خوشه‌بندی و نقشه موضوعی کلمات کلیدی (فاز ۵)' }
+        description: 'ورود، خوشه‌بندی و نقشه موضوعی کلمات کلیدی (فاز ۵)' },
+      { title: 'پژوهش بازار و رقبا', url: '/dashboard/research', icon: 'keywords', items: [],
+        description: 'عبارت‌های تازه از GSC، پرسش‌های خریدار و پایش صفحات رقیب با منبع روشن' }
     ]
   },
   {

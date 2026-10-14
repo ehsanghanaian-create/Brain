@@ -314,9 +314,20 @@ def run_tick(engine: Engine, queue, max_sites: int = 2, stale_after_minutes: int
                 log.error(f"scheduler: enqueue {kind} for {sid} failed: {e.__class__.__name__}: {e}")
     from .content import enqueue_due
     content_queued = enqueue_due(engine, queue, limit=max(1, max_sites))
-    if queued or content_queued:
-        log.info(f"scheduler tick: recovered={recovered}, queued={queued}, content={content_queued}")
-    return {"recovered": recovered, "queued": queued, "content_queued": content_queued, "sites_started": started_sites}
+    from ..analysis.research_intelligence import due_competitors
+    from .queue import Job as _Job
+    competitor_queued = 0
+    for target in due_competitors(engine, limit=2):
+        try:
+            queue.enqueue(_Job(type="competitor_refresh", payload={"site_id": target["site_id"],
+                            "competitor_id": target["id"]}, site_id=target["site_id"]))
+            competitor_queued += 1
+        except Exception as e:  # noqa: BLE001 — one bad page must not stop other syncs
+            log.error(f"scheduler: competitor refresh enqueue failed: {e.__class__.__name__}")
+    if queued or content_queued or competitor_queued:
+        log.info(f"scheduler tick: recovered={recovered}, queued={queued}, content={content_queued}, competitors={competitor_queued}")
+    return {"recovered": recovered, "queued": queued, "content_queued": content_queued,
+            "competitor_queued": competitor_queued, "sites_started": started_sites}
 
 
 class SyncScheduler:

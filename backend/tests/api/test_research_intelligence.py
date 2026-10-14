@@ -93,7 +93,7 @@ def test_competitor_queue_comparison_and_safe_host_validation(tmp_path, monkeypa
     assert client.post(base + f"/competitors/{page_id}/refresh").json()["already_queued"] is True
     with engine.begin() as cx:
         cx.execute(text("""INSERT INTO pages(site_id,url,title,h1,h2,word_count,crawl_status)
-            VALUES ('s','https://store.example/own','Our title','[\"Our H1\"]','[\"Our H2\"]',250,'ok')"""))
+            VALUES ('s','https://store.example/own/','Our title','[\"Our H1\"]','[\"Our H2\"]',250,'ok')"""))
     monkeypatch.setattr(research_service, "fetch_public_metadata", lambda url: {
         "http_status": 200, "title": "Rival title", "meta_description": "Rival description",
         "h1_json": '["Rival H1"]', "h2_json": '["Rival H2"]', "canonical": url, "word_count": 400})

@@ -219,9 +219,16 @@ def overview(engine: Engine, site_id: str, days: int = 28) -> dict:
         known = {row[0] for row in cx.execute(text("SELECT normalized FROM keywords WHERE site_id=:s"),
                                                {"s": site_id}).all()}
         for row in competitors:
+            own_url = row["own_url"]
+            own_parts = urlsplit(own_url)
+            alternate_path = own_parts.path.rstrip("/") or "/"
+            if alternate_path == own_parts.path:
+                alternate_path += "/"
+            alternate_url = urlunsplit((own_parts.scheme, own_parts.netloc,
+                                        alternate_path, own_parts.query, ""))
             own = cx.execute(text("""SELECT title,meta_description,h1,h2,word_count,last_crawled
-                FROM pages WHERE site_id=:s AND url=:u ORDER BY last_crawled DESC LIMIT 1"""),
-                {"s": site_id, "u": row["own_url"]}).mappings().first() if row["own_url"] else None
+                FROM pages WHERE site_id=:s AND url IN (:u,:v) ORDER BY last_crawled DESC LIMIT 1"""),
+                {"s": site_id, "u": own_url, "v": alternate_url}).mappings().first() if own_url else None
             row["h1"] = _json_list(row.pop("h1_json"))
             row["h2"] = _json_list(row.pop("h2_json"))
             row["own_page"] = ({**dict(own), "h1": _json_list(own["h1"]), "h2": _json_list(own["h2"])}

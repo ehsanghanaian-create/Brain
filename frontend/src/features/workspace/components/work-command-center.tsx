@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, useReducedMotion } from 'motion/react';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { toast } from 'sonner';
@@ -67,6 +68,10 @@ const statusTone = (status: WorkStatus) => status === 'blocked' ? 'border-rose-5
   status === 'in_progress' ? 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300' : '';
 
 export function WorkCommandCenter() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const deepLink = searchParams.toString();
+  const openedFromQuery = useRef(false);
   const [data, setData] = useState<CommandOverview | null>(null);
   const [personalItems, setPersonalItems] = useState<CommandWorkItem[]>([]);
   const [delegatedItems, setDelegatedItems] = useState<CommandWorkItem[]>([]);
@@ -216,7 +221,7 @@ export function WorkCommandCenter() {
   }
   useEffect(() => {
     if (meId === null) return;
-    const query = new URLSearchParams(window.location.search);
+    const query = new URLSearchParams(deepLink);
     const siteId = query.get('site');
     const taskId = Number(query.get('task'));
     const ownerId = Number(query.get('owner_id'));
@@ -229,12 +234,18 @@ export function WorkCommandCenter() {
     }
     if (!siteId || !Number.isSafeInteger(taskId) || taskId < 1) return;
     let active = true;
-    void commandApi.boardPage(siteId, taskId - 1).then((page) => {
-      const task = page.items.find((item) => item.id === taskId);
-      if (active && task) openTask(task);
-    }).catch(() => { if (active) toast.error('کار انتخاب‌شده پیدا نشد'); });
+    void commandApi.work(siteId, taskId).then((task) => {
+      if (active) { openedFromQuery.current = true; openTask(task); }
+    }).catch(() => { if (active) toast.error('کار انتخاب‌شده پیدا نشد یا به آن دسترسی ندارید'); });
     return () => { active = false; };
-  }, [meId]);
+  }, [meId, deepLink]);
+  useEffect(() => {
+    if (editing || !openedFromQuery.current) return;
+    openedFromQuery.current = false;
+    const query = new URLSearchParams(deepLink);
+    query.delete('task');
+    router.replace(`/dashboard/work${query.size ? `?${query}` : ''}`, { scroll: false });
+  }, [editing, deepLink, router]);
   async function saveTask() {
     if (!editing) return;
     if (form.title.trim().length < 3 || !form.site_id) { toast.error('پروژه و عنوان کار را مشخص کنید'); return; }

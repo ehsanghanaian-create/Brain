@@ -95,6 +95,37 @@ def test_board_order_and_checklist_persist_with_site_boundary(client):
     assert client.patch(f"/api/v1/sites/other/work/{first['id']}/checklist/{check.json()['id']}", json={"done": False}).status_code == 404
 
 
+def test_main_work_done_and_atomic_check_all(client):
+    base = "/api/v1/sites/demo/work"
+    parent = client.post(base, json={"title": "Main repair", "subtasks": ["First follow-up", "Second follow-up"]}).json()
+    first = client.post(f"{base}/{parent['id']}/checklist", json={"title": "Check output"}).json()
+    second = client.post(f"{base}/{parent['id']}/checklist", json={"title": "Check links"}).json()
+    detail = client.get(f"{base}/{parent['id']}")
+    assert detail.status_code == 200 and detail.json()["checklist_total"] == 4
+    children = client.get(f"{base}/{parent['id']}/subtasks").json()
+    assert client.get(f"{base}/{children[0]['id']}").json()["id"] == children[0]["id"]
+    assert client.get(f"/api/v1/sites/other/work/{parent['id']}").status_code == 404
+
+    partial = client.patch(f"{base}/{parent['id']}", json={"main_work_done": True})
+    assert partial.status_code == 200 and partial.json()["status"] == "new"
+    assert client.get("/api/v1/work/board/demo").json()["items"][0]["main_work_done"] == 1
+    assert client.patch(f"{base}/{parent['id']}", json={"status": "verified"}).status_code == 422
+
+    all_done = client.patch(f"{base}/{parent['id']}/checklist", json={"done": True})
+    assert all_done.status_code == 200, all_done.text
+    assert all_done.json()["updated"] == 4 and all(step["done"] for step in all_done.json()["items"])
+    assert client.patch(f"{base}/{parent['id']}/checklist", json={"done": True}).json()["updated"] == 0
+    assert all(child["status"] == "verified" for child in client.get(f"{base}/{parent['id']}/subtasks").json())
+    assert client.patch(f"{base}/{parent['id']}/checklist", json={"done": False}).json()["updated"] == 4
+    assert not any(step["done"] for step in client.get(f"{base}/{parent['id']}/checklist").json())
+
+    assert client.patch(f"{base}/{children[0]['id']}", json={"status": "rejected", "note": "Not applicable"}).status_code == 200
+    denied = client.patch(f"{base}/{parent['id']}/checklist", json={"done": True})
+    assert denied.status_code == 409
+    assert not any(step["done"] for step in client.get(f"{base}/{parent['id']}/checklist").json())
+    assert second["id"] != first["id"]
+
+
 def test_project_labels_and_atomic_bulk_work_updates(client):
     base = "/api/v1/sites/demo/work"
     first = client.post(base, json={"title": "Audit crawl paths"}).json()
@@ -469,9 +500,19 @@ def test_shared_discussion_and_project_mentions(client):
     manager_notices = client.get("/api/v1/auth/notifications?audience=discussion", headers=manager).json()["items"]
     outsider_notices = client.get("/api/v1/auth/notifications?audience=discussion", headers=outsider).json()["items"]
     colleague_notices = client.get("/api/v1/auth/notifications?audience=discussion", headers=colleague).json()["items"]
-    assert any(row["kind"] == "mention" and row["work_item_id"] == root["id"] for row in worker_notices)
-    assert any(row["kind"] == "mention" and row["work_item_id"] == root["id"] for row in manager_notices)
-    assert any(row["kind"] == "mention" and row["work_item_id"] == root["id"] for row in colleague_notices)
+    assert any(row["kind"] == "mention" and row["work_item_id"] == grandchild["id"] for row in worker_notices)
+    assert any(row["kind"] == "mention" and row["work_item_id"] == grandchild["id"] for row in manager_notices)
+    assert any(row["kind"] == "mention" and row["work_item_id"] == child["id"] for row in colleague_notices)
+    assert all(row["kind"] == "mention" for row in worker_notices + manager_notices + colleague_notices)
+    manager_count = len(manager_notices)
+    assert client.post(f"{base}/{grandchild['id']}/comments", headers=colleague,
+                       json={"text": "@worker can you handle this?"}).status_code == 201
+    assert len(client.get("/api/v1/auth/notifications?audience=discussion", headers=manager).json()["items"]) == manager_count
+    assert client.post(f"{base}/{grandchild['id']}/comments", headers=colleague,
+                       json={"text": "@outsider cannot see this project"}).status_code == 201
+    assert len(client.get("/api/v1/auth/notifications?audience=discussion", headers=manager).json()["items"]) == manager_count
+    assert client.get(f"{base}/{grandchild['id']}", headers=worker).json()["id"] == grandchild["id"]
+    assert client.get(f"{base}/{grandchild['id']}", headers=outsider).status_code == 403
     assert not outsider_notices
     assert client.post(f"{base}/{root['id']}/comments", headers=outsider,
                        json={"text": "Unauthorized"}).status_code == 403

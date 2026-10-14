@@ -58,6 +58,7 @@ class WorkIn(BaseModel):
     estimated_hours: float | None = Field(default=None, ge=0, le=1000)
     start_at: datetime | None = None
     progress_percent: int = Field(default=0, ge=0, le=100)
+    main_work_done: bool = False
     parent_id: int | None = Field(default=None, ge=1)
     milestone_id: int | None = Field(default=None, ge=1)
     due_at: datetime | None = None
@@ -80,6 +81,7 @@ class WorkPatch(BaseModel):
     estimated_hours: float | None = Field(default=None, ge=0, le=1000)
     start_at: datetime | None = None
     progress_percent: int | None = Field(default=None, ge=0, le=100)
+    main_work_done: bool | None = None
     parent_id: int | None = Field(default=None, ge=1)
     milestone_id: int | None = Field(default=None, ge=1)
     due_at: datetime | None = None
@@ -135,6 +137,8 @@ def create_subtask(site_id: str, item_id: int, body: SubtaskIn, request: Request
         if not parent:
             raise HTTPException(404, "parent task not found")
         require_task_editor(cx, request, site_id, parent)
+        if parent["status"] == "verified":
+            raise HTTPException(409, "reopen the task before adding subtasks")
         actor = getattr(request.state, "panel_user", None)
         stamp = now()
         result = cx.execute(text("""INSERT INTO work_items
@@ -170,14 +174,18 @@ def add_comment(site_id: str, item_id: int, body: CommentIn, request: Request,
         actor = getattr(request.state, "panel_user", None)
         _record(cx, site_id, item_id, "comment", dict(item), dict(item), message, actor)
         if actor:
-            root_id = _discussion_root(cx, site_id, item_id)
-            root = cx.execute(text("SELECT id,title,owner_id,created_by_id FROM work_items WHERE id=:id"),
-                              {"id": root_id}).mappings().one()
             mentioned = _mentioned_users(cx, site_id, message) - {actor["id"]}
-            for recipient in ({item["owner_id"], item["created_by_id"],
-                               root["owner_id"], root["created_by_id"]} - {None, actor["id"]} - mentioned):
-                _notify(cx, recipient, root_id, "comment", "discussion", root["title"],
-                        f"{actor['full_name']} در این کار پیام گذاشت")
+            # A directed @mention is delivered only to the named people. _record
+            # already created those notifications; a generic comment notice would
+            # otherwise alert the owner/creator about someone else's conversation.
+            if not re.search(r"(?<![\w@])@[A-Za-z0-9_.-]{3,40}\b", message):
+                root_id = _discussion_root(cx, site_id, item_id)
+                root = cx.execute(text("SELECT id,owner_id,created_by_id FROM work_items WHERE id=:id"),
+                                  {"id": root_id}).mappings().one()
+                for recipient in ({item["owner_id"], item["created_by_id"],
+                                   root["owner_id"], root["created_by_id"]} - {None, actor["id"]}):
+                    _notify(cx, recipient, item_id, "comment", "discussion", item["title"],
+                            f"{actor['full_name']} در این کار پیام گذاشت")
         row = cx.execute(text("""SELECT id,event_type,note,actor_id,actor_username,created_at
             FROM work_item_events WHERE work_item_id=:id ORDER BY id DESC LIMIT 1"""),
             {"id": item_id}).mappings().one()
@@ -227,10 +235,10 @@ def edit_comment(site_id: str, item_id: int, comment_id: int, body: CommentIn,
                 {"comment_id": comment_id, "text": message}, None, actor)
         added_mentions = _mentioned_users(cx, site_id, message) - _mentioned_users(cx, site_id, current) - {actor["id"]}
         if added_mentions:
-            root_id = _discussion_root(cx, site_id, item_id)
-            title = cx.execute(text("SELECT title FROM work_items WHERE id=:id"), {"id": root_id}).scalar_one()
+            target_id = original["work_item_id"]
+            title = cx.execute(text("SELECT title FROM work_items WHERE id=:id"), {"id": target_id}).scalar_one()
             for recipient in added_mentions:
-                _notify(cx, recipient, root_id, "mention", "discussion", title,
+                _notify(cx, recipient, target_id, "mention", "discussion", title,
                         f"{actor['full_name']} شما را در ویرایش گفت‌وگوی این کار منشن کرد")
         edited_at = cx.execute(text("SELECT created_at FROM work_item_events WHERE id=last_insert_rowid()")).scalar_one()
     request.state.audit_fields = ["comment_id", "text"]
@@ -357,10 +365,9 @@ def _record(cx, site_id: str, item_id: int, event_type: str, before: dict | None
          "actor_id": actor["id"] if actor else None, "actor_username": actor["username"] if actor else None,
          "at": now()})
     if note and actor:
-        root_id = _discussion_root(cx, site_id, item_id)
-        root_title = cx.execute(text("SELECT title FROM work_items WHERE id=:id"), {"id": root_id}).scalar_one()
+        task_title = cx.execute(text("SELECT title FROM work_items WHERE id=:id"), {"id": item_id}).scalar_one()
         for recipient in _mentioned_users(cx, site_id, note) - {actor["id"]}:
-            _notify(cx, recipient, root_id, "mention", "discussion", root_title,
+            _notify(cx, recipient, item_id, "mention", "discussion", task_title,
                     f"{actor['full_name']} شما را در گفت‌وگوی این کار منشن کرد")
 
 
@@ -444,6 +451,27 @@ def list_work(site_id: str, status: Status | None = None, owner_id: int | None =
             "summary": {k: int(v or 0) for k, v in summary.items()}}
 
 
+@router.get("/{item_id}")
+def get_work(site_id: str, item_id: int, request: Request, eng: Engine = Depends(engine)) -> dict:
+    """Load one exact task for a notification deep link, including subtasks."""
+    with eng.connect() as cx:
+        if project_responsibility(cx, request, site_id) == "none":
+            raise HTTPException(403, "project membership is required")
+        row = cx.execute(text("""SELECT w.*,s.name AS site_name,u.full_name AS owner_name,
+            creator.full_name AS created_by_name,t.name AS team_name,t.color AS team_color
+            FROM work_items w JOIN sites s ON s.site_id=w.site_id
+            LEFT JOIN panel_users u ON u.id=w.owner_id
+            LEFT JOIN panel_users creator ON creator.id=w.created_by_id
+            LEFT JOIN panel_teams t ON t.id=w.team_id
+            WHERE w.site_id=:site AND w.id=:id AND w.deleted_at IS NULL"""),
+            {"site": site_id, "id": item_id}).mappings().first()
+    if not row:
+        raise HTTPException(404, "work item not found")
+    steps = checklist(site_id, item_id, eng)
+    return {**dict(row), "checklist": steps, "checklist_total": len(steps),
+            "checklist_done": sum(step["done"] for step in steps), "labels": []}
+
+
 @router.post("", status_code=201)
 def create_work(site_id: str, body: WorkIn, request: Request, eng: Engine = Depends(engine)) -> dict:
     if body.status in ("rejected", "deferred") and not body.note:
@@ -456,6 +484,9 @@ def create_work(site_id: str, body: WorkIn, request: Request, eng: Engine = Depe
     values["start_at"] = _date_utc(body.start_at, "start date")
     if values["status"] == "verified":
         values["progress_percent"] = 100
+        values["main_work_done"] = True
+        if subtask_titles:
+            raise HTTPException(422, "child work is not complete")
     actor = getattr(request.state, "panel_user", None)
     values.update(site_id=site_id, created_at=now(), updated_at=now(),
                   created_by_id=actor["id"] if actor else None)
@@ -535,7 +566,7 @@ def bulk_update_work(site_id: str, body: BulkWorkIn, request: Request,
 @router.patch("/{item_id}")
 def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, eng: Engine = Depends(engine)) -> dict:
     patch = body.model_dump(exclude_unset=True, exclude={"note", "expected_status"})
-    if any(key in patch and patch[key] is None for key in ("title", "description", "status", "priority", "progress_percent", "board_order")):
+    if any(key in patch and patch[key] is None for key in ("title", "description", "status", "priority", "progress_percent", "board_order", "main_work_done")):
         raise HTTPException(422, "required work fields cannot be null")
     if "due_at" in patch:
         patch["due_at"] = _due_utc(patch["due_at"])
@@ -543,6 +574,7 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
         patch["start_at"] = _date_utc(patch["start_at"], "start date")
     if patch.get("status") == "verified":
         patch["progress_percent"] = 100
+        patch["main_work_done"] = True
     with eng.begin() as cx:
         current = cx.execute(text("SELECT * FROM work_items WHERE site_id=:s AND id=:id AND deleted_at IS NULL"),
                              {"s": site_id, "id": item_id}).mappings().first()
@@ -560,6 +592,8 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
             raise HTTPException(403, "an assigned task cannot be reassigned by another user")
         before = dict(current)
         merged = {**before, **patch}
+        if merged["status"] == "verified" and not merged["main_work_done"]:
+            raise HTTPException(422, "verified work must have its main assignment complete")
         if patch.get("status") in ("rejected", "deferred") and patch["status"] != before["status"] and not body.note:
             raise HTTPException(422, "rejected or deferred work requires a reason")
         _validate(cx, site_id, merged, item_id,
@@ -576,6 +610,11 @@ def update_work(site_id: str, item_id: int, body: WorkPatch, request: Request, e
                 {"s": site_id, "id": item_id}).first()
             if unfinished_child:
                 raise HTTPException(422, "child work is not complete")
+            unfinished_step = cx.execute(text("""SELECT 1 FROM work_checklist_items
+                WHERE site_id=:s AND work_item_id=:id AND done=0 LIMIT 1"""),
+                {"s": site_id, "id": item_id}).first()
+            if unfinished_step:
+                raise HTTPException(422, "checklist is not complete")
         if merged == before and not body.note:
             return before
         if merged == before:
@@ -748,6 +787,76 @@ def checklist(site_id: str, item_id: int, eng: Engine = Depends(engine)) -> list
               "updated_at": child["updated_at"]} for child in children])
 
 
+@router.patch("/{item_id}/checklist")
+def set_all_checklist_items(site_id: str, item_id: int, body: ChecklistPatch, request: Request,
+                            eng: Engine = Depends(engine)) -> dict:
+    """Apply select-all in one transaction instead of one network round trip per step."""
+    with eng.begin() as cx:
+        work = cx.execute(text("""SELECT * FROM work_items
+            WHERE site_id=:site AND id=:item AND deleted_at IS NULL"""),
+            {"site": site_id, "item": item_id}).mappings().first()
+        if not work:
+            raise HTTPException(404, "work item not found")
+        require_task_editor(cx, request, site_id, work)
+        if work["status"] == "verified" and not body.done:
+            raise HTTPException(409, "reopen the task before unchecking its checklist")
+        actor = getattr(request.state, "panel_user", None)
+        steps = cx.execute(text("""SELECT id,done FROM work_checklist_items
+            WHERE site_id=:site AND work_item_id=:item ORDER BY id"""),
+            {"site": site_id, "item": item_id}).mappings().all()
+        children = cx.execute(text("""WITH RECURSIVE tree(id,depth) AS (
+            SELECT id,1 FROM work_items WHERE site_id=:site AND parent_id=:item AND deleted_at IS NULL
+            UNION ALL SELECT child.id,tree.depth+1 FROM work_items child JOIN tree ON child.parent_id=tree.id
+            WHERE child.site_id=:site AND child.deleted_at IS NULL
+        ) SELECT w.*,tree.depth FROM work_items w JOIN tree ON tree.id=w.id"""),
+            {"site": site_id, "item": item_id}).mappings().all()
+        child_ids = {child["id"] for child in children}
+        for child in children:
+            require_task_editor(cx, request, site_id, child)
+            if body.done and child["status"] == "review" and not (actor or {}).get("is_superadmin"):
+                raise HTTPException(403, "only the general manager can approve work in review")
+            if body.done and child["status"] in {"rejected", "deferred"}:
+                raise HTTPException(409, "rejected or deferred subtasks need individual review")
+            if body.done:
+                unfinished_step = cx.execute(text("""SELECT 1 FROM work_checklist_items
+                    WHERE site_id=:site AND work_item_id=:id AND done=0 LIMIT 1"""),
+                    {"site": site_id, "id": child["id"]}).first()
+                if unfinished_step:
+                    raise HTTPException(422, "a subtask checklist is not complete")
+                prerequisites = cx.execute(text("""SELECT depends_on_id FROM work_dependencies
+                    WHERE work_item_id=:id"""), {"id": child["id"]}).scalars().all()
+                for prerequisite_id in prerequisites:
+                    if prerequisite_id not in child_ids and not cx.execute(text("""SELECT 1 FROM work_items
+                        WHERE id=:id AND status='verified'"""), {"id": prerequisite_id}).first():
+                        raise HTTPException(422, "prerequisite work is not verified")
+        stamp = now()
+        changed_steps = [step["id"] for step in steps if bool(step["done"]) != body.done]
+        if changed_steps:
+            cx.execute(text("""UPDATE work_checklist_items SET done=:done,updated_at=:at
+                WHERE site_id=:site AND work_item_id=:item AND done<>:done"""),
+                {"done": int(body.done), "at": stamp, "site": site_id, "item": item_id})
+        changed_children = []
+        for child in sorted(children, key=lambda row: row["depth"], reverse=body.done):
+            if (child["status"] == "verified") == body.done:
+                continue
+            status = "verified" if body.done else "new"
+            cx.execute(text("""UPDATE work_items SET status=:status,progress_percent=:progress,
+                main_work_done=:done,updated_at=:at
+                WHERE id=:id AND site_id=:site"""),
+                {"status": status, "progress": 100 if body.done else 0, "done": int(body.done), "at": stamp,
+                 "id": child["id"], "site": site_id})
+            after = dict(cx.execute(text("SELECT * FROM work_items WHERE id=:id"),
+                                    {"id": child["id"]}).mappings().one())
+            _record(cx, site_id, child["id"], "updated", dict(child), after, None, actor)
+            changed_children.append(child["id"])
+        if changed_steps or changed_children:
+            _record(cx, site_id, item_id, "checklist_updated",
+                    {"done": not body.done, "step_ids": changed_steps, "child_ids": changed_children},
+                    {"done": body.done, "step_ids": changed_steps, "child_ids": changed_children}, None, actor)
+    request.state.audit_fields = ["done", "checklist"]
+    return {"items": checklist(site_id, item_id, eng), "updated": len(changed_steps) + len(changed_children)}
+
+
 @router.post("/{item_id}/checklist", status_code=201)
 def add_checklist_item(site_id: str, item_id: int, body: ChecklistIn, request: Request,
                        eng: Engine = Depends(engine)) -> dict:
@@ -755,11 +864,13 @@ def add_checklist_item(site_id: str, item_id: int, body: ChecklistIn, request: R
     if len(title) < 2:
         raise HTTPException(422, "checklist title is too short")
     with eng.begin() as cx:
-        work = cx.execute(text("SELECT owner_id,created_by_id FROM work_items WHERE site_id=:site AND id=:item AND deleted_at IS NULL"),
+        work = cx.execute(text("SELECT owner_id,created_by_id,status FROM work_items WHERE site_id=:site AND id=:item AND deleted_at IS NULL"),
                           {"site": site_id, "item": item_id}).mappings().first()
         if not work:
             raise HTTPException(404, "work item not found")
         require_task_editor(cx, request, site_id, work)
+        if work["status"] == "verified":
+            raise HTTPException(409, "reopen the task before adding checklist steps")
         actor = getattr(request.state, "panel_user", None)
         result = cx.execute(text("""INSERT INTO work_checklist_items
             (site_id,work_item_id,title,done,actor_id,created_at,updated_at)
@@ -777,11 +888,13 @@ def add_checklist_item(site_id: str, item_id: int, body: ChecklistIn, request: R
 def update_checklist_item(site_id: str, item_id: int, checklist_id: int, body: ChecklistPatch,
                           request: Request, eng: Engine = Depends(engine)) -> dict:
     with eng.begin() as cx:
-        work = cx.execute(text("SELECT owner_id,created_by_id FROM work_items WHERE site_id=:site AND id=:item AND deleted_at IS NULL"),
+        work = cx.execute(text("SELECT owner_id,created_by_id,status FROM work_items WHERE site_id=:site AND id=:item AND deleted_at IS NULL"),
                           {"site": site_id, "item": item_id}).mappings().first()
         if not work:
             raise HTTPException(404, "work item not found")
         require_task_editor(cx, request, site_id, work)
+        if work["status"] == "verified" and not body.done:
+            raise HTTPException(409, "reopen the task before unchecking its checklist")
         if checklist_id < 0:
             child = cx.execute(text("""WITH RECURSIVE tree(id) AS (
                 SELECT id FROM work_items WHERE site_id=:site AND parent_id=:item AND deleted_at IS NULL
@@ -792,10 +905,30 @@ def update_checklist_item(site_id: str, item_id: int, checklist_id: int, body: C
             if not child:
                 raise HTTPException(404, "checklist item not found")
             require_task_editor(cx, request, site_id, child)
+            actor = getattr(request.state, "panel_user", None)
+            if body.done and child["status"] == "review" and not (actor or {}).get("is_superadmin"):
+                raise HTTPException(403, "only the general manager can approve work in review")
+            if body.done and child["status"] in {"rejected", "deferred"}:
+                raise HTTPException(409, "rejected or deferred subtasks need individual review")
+            if body.done:
+                unfinished = cx.execute(text("""SELECT 1 FROM work_dependencies d
+                    JOIN work_items prerequisite ON prerequisite.id=d.depends_on_id
+                    WHERE d.work_item_id=:id AND prerequisite.status<>'verified' LIMIT 1"""),
+                    {"id": child["id"]}).first()
+                unfinished_child = cx.execute(text("""SELECT 1 FROM work_items
+                    WHERE site_id=:site AND parent_id=:id AND deleted_at IS NULL
+                    AND status NOT IN ('verified','rejected','deferred') LIMIT 1"""),
+                    {"site": site_id, "id": child["id"]}).first()
+                unfinished_step = cx.execute(text("""SELECT 1 FROM work_checklist_items
+                    WHERE site_id=:site AND work_item_id=:id AND done=0 LIMIT 1"""),
+                    {"site": site_id, "id": child["id"]}).first()
+                if unfinished or unfinished_child or unfinished_step:
+                    raise HTTPException(422, "subtask prerequisites or children are not complete")
             status = "verified" if body.done else "new"
-            cx.execute(text("""UPDATE work_items SET status=:status,progress_percent=:progress,updated_at=:at
+            cx.execute(text("""UPDATE work_items SET status=:status,progress_percent=:progress,
+                main_work_done=:done,updated_at=:at
                 WHERE id=:id AND site_id=:site"""),
-                {"status": status, "progress": 100 if body.done else 0, "at": now(),
+                {"status": status, "progress": 100 if body.done else 0, "done": int(body.done), "at": now(),
                  "id": child["id"], "site": site_id})
             updated = dict(cx.execute(text("SELECT * FROM work_items WHERE id=:id"),
                                       {"id": child["id"]}).mappings().one())

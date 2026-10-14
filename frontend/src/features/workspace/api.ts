@@ -23,6 +23,7 @@ export type CommandWorkItem = WorkItem & {
   board_order: number;
   checklist_total: number;
   checklist_done: number;
+  main_work_done: boolean;
   checklist?: { id: number; title: string; done: boolean }[];
   labels: WorkLabel[];
   custom_fields?: { id: number; name: string; field_type: WorkCustomField['field_type']; value: string | number }[];
@@ -143,6 +144,8 @@ export const commandApi = {
   },
   boardPage: (siteId: string, afterId = 0) =>
     api<{ items: CommandWorkItem[]; next_after_id: number | null }>(`/work/board/${encodeURIComponent(siteId)}?after_id=${afterId}&limit=500`),
+  work: (siteId: string, itemId: number) =>
+    api<CommandWorkItem>(`/sites/${encodeURIComponent(siteId)}/work/${itemId}`),
   personalBoardPage: (afterId = 0) =>
     api<{ items: CommandWorkItem[]; next_after_id: number | null }>(`/work/board/all?after_id=${afterId}&limit=500`),
   delegatedBoardPage: (afterId = 0) =>
@@ -208,6 +211,8 @@ export const commandApi = {
   checklist: (item: WorkItemRef) => api<WorkChecklistItem[]>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist`),
   addChecklist: (item: WorkItemRef, title: string) => api<WorkChecklistItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist`, { method: 'POST', json: { title } }),
   toggleChecklist: (item: WorkItemRef, checklistId: number, done: boolean) => api<WorkChecklistItem>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist/${checklistId}`, { method: 'PATCH', json: { done } }),
+  setAllChecklist: (item: WorkItemRef, done: boolean) => api<{ items: WorkChecklistItem[]; updated: number }>(
+    `/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist`, { method: 'PATCH', json: { done } }),
   removeChecklist: (item: WorkItemRef, checklistId: number) => api(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/checklist/${checklistId}`, { method: 'DELETE' }),
   labels: (siteId: string) => api<WorkLabel[]>(`/sites/${encodeURIComponent(siteId)}/work/labels`),
   itemLabels: (item: CommandWorkItem) => api<WorkLabel[]>(`/sites/${encodeURIComponent(item.site_id)}/work/${item.id}/labels`),

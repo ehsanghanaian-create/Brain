@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,6 +29,9 @@ export function TaskExecutionDetails({ item, items, people, canEdit, canLogTime,
   const [workDate, setWorkDate] = useState(new Date().toISOString().slice(0, 10));
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const pendingSteps = useRef(new Set<number>());
+  const [pendingStepIds, setPendingStepIds] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
   const refresh = useCallback(async () => {
     try { const [deps, time, checks, labels, selectedLabels, fieldRows] = await Promise.all([
       commandApi.dependencies(item.site_id, item.id), commandApi.timeEntries(item.site_id, item.id), commandApi.checklist(item),
@@ -71,10 +74,33 @@ export function TaskExecutionDetails({ item, items, people, canEdit, canLogTime,
     finally { setBusy(false); }
   }
   async function toggleChecklist(entry: WorkChecklistItem) {
-    setBusy(true);
-    try { await commandApi.toggleChecklist(item, entry.id, !entry.done); await refresh(); onChanged(); }
-    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'تغییر چک‌لیست انجام نشد'); }
-    finally { setBusy(false); }
+    if (busy || bulkBusy || pendingSteps.current.has(entry.id)) return;
+    pendingSteps.current.add(entry.id); setPendingStepIds(new Set(pendingSteps.current));
+    setChecklist((rows) => rows.map((row) => row.id === entry.id ? { ...row, done: !entry.done } : row));
+    try {
+      const saved = await commandApi.toggleChecklist(item, entry.id, !entry.done);
+      setChecklist((rows) => rows.map((row) => row.id === entry.id ? { ...row, done: saved.done } : row));
+      onChanged();
+    } catch (cause) {
+      setChecklist((rows) => rows.map((row) => row.id === entry.id ? { ...row, done: entry.done } : row));
+      toast.error(cause instanceof Error ? cause.message : 'تغییر چک‌لیست انجام نشد');
+    } finally {
+      pendingSteps.current.delete(entry.id); setPendingStepIds(new Set(pendingSteps.current));
+    }
+  }
+  async function toggleAllChecklist() {
+    if (busy || bulkBusy || pendingSteps.current.size || !checklist.length) return;
+    const next = !checklist.every((entry) => entry.done);
+    const previous = checklist;
+    setBulkBusy(true);
+    setChecklist((rows) => rows.map((row) => ({ ...row, done: next })));
+    try {
+      const result = await commandApi.setAllChecklist(item, next);
+      setChecklist(result.items); onChanged();
+    } catch (cause) {
+      setChecklist(previous);
+      toast.error(cause instanceof Error ? cause.message : 'ثبت گروهی چک‌لیست انجام نشد');
+    } finally { setBulkBusy(false); }
   }
   async function removeChecklist(entry: WorkChecklistItem) {
     setBusy(true);
@@ -119,8 +145,14 @@ export function TaskExecutionDetails({ item, items, people, canEdit, canLogTime,
       {!fields.length && <p className='text-muted-foreground text-xs'>فیلد اختصاصی برای این پروژه تعریف نشده است.</p>}
     </div>
     <div className='space-y-2'><div className='flex items-center justify-between'><strong className='text-sm'>چک‌لیست انجام کار</strong><span className='text-muted-foreground text-xs'>{number.format(checklist.filter((entry) => entry.done).length)} از {number.format(checklist.length)} انجام‌شده</span></div>
+      {canLogTime && !!checklist.length && <label className='flex cursor-pointer items-center gap-2 text-xs font-medium'>
+        <input type='checkbox' checked={checklist.every((entry) => entry.done)}
+          ref={(node) => { if (node) node.indeterminate = checklist.some((entry) => entry.done) && !checklist.every((entry) => entry.done); }}
+          disabled={busy || bulkBusy || pendingStepIds.size > 0} onChange={() => void toggleAllChecklist()}
+          aria-label='تیک همهٔ چک‌لیست انجام کار' />تیک همهٔ چک‌لیست
+      </label>}
       {checklist.length > 0 && <div className='h-1.5 overflow-hidden rounded-full bg-muted'><div className='h-full bg-emerald-500 transition-all' style={{ width: `${checklist.filter((entry) => entry.done).length / checklist.length * 100}%` }} /></div>}
-      {checklist.map((entry) => <div key={entry.id} className='flex items-center gap-2 rounded-lg border p-2 text-xs'><label className='flex min-w-0 flex-1 items-center gap-2'><input type='checkbox' checked={entry.done} disabled={!canLogTime || busy} onChange={() => void toggleChecklist(entry)} /><span className={entry.done ? 'text-muted-foreground line-through' : ''}>{entry.title}</span></label>{canEdit && !entry.legacy && <Button size='sm' variant='ghost' disabled={busy} onClick={() => void removeChecklist(entry)}>برداشتن</Button>}</div>)}
+      {checklist.map((entry) => <div key={entry.id} className='flex items-center gap-2 rounded-lg border p-2 text-xs'><label className='flex min-w-0 flex-1 items-center gap-2'><input type='checkbox' checked={entry.done} disabled={!canLogTime || busy || bulkBusy || pendingStepIds.has(entry.id)} onChange={() => void toggleChecklist(entry)} /><span className={entry.done ? 'text-muted-foreground line-through' : ''}>{entry.title}</span></label>{canEdit && !entry.legacy && <Button size='sm' variant='ghost' disabled={busy || bulkBusy || pendingStepIds.has(entry.id)} onClick={() => void removeChecklist(entry)}>برداشتن</Button>}</div>)}
       {!checklist.length && <p className='text-muted-foreground text-xs'>هنوز گامی برای این کار ثبت نشده است.</p>}
       {canLogTime && <div className='flex gap-2'><Input aria-label='گام جدید چک‌لیست' placeholder='گام بعدی انجام کار' value={checklistTitle} onChange={(event) => setChecklistTitle(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void addChecklist(); }} /><Button size='sm' disabled={busy || checklistTitle.trim().length < 2} onClick={addChecklist}>افزودن</Button></div>}
     </div>

@@ -38,6 +38,9 @@ export function TaskDiscussion({ item, canEdit, canComment, meId, canModerate, o
   const [mentionIndex, setMentionIndex] = useState(0);
   const [threadError, setThreadError] = useState('');
   const [busy, setBusy] = useState(false);
+  const pendingSteps = useRef(new Set<number>());
+  const [pendingStepIds, setPendingStepIds] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     const [checklistResult, threadResult] = await Promise.allSettled([
@@ -84,10 +87,34 @@ export function TaskDiscussion({ item, canEdit, canComment, meId, canModerate, o
     finally { setBusy(false); }
   }
   async function toggleStep(step: WorkChecklistItem) {
-    setBusy(true);
-    try { await commandApi.toggleChecklist(item, step.id, !step.done); await refresh(); onChanged(); }
-    catch (error) { toast.error(error instanceof Error ? error.message : 'تغییر چک‌لیست انجام نشد'); }
-    finally { setBusy(false); }
+    if (busy || bulkBusy || pendingSteps.current.has(step.id)) return;
+    pendingSteps.current.add(step.id); setPendingStepIds(new Set(pendingSteps.current));
+    setChecklist((rows) => rows.map((row) => row.id === step.id ? { ...row, done: !step.done } : row));
+    try {
+      const saved = await commandApi.toggleChecklist(item, step.id, !step.done);
+      setChecklist((rows) => rows.map((row) => row.id === step.id ? { ...row, done: saved.done } : row));
+      void Promise.resolve(onChanged()).catch(() => {});
+    } catch (error) {
+      setChecklist((rows) => rows.map((row) => row.id === step.id ? { ...row, done: step.done } : row));
+      toast.error(error instanceof Error ? error.message : 'تغییر چک‌لیست انجام نشد');
+    } finally {
+      pendingSteps.current.delete(step.id); setPendingStepIds(new Set(pendingSteps.current));
+    }
+  }
+  async function toggleAllSteps() {
+    if (busy || bulkBusy || pendingSteps.current.size || !checklist.length) return;
+    const next = !checklist.every((step) => step.done);
+    const previous = checklist;
+    setBulkBusy(true);
+    setChecklist((rows) => rows.map((row) => ({ ...row, done: next })));
+    try {
+      const result = await commandApi.setAllChecklist(item, next);
+      setChecklist(result.items);
+      void Promise.resolve(onChanged()).catch(() => {});
+    } catch (error) {
+      setChecklist(previous);
+      toast.error(error instanceof Error ? error.message : 'ثبت گروهی چک‌لیست انجام نشد');
+    } finally { setBulkBusy(false); }
   }
   async function removeStep(step: WorkChecklistItem) {
     setBusy(true);
@@ -203,9 +230,15 @@ export function TaskDiscussion({ item, canEdit, canComment, meId, canModerate, o
     </div>
     <div className='space-y-2 rounded-xl border p-4'>
       <div className='flex items-center justify-between'><h3 className='text-sm font-semibold'>چک‌لیست زیرکارها</h3><span className='text-muted-foreground text-xs'>{checklist.filter((step) => step.done).length} از {checklist.length} انجام‌شده</span></div>
+      {canEdit && !!checklist.length && <label className='flex cursor-pointer items-center gap-2 text-xs font-medium'>
+        <input type='checkbox' checked={checklist.every((step) => step.done)}
+          ref={(node) => { if (node) node.indeterminate = checklist.some((step) => step.done) && !checklist.every((step) => step.done); }}
+          disabled={busy || bulkBusy || pendingStepIds.size > 0} onChange={() => void toggleAllSteps()}
+          aria-label='تیک همهٔ زیرکارها' />تیک همهٔ زیرکارها
+      </label>}
       {!!checklist.length && <div className='overflow-hidden rounded-lg border'>{checklist.map((step) => <div key={step.id}
         className='flex items-center justify-between gap-2 border-b px-3 py-2 text-sm last:border-b-0'>
-        <label className='flex min-w-0 flex-1 items-center gap-2'><input type='checkbox' checked={step.done} disabled={!canEdit || busy} onChange={() => void toggleStep(step)} aria-label={step.title} />
+        <label className='flex min-w-0 flex-1 items-center gap-2'><input type='checkbox' checked={step.done} disabled={!canEdit || busy || bulkBusy || pendingStepIds.has(step.id)} onChange={() => void toggleStep(step)} aria-label={step.title} />
           <span className={`min-w-0 break-words ${step.done ? 'text-muted-foreground line-through' : ''}`}>{step.title}</span></label>
         {canEdit && !step.legacy && <Button size='sm' variant='ghost' disabled={busy} onClick={() => void removeStep(step)}>برداشتن</Button>}
       </div>)}</div>}

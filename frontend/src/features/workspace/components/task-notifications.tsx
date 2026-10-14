@@ -70,7 +70,9 @@ export function TaskNotifications() {
       </NativeSelect>
       <div className='max-h-96 space-y-1 overflow-y-auto'>
         {items.map((item) => <div key={item.id} className={`flex items-start gap-1 rounded-lg p-1 hover:bg-muted ${!item.read_at ? 'bg-primary/5' : ''}`}>
-          <Link href='/dashboard/work' onClick={() => { void read(item); setOpen(false); }} className='min-w-0 flex-1 rounded-md p-1.5 text-right'>
+          <Link href={item.site_id && item.work_item_id ?
+            `/dashboard/work?site=${encodeURIComponent(item.site_id)}&task=${item.work_item_id}` : '/dashboard/work'}
+            onClick={() => { void read(item); setOpen(false); }} className='min-w-0 flex-1 rounded-md p-1.5 text-right'>
             <span className='block truncate text-sm font-medium'>{item.title}</span>
             <span className='text-muted-foreground block text-xs leading-5'>{item.body}</span>
             <span className='text-muted-foreground block text-[11px]'>{formatUserDateTime(item.created_at, calendar)}</span>

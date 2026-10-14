@@ -42,17 +42,29 @@ function BoardCard({ item, people, canUpdate, canDelete, canSelect, busy, select
   const [owner, setOwner] = useState(item.owner_id?.toString() || '');
   const [due, setDue] = useState(dateInput(item.due_at));
   const [priority, setPriority] = useState<WorkPriority>(item.priority);
+  const [mainDone, setMainDone] = useState(Boolean(item.main_work_done));
+  useEffect(() => { setMainDone(Boolean(item.main_work_done)); }, [item.main_work_done]);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: `card:${item.id}`, disabled: !canUpdate || busy });
   const overdue = Boolean(item.due_at && !['verified', 'rejected', 'deferred'].includes(item.status) && Date.parse(item.due_at) < Date.now());
+  const remaining = Math.max(0, item.checklist_total - item.checklist_done);
+  async function toggleMainDone() {
+    const next = !mainDone;
+    setMainDone(next);
+    if (!await onQuickSave({ main_work_done: next })) setMainDone(!next);
+  }
   return <article ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={`rounded-xl border bg-card p-3 shadow-sm transition-shadow hover:shadow-md ${isDragging ? 'opacity-40' : ''} ${overdue ? 'border-rose-500/50' : ''} ${selected ? 'ring-2 ring-primary/50' : ''}`}>
     <div className='flex items-start justify-between gap-2'>{canSelect && <input type='checkbox' aria-label={`انتخاب ${item.title}`} checked={selected} onChange={onSelect} className='mt-1' />}<button type='button' onClick={onOpen} className='min-w-0 flex-1 text-right'><strong className='block text-sm leading-6'>{item.title}</strong><span className='text-muted-foreground mt-1 block truncate text-[11px]'>{item.site_name}{item.parent_id ? ' · زیرکار' : ''}</span></button>{canUpdate && <button type='button' {...attributes} {...listeners} aria-label={`جابه‌جایی ${item.title}`} className='touch-none rounded-md border px-2 py-1 text-muted-foreground hover:bg-muted' title='گرفتن و جابه‌جایی'>⠿</button>}</div>
     {!!item.labels?.length && <div className='mt-2 flex flex-wrap gap-1'>{item.labels.map((label) => <span key={label.id} className='rounded-md px-1.5 py-0.5 text-[10px] text-white' style={{ backgroundColor: label.color }}>{label.name}</span>)}</div>}
     {!!item.custom_fields?.length && <div className='mt-2 space-y-1 text-[10px] text-muted-foreground'>{item.custom_fields.slice(0, 2).map((field) => <p key={field.id} className='truncate'>{field.name}: <span className='text-foreground'>{String(field.value)}</span></p>)}</div>}
-    <div className='mt-3 flex flex-wrap gap-1.5'><Badge variant='outline' className={item.priority === 'critical' ? 'border-rose-500/40 text-rose-600' : ''}>{priorityText[item.priority]}</Badge>{overdue && <Badge variant='destructive'>عقب‌افتاده</Badge>}</div>
+    <div className='mt-3 flex flex-wrap gap-1.5'><Badge variant='outline' className={item.priority === 'critical' ? 'border-rose-500/40 text-rose-600' : ''}>{priorityText[item.priority]}</Badge>{overdue && <Badge variant='destructive'>عقب‌افتاده</Badge>}{remaining > 0 && <Badge variant='outline' className={mainDone ? 'border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300' : ''}>{mainDone ? `بخش اصلی انجام شد · ${number.format(remaining)} پیگیری باز` : `${number.format(remaining)} مورد باز`}</Badge>}</div>
     <TaskChecklistPreview item={item} canToggle={canUpdate && !busy} onChanged={onChecklistChanged} />
+    {canUpdate && item.status !== 'verified' && item.status !== 'review' && remaining > 0 && <label className='mt-2 flex cursor-pointer items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 text-xs'>
+      <input type='checkbox' checked={mainDone} disabled={busy} onChange={() => void toggleMainDone()} aria-label={`بخش اصلی ${item.title} انجام شد`} />
+      بخش اصلی انجام شد؛ پیگیری‌ها باز بمانند
+    </label>}
     <div className='text-muted-foreground mt-3 flex items-center justify-between gap-2 text-[11px]'><span className='truncate'>{item.owner_name || 'بی‌مسئول'}</span><span>{item.due_at ? formatUserDate(item.due_at, calendar, { month: 'short', day: 'numeric' }) : 'بی‌موعد'}</span></div>
     <span className='text-muted-foreground mt-1 block text-[11px]'>واگذارکننده: {item.created_by_name || 'سیستم'}</span>
-    {canUpdate && <div className='mt-2 flex gap-1'><button type='button' onClick={onOpen} className='rounded-md border px-2 py-1 text-[11px] text-primary hover:bg-muted'>ویرایش تسک</button>{item.status !== 'verified' && item.status !== 'review' && <button type='button' disabled={busy} onClick={() => void onQuickSave({ status: 'verified' })} className='rounded-md border border-emerald-500/30 px-2 py-1 text-[11px] text-emerald-700 hover:bg-emerald-500/10'>✓ انجام شد</button>}{item.status === 'review' && <span className='rounded-md border border-amber-500/30 px-2 py-1 text-[11px] text-amber-700'>در انتظار تأیید مدیر</span>}</div>}
+    {canUpdate && <div className='mt-2 flex gap-1'><button type='button' onClick={onOpen} className='rounded-md border px-2 py-1 text-[11px] text-primary hover:bg-muted'>ویرایش تسک</button>{item.status !== 'verified' && item.status !== 'review' && remaining === 0 && <button type='button' disabled={busy} onClick={() => void onQuickSave({ status: 'verified' })} className='rounded-md border border-emerald-500/30 px-2 py-1 text-[11px] text-emerald-700 hover:bg-emerald-500/10'>✓ انجام شد</button>}{item.status === 'review' && <span className='rounded-md border border-amber-500/30 px-2 py-1 text-[11px] text-amber-700'>در انتظار تأیید مدیر</span>}</div>}
     {canDelete && <button type='button' disabled={busy} onClick={onDelete} className='mt-2 rounded-md border border-rose-500/30 px-2 py-1 text-[11px] text-rose-700 hover:bg-rose-500/10'>حذف و انتقال به آرشیو</button>}
     {(item.progress_percent || 0) > 0 && <div className='mt-2 h-1 overflow-hidden rounded-full bg-muted'><div className='h-full rounded-full bg-emerald-500' style={{ width: `${item.progress_percent || 0}%` }} /></div>}
     {canUpdate && <div className='mt-2 border-t pt-2'><button type='button' onClick={() => { setOwner(item.owner_id?.toString() || ''); setDue(dateInput(item.due_at)); setPriority(item.priority); setQuick((value) => !value); }} className='text-primary text-[11px] hover:underline'>{quick ? 'بستن ویرایش سریع' : 'برنامه‌ریزی کارت'}</button>{quick && <div className='mt-2 space-y-2'>{item.owner_id === null && <NativeSelect aria-label={`مسئول ${item.title}`} value={owner} onChange={(event) => setOwner(event.target.value)}><NativeSelectOption value=''>بی‌مسئول</NativeSelectOption>{people.map((person) => <NativeSelectOption key={person.id} value={String(person.id)}>{person.full_name}</NativeSelectOption>)}</NativeSelect>}<UserDateInput label={`موعد ${item.title}`} value={due} onChange={setDue} /><NativeSelect aria-label={`اولویت ${item.title}`} value={priority} onChange={(event) => setPriority(event.target.value as WorkPriority)}>{(Object.keys(priorityText) as WorkPriority[]).map((key) => <NativeSelectOption key={key} value={key}>{priorityText[key]}</NativeSelectOption>)}</NativeSelect><Button size='sm' disabled={busy} onClick={() => void onQuickSave({ ...(item.owner_id === null ? { owner_id: owner ? Number(owner) : null } : {}), due_at: due ? new Date(`${due}T12:00:00`).toISOString() : null, priority }).then((saved) => { if (saved) setQuick(false); })}>ذخیره</Button></div>}</div>}
@@ -137,6 +149,8 @@ export function TeamBoard({ items, sites, people, preferredSiteId, meId, canAppr
   const filtered = siteItems.filter((item) => (!query || `${item.title} ${item.description || ''} ${item.url || ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())) &&
     (!ownerFilter || item.owner_id?.toString() === ownerFilter) && (!priorityFilter || item.priority === priorityFilter) &&
     (!labelFilter || item.labels?.some((label) => label.id === labelFilter)) && (!mine || item.owner_id === meId));
+  const selectableIds = siteId === 'all' ? [] : filtered.filter(canUpdate).map((item) => item.id);
+  const allVisibleSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedIds.includes(id));
   const activeLanes: Lane[] = groupBy === 'status' ? lanes : groupBy === 'priority' ?
     (Object.keys(priorityText) as WorkPriority[]).map((key) => ({ key, title: priorityText[key], status: 'new' as WorkStatus, statuses: [], color: priorityColor[key] })) :
     [{ key: 'unassigned', title: 'بی‌مسئول', status: 'new' as WorkStatus, statuses: [], color: 'bg-slate-500' },
@@ -232,10 +246,20 @@ export function TeamBoard({ items, sites, people, preferredSiteId, meId, canAppr
     if (bulkPriority) patch.priority = bulkPriority as WorkPriority;
     if (!Object.keys(patch).length) { toast.error('تغییری برای کارت‌های انتخابی مشخص کنید'); return; }
     setBusy(true);
-    try { const result = await commandApi.bulkUpdate(siteId, selectedIds, patch);
+    let updated = 0;
+    let processed = 0;
+    try {
+      for (let index = 0; index < selectedIds.length; index += 100) {
+        const result = await commandApi.bulkUpdate(siteId, selectedIds.slice(index, index + 100), patch);
+        updated += result.updated;
+        processed = index + result.item_ids.length;
+      }
       await onChanged(); setSelectedIds([]); setBulkOwner(''); setBulkDue(''); setBulkPriority('');
-      toast.success(`${number.format(result.updated)} کار به‌روزرسانی شد`); }
-    catch (cause) { toast.error(cause instanceof Error ? cause.message : 'ویرایش گروهی انجام نشد'); }
+      toast.success(`${number.format(updated)} کار به‌روزرسانی شد`); }
+    catch (cause) {
+      if (processed) { setSelectedIds(selectedIds.slice(processed)); await onChanged(); }
+      toast.error(`${number.format(updated)} کارت ذخیره شد؛ ادامهٔ ویرایش گروهی انجام نشد. ${cause instanceof Error ? cause.message : ''}`);
+    }
     finally { setBusy(false); }
   }
   async function handleDragEnd(event: DragEndEvent) {
@@ -278,6 +302,12 @@ export function TeamBoard({ items, sites, people, preferredSiteId, meId, canAppr
   return <div className={fullscreen ? 'fixed inset-0 z-[60] space-y-3 overflow-y-auto bg-background p-4' : 'space-y-3'} dir='rtl'>
     <div className='flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3'>
       <strong className='ml-2 text-sm'>برد پروژه</strong>
+      {selectableIds.length > 0 && <label className='flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-xs'>
+        <input type='checkbox' checked={allVisibleSelected}
+          ref={(node) => { if (node) node.indeterminate = !allVisibleSelected && selectableIds.some((id) => selectedIds.includes(id)); }}
+          aria-label='انتخاب همهٔ کارت‌های قابل ویرایش در این نما'
+          onChange={() => setSelectedIds(allVisibleSelected ? [] : selectableIds)} />انتخاب همهٔ کارت‌های نما
+      </label>}
       <NativeSelect aria-label='پروژهٔ برد' value={siteId} onChange={(event) => { setSiteId(event.target.value); setSelectedIds([]); onSiteChange(event.target.value === 'all' ? '' : event.target.value); }} className='min-w-44'><NativeSelectOption value='all'>به من واگذار شده</NativeSelectOption>{sites.map((site) => <NativeSelectOption key={site.site_id} value={site.site_id}>{site.name}</NativeSelectOption>)}</NativeSelect>
       <NativeSelect aria-label='گروه‌بندی برد' value={groupBy} onChange={(event) => { setGroupBy(event.target.value as BoardViewConfig['group_by']); setSelectedIds([]); }} className='w-36'><NativeSelectOption value='status'>بر اساس مرحله</NativeSelectOption><NativeSelectOption value='owner'>بر اساس مسئول</NativeSelectOption><NativeSelectOption value='priority'>بر اساس اولویت</NativeSelectOption></NativeSelect>
       <Input aria-label='جست‌وجوی کارت در برد' placeholder='جست‌وجوی کارت…' value={query} onChange={(event) => setQuery(event.target.value)} className='min-w-40 flex-1' />

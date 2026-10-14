@@ -80,6 +80,15 @@ const actionFa: Record<string, string> = {
   check_rank_drop: 'افت نسبت به مشاهدهٔ قبلی؛ چند روز روند و تغییرات صفحه و رقبا را بررسی کنید.',
   review_indexing_and_intent: 'در نتایج دریافت‌شده دیده نشد؛ ایندکس، نیت جست‌وجو و عمق دریافت را بررسی کنید.'
 };
+const runErrorFa: Record<string, string> = {
+  daily_request_cap_reached: 'سقف درخواست روزانه رسید؛ کلمات باقی‌مانده در نوبت‌های بعدی بررسی می‌شوند.',
+  provider_repeated_errors: 'منبع جست‌وجو چند بار نتیجهٔ معتبر نداد؛ پایش برای جلوگیری از درخواست‌های بی‌فایده متوقف شد.',
+  provider_quota_or_rate_limit: 'سهمیه یا محدودیت درخواست منبع جست‌وجو مانع ادامهٔ پایش شد.',
+  provider_auth_failed: 'اتصال به منبع جست‌وجو تأیید نشد؛ کلید سرویس باید بررسی شود.',
+  provider_http_error: 'منبع جست‌وجو با خطای HTTP پاسخ داد.',
+  provider_network_error: 'ارتباط با منبع جست‌وجو برقرار نشد.',
+  queue_unavailable: 'صف اجرای پایش در دسترس نبود.'
+};
 
 function Stat({ label, value, detail }: { label: string; value: string; detail: string }) {
   return <Card><CardHeader className='pb-2'><CardDescription>{label}</CardDescription><CardTitle className='text-2xl tabular-nums'>{value}</CardTitle></CardHeader>
@@ -117,6 +126,7 @@ export function RankTrackingDashboard({ sites, initialSiteId }: { sites: Site[];
   const focus = data?.keywords.find((row) => row.keyword_id === selected) ?? null;
   const found = data?.keywords.filter((row) => row.status === 'found').length ?? 0;
   const actions = data?.keywords.filter((row) => !!row.action).length ?? 0;
+  const validChecks = data?.latest_run ? Math.max(0, data.latest_run.keywords_checked - data.latest_run.keywords_failed) : 0;
   const dailyRequests = data?.keywords_total ?? 0;
   const plannedDaily = Math.min(dailyRequests, draft?.max_keywords_per_run ?? 0);
   const estimatedMonthlyCredits = plannedDaily * Math.ceil((draft?.depth ?? 10) / 10) * 31;
@@ -140,8 +150,9 @@ export function RankTrackingDashboard({ sites, initialSiteId }: { sites: Site[];
   async function runNow() {
     setBusy(true);
     try {
-      const response = await api<{ status: string }>(`${path}/run`, { method: 'POST' });
-      toast.success(response.status === 'queued' ? 'پایش رتبه در صف قرار گرفت.' : 'اجرای امروز قبلاً ثبت شده است.');
+      const response = await api<{ status: string; run_status?: string }>(`${path}/run`, { method: 'POST' });
+      if (response.status === 'queued') toast.success('پایش رتبه در صف قرار گرفت.');
+      else toast.info(response.run_status === 'blocked' ? 'اجرای امروز متوقف شده است؛ زمان و علت را در وضعیت آخرین اجرا ببینید.' : 'اجرای امروز قبلاً ثبت شده است.');
       await load();
     } catch (cause) { toast.error(cause instanceof Error ? cause.message : 'اجرای پایش ممکن نشد.'); }
     finally { setBusy(false); }
@@ -173,7 +184,7 @@ export function RankTrackingDashboard({ sites, initialSiteId }: { sites: Site[];
         <Stat label='کلمات فعال' value={number.format(data.keywords_total)} detail='همهٔ کلمات ذخیره‌شده به‌جز نادیده‌گرفته‌شده‌ها' />
         <Stat label='دارای رتبهٔ ثبت‌شده' value={data.latest_run ? number.format(found) : '—'} detail={`از آخرین مشاهدهٔ هر کلمه؛ عمق بررسی ${data.latest_run?.requested_depth ?? draft?.depth ?? 10} نتیجه`} />
         <Stat label='نیازمند بررسی' value={data.latest_run ? number.format(actions) : '—'} detail='پیشنهادهای توضیح‌پذیر؛ تغییر سایت خودکار انجام نمی‌شود' />
-        <Stat label='آخرین اجرا' value={data.latest_run ? date(data.latest_run.local_date) : 'هنوز اجرا نشده'} detail={data.latest_run ? `${statusFa[data.latest_run.status] ?? data.latest_run.status} · ${number.format(data.latest_run.keywords_checked)} از ${number.format(data.latest_run.keywords_total)}` : 'پس از اتصال منبع، اجرای روزانه آغاز می‌شود'} />
+        <Stat label='آخرین اجرا' value={data.latest_run ? date(data.latest_run.local_date) : 'هنوز اجرا نشده'} detail={data.latest_run ? `${statusFa[data.latest_run.status] ?? data.latest_run.status} · ${number.format(validChecks)} نتیجهٔ معتبر از ${number.format(data.latest_run.keywords_total)} کلمه` : 'پس از اتصال منبع، اجرای روزانه آغاز می‌شود'} />
       </div>
 
       <Card><CardHeader><CardTitle className='text-lg'>تنظیم پایش</CardTitle><CardDescription>رتبه به کشور، زبان، دستگاه و عمق بررسی وابسته است. تغییر تنظیمات از اجرای روز بعد اعمال می‌شود.</CardDescription></CardHeader>
@@ -188,7 +199,7 @@ export function RankTrackingDashboard({ sites, initialSiteId }: { sites: Site[];
         </CardContent>
       </Card>
 
-      {data.latest_run && data.latest_run.status !== 'succeeded' && <p className='rounded-md border border-amber-500/40 p-3 text-sm' role='status'>آخرین اجرا {statusFa[data.latest_run.status] ?? data.latest_run.status} است؛ {number.format(data.latest_run.keywords_checked)} از {number.format(data.latest_run.keywords_total)} کلمه بررسی شد و {number.format(data.latest_run.keywords_failed)} خطا ثبت شد. {data.latest_run.error_code === 'daily_request_cap_reached' ? 'سقف روزانهٔ تنظیم‌شده رسید؛ کلمات باقی‌مانده در نوبت‌های بعدی بررسی می‌شوند.' : data.latest_run.error_code ? `خطای منبع: ${data.latest_run.error_code}` : ''} دادهٔ ناموجود رتبهٔ صفر محسوب نمی‌شود.</p>}
+      {data.latest_run && data.latest_run.status !== 'succeeded' && <p className='rounded-md border border-amber-500/40 p-3 text-sm leading-6' role={data.latest_run.status === 'blocked' ? 'alert' : 'status'}>آخرین اجرا {statusFa[data.latest_run.status] ?? data.latest_run.status} است؛ {number.format(data.latest_run.keywords_checked)} درخواست انجام شد، {number.format(validChecks)} نتیجهٔ معتبر و {number.format(data.latest_run.keywords_failed)} خطا ثبت شد. {data.latest_run.error_code ? runErrorFa[data.latest_run.error_code] ?? 'خطای منبع جست‌وجو رخ داد؛ جزئیات در گزارش فنی ثبت شده است.' : ''} دادهٔ ناموجود رتبهٔ صفر محسوب نمی‌شود.</p>}
 
       <Card><CardHeader><CardTitle className='text-lg'>کلمات و مسیر اقدام</CardTitle><CardDescription>رتبهٔ ارگانیک مشاهده‌شده برای ایران، فارسی و دستگاه انتخاب‌شده. جابه‌جایی یک روزه ممکن است نوسان باشد؛ پیش از تغییر محتوا روند و شواهد را بررسی کنید.</CardDescription></CardHeader>
         <CardContent className='space-y-3'>
@@ -209,7 +220,7 @@ export function RankTrackingDashboard({ sites, initialSiteId }: { sites: Site[];
 
       {focus && <Card><CardHeader><CardTitle className='text-lg'>{focus.keyword}</CardTitle><CardDescription>{focus.local_date ? `آخرین مشاهده: ${date(focus.local_date)} · ${focus.provider ?? data.latest_run?.provider ?? 'SERP'}` : 'هنوز مشاهده‌ای ثبت نشده است'}</CardDescription></CardHeader>
         <CardContent className='space-y-4'>
-          <div className='grid gap-3 text-sm md:grid-cols-3'><div><span className='text-muted-foreground'>صفحهٔ هدف: </span><span dir='ltr' className='break-all'>{focus.target_url ?? 'تعریف نشده'}</span></div><div><span className='text-muted-foreground'>صفحهٔ دیده‌شده: </span><span dir='ltr' className='break-all'>{focus.ranking_url ?? 'دیده نشد'}</span></div><div><span className='text-muted-foreground'>رتبهٔ قبلی: </span>{focus.previous_position ? `#${number.format(focus.previous_position)}` : '—'}</div></div>
+          <div className='grid gap-3 text-sm md:grid-cols-3'><div><span className='text-muted-foreground'>صفحهٔ هدف: </span><span dir='ltr' className='break-all'>{focus.target_url ?? 'تعریف نشده'}</span></div><div><span className='text-muted-foreground'>صفحهٔ دیده‌شده: </span><span dir='ltr' className='break-all'>{focus.ranking_url ?? (focus.status === 'not_found_in_results' ? 'در نتایج دریافت‌شده نبود' : 'هنوز سنجش معتبر ندارد')}</span></div><div><span className='text-muted-foreground'>رتبهٔ قبلی: </span>{focus.previous_position ? `#${number.format(focus.previous_position)}` : '—'}</div></div>
           {focus.history.length > 1 && <div className='h-48' role='img' aria-label={`روند رتبهٔ ارگانیک ${focus.keyword}`}><ResponsiveContainer width='100%' height='100%'><LineChart data={focus.history}><CartesianGrid strokeDasharray='3 3' /><XAxis dataKey='local_date' tickFormatter={(value: string) => value.slice(5)} /><YAxis reversed domain={[1, 'dataMax + 3']} allowDecimals={false} /><Tooltip formatter={(value) => [`رتبه ${value}`, 'ارگانیک']} /><Line type='monotone' dataKey='organic_position' connectNulls={false} stroke='var(--primary)' strokeWidth={2} dot={false} /></LineChart></ResponsiveContainer></div>}
           {focus.action && <p className='rounded-md bg-muted p-3 text-sm'><strong>بررسی پیشنهادی: </strong>{actionFa[focus.action]}</p>}
           {!!focus.competitors.length && <div className='text-sm'><strong>رقبای دیده‌شده در همین نمونه:</strong><ul className='mt-2 space-y-1'>{focus.competitors.map((item) => <li key={`${item.position}-${item.url}`} className='flex gap-2'><span className='tabular-nums'>#{number.format(item.position)}</span><span dir='ltr' className='truncate'>{item.domain}</span></li>)}</ul></div>}

@@ -208,6 +208,8 @@ class Ga4Pipeline:
             for k in ("rows", "pages", "sessions", "users", "conversions", "snapshots", "graph_nodes", "graph_edges"):
                 if k in out:
                     st.items[k] = out[k]
+            if out.get("ai_referral_status") == "error":
+                st.errors.append("sync.ai_referrals: " + str(out.get("ai_referral_error") or "acquisition_report_failed"))
             if out.get("_not_authorized"):
                 st.status = "not_authorized"
         except Exception as e:  # noqa: BLE001
@@ -235,7 +237,7 @@ class Ga4Pipeline:
         try:
             with db() as conn:
                 out = sync_ga4(conn, site, start, end, property_id=pid, interactive=False)
-            return {k: out.get(k) for k in ("run_id", "property", "rows", "pages", "sessions", "users", "conversions", "date_from", "date_to")}
+            return {k: out.get(k) for k in ("run_id", "property", "rows", "pages", "sessions", "users", "conversions", "date_from", "date_to", "ai_referral_rows", "ai_referral_status", "ai_referral_error")}
         except GscAuthError as e:
             log.warning(f"GA4 not authorized for {site_id}: {e.__class__.__name__}")
             return {"_step_status": "failed", "_not_authorized": True,

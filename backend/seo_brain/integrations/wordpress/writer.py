@@ -15,6 +15,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
+from urllib.parse import quote, unquote, urlparse
 
 import httpx
 from sqlalchemy import Engine, text
@@ -104,6 +105,50 @@ class WordPressWriter:
         with self.engine.connect() as cx:
             return cx.execute(text("SELECT wp_url, mode, canonical_url, timezone FROM sites WHERE site_id=:s"), {"s": site_id}).first()
 
+    def existing_post(self, site_id: str, plan_id: int) -> dict[str, Any] | None:
+        """Fail closed before generation or a new POST when a plan URL may already be live."""
+        site = self._site(site_id)
+        with self.engine.connect() as cx:
+            plan = cx.execute(text("SELECT url,publishing FROM content_plans WHERE site_id=:s AND id=:p"),
+                              {"s": site_id, "p": plan_id}).first()
+        if not site or not plan:
+            return None
+        try:
+            publishing = json.loads(plan[1] or "{}")
+        except ValueError:
+            publishing = {}
+        if publishing.get("wp_post_id"):
+            return {"status": "already_published", "wp_post_id": publishing["wp_post_id"],
+                    "link": publishing.get("link"), "message": "این برنامه قبلاً منتشر شده است"}
+        url = urlparse(plan[0] or "")
+        canonical_host = (urlparse(site[2] or "").hostname or "").lower()
+        if not url.hostname or url.hostname.lower() != canonical_host:
+            return None
+        slug = unquote(url.path.rstrip("/").split("/")[-1]).strip()
+        if not re.fullmatch(r"[a-z0-9-]{2,160}", slug):
+            return None
+        with self.engine.connect() as cx:
+            local = cx.execute(text("SELECT wp_id,url FROM posts WHERE site_id=:s AND type='post' AND status='publish' AND slug=:slug LIMIT 1"),
+                               {"s": site_id, "slug": slug}).first()
+        if local:
+            return {"status": "already_published", "wp_post_id": local[0], "link": local[1],
+                    "message": "نوشتهٔ متناظر این برنامه از قبل در وردپرس منتشر شده است؛ ابتدا آن را همگام کنید"}
+        auth = resolve_auth(site_id)
+        if not auth or not site[0]:
+            return {"status": "existing_post_check_failed", "message": "پیش از انتشار، وجود نوشتهٔ متناظر در وردپرس قابل بررسی نیست"}
+        endpoint = f"{wp_rest_v2(site[0]).rstrip('/')}/posts?slug={quote(slug)}&_fields=id,slug,status,link"
+        try:
+            response = self._request("GET", endpoint, auth.basic)
+            if response.status_code != 200 or not isinstance(response.json(), list):
+                raise ValueError("WordPress lookup did not return a post list")
+            matches = [post for post in response.json() if post.get("slug") == slug and post.get("status") == "publish"]
+        except Exception:  # noqa: BLE001 — a failed duplicate check must prevent a new post
+            return {"status": "existing_post_check_failed", "message": "بررسی نوشتهٔ موجود در وردپرس ناموفق بود؛ انتشار متوقف شد"}
+        if matches:
+            return {"status": "already_published", "wp_post_id": matches[0].get("id"), "link": matches[0].get("link"),
+                    "message": "نوشتهٔ متناظر این برنامه از قبل در وردپرس منتشر شده است؛ ابتدا آن را همگام کنید"}
+        return None
+
     # ------------------------------------------------------------------ capability (users/me?context=edit)
     def capability(self, site_id: str) -> dict[str, Any]:
         """Can this site's stored Application Password actually publish? (role check, no write performed)."""
@@ -149,6 +194,9 @@ class WordPressWriter:
         if actor != "human" and site[1] != "autopilot":
             return {"status": "skipped_mode",
                     "message": "حالت انتشار سایت «خودکار» نیست — انتشار زمان‌بندی‌شده فقط در حالت خودکار انجام می‌شود؛ از دکمه «انتشار» استفاده کنید"}
+        existing = self.existing_post(site_id, plan_id)
+        if existing:
+            return existing
         with self.engine.connect() as cx:
             plan = cx.execute(text("SELECT id, title, seo_title, meta_description, content_item_id, category_id, publish_date, publish_time, status, publishing, metadata FROM content_plans WHERE site_id=:s AND id=:p"),
                               {"s": site_id, "p": plan_id}).first()

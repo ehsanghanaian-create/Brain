@@ -33,6 +33,7 @@ export function PlanSheet({ siteId, pid, meta, categories, onClose, onChanged }:
   useEffect(() => { if (open) endpoints.wsOptions(siteId).then(setOpts).catch(() => setOpts(null)); }, [open, siteId]);
   async function run(key: string, fn: () => Promise<unknown>, ok?: string) { setBusy(key); try { await fn(); if (ok) toast.success(ok); await load(); onChanged(); } catch (e) { err(e); } finally { setBusy(null); } }
   const rec = (p?.recommendation ?? {}) as any;
+  const linkedPostId = p?.publishing?.wp_post_id;
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent side='left' className='w-full overflow-y-auto p-4 sm:max-w-2xl' dir='rtl'>
@@ -53,13 +54,19 @@ export function PlanSheet({ siteId, pid, meta, categories, onClose, onChanged }:
               <Button size='sm' disabled={!!busy} onClick={() => run('a', () => endpoints.planAnalyze(siteId, p.id), 'تحلیل مجدد انجام شد')}>{busy === 'a' ? '…' : 'تحلیل مغز'}</Button>
               <Button size='sm' variant='secondary' disabled={!!busy || !(p.primary_keyword || p.primary_keyword_id)} onClick={() => run('b', () => endpoints.planBrief(siteId, p.id), 'بریف ساخته شد')} title='ساخت بریف Phase-6 با نکات برنامه (سرفصل‌ها، کلمات ثانویه، اهداف لینک)'>{busy === 'b' ? '…' : 'ساخت بریف'}</Button>
               <Button size='sm' variant='secondary' disabled={!!busy} onClick={() => run('l', () => endpoints.planLinkPrep(siteId, p.id), 'لینک‌های داخلی آماده شد')}>آماده‌سازی لینک داخلی</Button>
-              <Button size='sm' variant='outline' disabled={!!busy || !(p.primary_keyword || p.primary_keyword_id)} onClick={() => run('g', async () => { const j = await endpoints.planGenPrepare(siteId, p.id, 'article', { run_now: true, approval_mode: 'human', publish_action: 'none' }); toast.info(j.note); }, 'تولید مقاله در پس‌زمینه شروع شد')} title='کار روی سرور و در صف پایدار اجرا می‌شود؛ خروج از صفحه آن را متوقف نمی‌کند'>تولید مقاله در پس‌زمینه</Button>
+              {!linkedPostId && <Button size='sm' variant='outline' disabled={!!busy || !(p.primary_keyword || p.primary_keyword_id)} onClick={() => run('g', async () => { const j = await endpoints.planGenPrepare(siteId, p.id, 'article', { run_now: true, approval_mode: 'human', publish_action: 'none' }); toast.info(j.note); }, 'تولید مقاله در پس‌زمینه شروع شد')} title='کار روی سرور و در صف پایدار اجرا می‌شود؛ خروج از صفحه آن را متوقف نمی‌کند'>تولید مقاله در پس‌زمینه</Button>}
               {p.content_item && <Button size='sm' variant='outline' nativeButton={false} render={<Link href={`/dashboard/ai-studio?site=${siteId}&content=${p.content_item.id}`} aria-label='باز کردن استودیوی AI' />}>استودیوی AI</Button>}
               {p.content_item && <Button size='sm' variant='outline' nativeButton={false} render={<Link href={`/dashboard/graph?site=${siteId}`} aria-label='باز کردن گراف دانش' />}>گراف دانش</Button>}
               <Button size='sm' variant='ghost' className='text-destructive ms-auto' disabled={!!busy} onClick={() => { if (confirm('این برنامه حذف شود؟ (آیتم محتوا حفظ می‌شود)')) run('d', async () => { await endpoints.planDelete(siteId, p.id); onClose(); }, 'حذف شد'); }}>حذف</Button>
             </div>
+            {linkedPostId && <div className='flex flex-wrap items-center gap-2 rounded-xl border bg-muted/20 p-3 text-xs'>
+              <Badge variant='outline'>منتشرشده در وردپرس · پست #{linkedPostId}</Badge>
+              <a className='underline' href={safeHref(p.publishing.link || p.url)} target='_blank' rel='noreferrer'>دیدن صفحهٔ زنده</a>
+              {p.content_item && <Link className='underline' href={`/dashboard/content?site=${encodeURIComponent(siteId)}&content=${p.content_item.id}`}>بازبینی و اصلاح مقاله در مغز محتوا</Link>}
+              <span className='text-muted-foreground'>نسخهٔ زنده به این برنامه وصل است؛ مقالهٔ تازه‌ای برای این نشانی نسازید.</span>
+            </div>}
             {/* durable generation schedule */}
-            <div className='rounded-xl border bg-muted/20 p-3'>
+            {!linkedPostId && <div className='rounded-xl border bg-muted/20 p-3'>
               <div className='mb-3'><div className='font-medium'>تولید و انتشار زمان‌بندی‌شده</div><p className='mt-1 text-xs leading-5 text-muted-foreground'>کار روی سرور ذخیره می‌شود و با بستن صفحه یا جابه‌جایی بین بخش‌ها ادامه پیدا می‌کند. حالت امن پیش‌فرض بعد از تولید منتظر تأیید شما می‌ماند.</p></div>
               <div className='grid gap-2 sm:grid-cols-2'>
                 <div className='grid gap-1'><Label>شروع تولید</Label><Input type='datetime-local' value={schedule.scheduled_at} onChange={(e) => setSchedule((s) => ({ ...s, scheduled_at: e.target.value }))} dir='ltr' /></div>
@@ -71,7 +78,7 @@ export function PlanSheet({ siteId, pid, meta, categories, onClose, onChanged }:
               </div>
               {schedule.approval_mode === 'score_gate' && <p className='mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-xs text-amber-700 dark:text-amber-300'>انتشار خودکار فقط وقتی انجام می‌شود که بازبینی «آماده» باشد و امتیاز از حد تعیین‌شده کمتر نباشد. اتصال Application Password وردپرس نیز باید معتبر باشد.</p>}
               <div className='mt-3 flex justify-end'><Button size='sm' disabled={!!busy || !schedule.scheduled_at || (schedule.publish_action === 'future' && !schedule.publish_at)} onClick={() => run('schedule', () => endpoints.planGenPrepare(siteId, p.id, 'article', { scheduled_at: schedule.scheduled_at, publish_at: schedule.publish_at || null, publish_action: schedule.publish_action, approval_mode: schedule.approval_mode, category_ids: schedule.category_id ? [Number(schedule.category_id)] : [], min_score: Number(schedule.min_score || 85) }), 'زمان‌بندی روی سرور ذخیره شد')}>ثبت زمان‌بندی</Button></div>
-            </div>
+            </div>}
             {/* recommendation card */}
             <div className='rounded-md border p-2'>
               <div className='flex flex-wrap items-center gap-2 text-xs'>
@@ -109,10 +116,10 @@ export function PlanSheet({ siteId, pid, meta, categories, onClose, onChanged }:
               business_value: f.business_value === '' ? null : Number(f.business_value), secondary_keywords: parseTags(String(f.secondary_keywords)),
               heading_structure: String(f.heading_structure).split('\n').map((l: string) => l.trim()).filter(Boolean).map((l: string) => { const m = l.match(/^h?([23])[:.\-)\s]+(.*)$/i); return m ? { level: Number(m[1]), text: m[2] } : { level: 2, text: l }; }) }), 'ذخیره شد')}>ذخیره فیلدها</Button></div>
             {/* AI generation + WordPress publish — same parameters as «آزمایش تولید محتوا», stored per-plan in metadata.ai */}
-            <div className='rounded-md border p-2'>
+            {!linkedPostId && <div className='rounded-md border p-2'>
               <div className='flex flex-wrap items-center gap-2 text-xs'>
                 <span className='font-medium'>تولید با هوش مصنوعی و انتشار در وردپرس</span>
-                <span className='text-muted-foreground'>فقط تایتل و کلمات کلیدی را وارد کنید — بقیه با همان موتور «آزمایش تولید محتوا» ساخته می‌شود و دقیقاً در تاریخ تقویم با دسته انتخابی منتشر می‌شود.</span>
+                <span className='text-muted-foreground'>برای برنامه‌های منتشرنشده می‌توانید پیش‌نویس بسازید. متن تولیدشده پیش از انتشار به بازبینی نیاز دارد.</span>
               </div>
               <div className='mt-2 grid gap-2 md:grid-cols-3'>
                 <div className='grid gap-1'><Label>ارائه‌دهنده</Label><NativeSelect value={ai.provider ?? ''} onChange={(e) => setAi((s) => ({ ...s, provider: e.target.value || null, model: null }))}><NativeSelectOption value=''>پیش‌فرض ({opts?.default?.provider ?? 'auto'})</NativeSelectOption>{(opts?.providers ?? []).filter((x) => x.name !== 'echo').map((x) => <NativeSelectOption key={x.name} value={x.name}>{x.name} ({x.kind_label ?? x.kind})</NativeSelectOption>)}</NativeSelect></div>
@@ -127,11 +134,10 @@ export function PlanSheet({ siteId, pid, meta, categories, onClose, onChanged }:
                 <Button size='sm' variant='outline' disabled={!!busy} onClick={() => run('ai-save', () => endpoints.planPatch(siteId, p.id, { metadata: { ...(p.metadata ?? {}), ai: Object.fromEntries(Object.entries(ai).filter(([, v]) => v !== null && v !== '')) } }), 'تنظیمات AI ذخیره شد')}>{busy === 'ai-save' ? '…' : 'ذخیره تنظیمات AI'}</Button>
                 <Button size='sm' disabled={!!busy} onClick={() => run('gen', async () => { await endpoints.planPatch(siteId, p.id, { metadata: { ...(p.metadata ?? {}), ai: Object.fromEntries(Object.entries(ai).filter(([, v]) => v !== null && v !== '')) } }); const r = await endpoints.planGenerate(siteId, p.id); toast.info(`تولید پیش‌نویس در صف اجرا قرار گرفت (${r.job_id}) — نتیجه در رویدادها و مغز محتوا ظاهر می‌شود`); })}>{busy === 'gen' ? '…' : 'تولید پیش‌نویس'}</Button>
                 <Button size='sm' variant='secondary' disabled={!!busy} onClick={() => { if (confirm(`محتوای این برنامه در وردپرس سایت منتشر شود؟${p.publish_date ? `\nتاریخ انتشار: ${jalaliLong(p.publish_date)}${p.publish_time ? ` ساعت ${p.publish_time}` : ''}` : ''}${p.category?.name ? `\nدسته: ${p.category.name}` : ''}\n(اگر پیش‌نویسی نباشد، اول تولید می‌شود)`)) run('pub-now', async () => { const r = await endpoints.planPublish(siteId, p.id); toast.info(`انتشار در صف اجرا قرار گرفت (${r.job_id})`); }); }}>{busy === 'pub-now' ? '…' : 'انتشار در وردپرس'}</Button>
-                {p.publishing?.wp_post_id && <Badge variant='outline' dir='ltr'><a className='underline' href={safeHref(p.publishing.link)} target='_blank' rel='noreferrer'>منتشرشده · پست #{p.publishing.wp_post_id}</a></Badge>}
                 <Button size='sm' variant='ghost' disabled={!!busy} onClick={() => run('cap', async () => { const r = await endpoints.wpPublishCapability(siteId); (r.can_publish ? toast.success : toast.warning)(r.message); })}>{busy === 'cap' ? '…' : 'بررسی دسترسی وردپرس'}</Button>
               </div>
               <p className='text-muted-foreground mt-1 text-xs'>انتشار خودکار در تاریخ تقویم فقط وقتی انجام می‌شود که حالت سایت «خودکار» باشد؛ دکمه «انتشار در وردپرس» همیشه با کلیک شما (تأیید انسانی) کار می‌کند.</p>
-            </div>
+            </div>}
             {/* keywords */}
             <div className='rounded-md border p-2 text-xs'>
               <div className='font-medium'>کلمات کلیدی ({p.keywords.length})</div>

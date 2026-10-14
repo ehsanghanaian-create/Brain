@@ -34,7 +34,9 @@ export const navGroups: NavGroup[] = [
       { title: 'نقشه تصمیم', url: '/dashboard/graph', icon: 'graph', shortcut: ['g', 'g'], items: [],
         description: 'هدف سایت، پرسش‌های سئو و مسیر اقدام از روی شواهد گراف' },
       { title: 'کلمات کلیدی', url: '/dashboard/keywords', icon: 'keywords', items: [],
-        description: 'ورود، خوشه‌بندی و نقشه موضوعی کلمات کلیدی (فاز ۵)' }
+        description: 'ورود، خوشه‌بندی و نقشه موضوعی کلمات کلیدی (فاز ۵)' },
+      { title: 'پژوهش بازار و رقبا', url: '/dashboard/research', icon: 'keywords', items: [],
+        description: 'عبارت‌های تازه از GSC، پرسش‌های خریدار و پایش صفحات رقیب با منبع روشن' }
     ]
   },
   {
@@ -68,6 +70,8 @@ export const navGroups: NavGroup[] = [
   {
     label: 'سنجش و تنظیمات',
     items: [
+      { title: 'جست‌وجوی هوش مصنوعی', url: '/dashboard/ai-visibility', icon: 'ai', items: [],
+        description: 'نمایش رسمی در AI، ارجاع‌های GA4 و آزمایش پرسش‌های خریدار با شواهد جدا' },
       { title: 'گزارش سایت', url: '/dashboard/reports', icon: 'reports', items: [],
         description: 'مرکز گزارش کامل هر سایت: کلمه کلیدی اصلی، جایگاه‌ها، مشکلات، بک‌لینک و رپورتاژ' },
       { title: 'داده زنده تبلیغات', url: '/ads-data', icon: 'reports', items: [],

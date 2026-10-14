@@ -71,6 +71,43 @@ def test_ga4_client_falls_back_to_legacy_conversions_metric(tmp_path, monkeypatc
     assert len(rows) == 1 and rows[0]["conversions"] == 1.0
 
 
+def test_ga4_ai_acquisition_parses_commerce_and_fallback(tmp_path, monkeypatch):
+    from seo_brain.ga4.client import Ga4Client
+    batch = {"rowCount": 1, "metadata": {"currencyCode": "IRR"}, "rows": [{
+        "dimensionValues": [{"value": "20261010"}, {"value": "chatgpt.com"},
+                            {"value": "referral"}, {"value": "/product/a?source=x"}],
+        "metricValues": [{"value": "3"}, {"value": "2"}, {"value": "1"}, {"value": "450000"}],
+    }]}
+    client = Ga4Client.__new__(Ga4Client)
+    bodies = []
+
+    def report(pid, body):
+        bodies.append(body)
+        return batch
+
+    client.run_report = report
+    result = client.ai_acquisition("123", date(2026, 10, 10), date(2026, 10, 10))
+    assert result["rows"][0]["purchase_revenue"] == 450000
+    assert result["currency"] == "IRR" and result["commerce_available"] is True
+    assert bodies[0]["dimensionFilter"]["filter"]["fieldName"] == "sessionSource"
+    assert "bing.com" not in bodies[0]["dimensionFilter"]["filter"]["inListFilter"]["values"]
+
+    calls = 0
+
+    def fallback(pid, body):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("purchaseRevenue is not a valid metric")
+        return {"rowCount": 1, "rows": [{"dimensionValues": batch["rows"][0]["dimensionValues"],
+                                        "metricValues": batch["rows"][0]["metricValues"][:2]}]}
+
+    client.run_report = fallback
+    reduced = client.ai_acquisition("123", date(2026, 10, 10), date(2026, 10, 10))
+    assert calls == 2 and reduced["commerce_available"] is False
+    assert reduced["rows"][0]["transactions"] is None
+
+
 # --------------------------------------------------------------------------- pipeline + endpoints
 @pytest.fixture
 def env(tmp_path, monkeypatch):
@@ -186,7 +223,7 @@ def test_upsert_idempotent_rerun_no_duplicates(env):
         dup = cx.execute(text("SELECT COUNT(*) FROM (SELECT node_id FROM graph_nodes WHERE site_id=:s GROUP BY node_id HAVING COUNT(*)>1)"), {"s": SID}).scalar()
         tables = {r[0] for r in cx.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
     assert daily == 3 and dup == 0
-    assert {t for t in tables if "ga4" in t} == {"ga4_daily"}       # exactly one new table
+    assert {"ga4_daily", "ga4_ai_referrals_daily"} <= tables
 
 
 def test_guards_and_permission_failure(env):

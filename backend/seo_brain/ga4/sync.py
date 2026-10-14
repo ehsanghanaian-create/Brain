@@ -81,11 +81,29 @@ def sync_ga4(conn: sqlite3.Connection, site: SiteConfig, start: date, end: date,
         client = Ga4Client(site.site_id, interactive=interactive)
         n_page = store_rows(conn, site, client.daily(pid, start, end, dimension="pagePath"), "page", run_id)
         n_land = store_rows(conn, site, client.daily(pid, start, end, dimension="landingPage"), "landing", run_id)
+        from .ai_referrals import store_referrals
+
+        referral_status = "reported"
+        referral_error = None
+        n_referrals = 0
+        try:
+            acquisition = client.ai_acquisition(pid, start, end)
+            n_referrals = store_referrals(conn, site.site_id, start, end, acquisition, run_id)
+            if not acquisition["commerce_available"]:
+                referral_status = "commerce_unavailable"
+        except Exception as exc:  # Existing page/landing data remain valid; surface the acquisition failure.
+            referral_status = "error"
+            referral_error = f"{exc.__class__.__name__}: {str(exc)[:180]}"
+            log.warning("GA4 AI referral acquisition unavailable for %s: %s", site.site_id, referral_error)
         stats = _stats(conn, site.site_id)
-        conn.execute("UPDATE sync_runs SET finished_at=?, status='completed', rows_written=?, notes=? WHERE run_id=?",
-                     (utcnow(), n_page + n_land, j({"property": pid, "page_rows": n_page, "landing_rows": n_land, **stats}), run_id))
+        conn.execute("UPDATE sync_runs SET finished_at=?, status=?, rows_written=?, notes=? WHERE run_id=?",
+                     (utcnow(), "completed_with_errors" if referral_status == "error" else "completed", n_page + n_land + n_referrals,
+                      j({"property": pid, "page_rows": n_page, "landing_rows": n_land, "ai_referral_rows": n_referrals,
+                         "ai_referral_status": referral_status, "ai_referral_error": referral_error, **stats}), run_id))
         conn.commit()
-        return {"run_id": run_id, "property": pid, "rows": n_page + n_land, "page_rows": n_page, "landing_rows": n_land, **stats}
+        return {"run_id": run_id, "property": pid, "rows": n_page + n_land + n_referrals, "page_rows": n_page,
+                "landing_rows": n_land, "ai_referral_rows": n_referrals, "ai_referral_status": referral_status,
+                "ai_referral_error": referral_error, **stats}
     except Exception as e:
         conn.execute("UPDATE sync_runs SET finished_at=?, status='failed', notes=? WHERE run_id=?", (utcnow(), str(e)[:500], run_id))
         conn.commit()

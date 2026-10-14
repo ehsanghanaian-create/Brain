@@ -37,6 +37,7 @@ STEPS: list[tuple[str, str]] = [
     ("posts", "در حال دریافت نوشته‌ها"),
     ("taxonomies", "در حال دریافت تاکسونومی‌ها و رسانه‌ها"),
     ("category_intelligence", "در حال تحلیل دسته‌بندی‌ها"),
+    ("reconcile_content", "در حال تطبیق برنامه‌های محتوا با نوشته‌های منتشرشده"),
     ("crawl", "در حال استخراج لینک‌ها"),
     ("build_graph", "در حال ساخت گراف"),
     ("knowledge_pack", "در حال ساخت بسته دانشی محتوا"),
@@ -78,12 +79,14 @@ class PipelineState:
 
 class WordPressSyncOrchestrator:
     def __init__(self, engine: Engine, crawler_factory: Callable[..., Any] | None = None, wp_sync: Callable[..., dict] | None = None,
-                 graph_build: Callable[..., dict] | None = None, probe: Callable[[str], int | None] | None = None):
+                 graph_build: Callable[..., dict] | None = None, probe: Callable[[str], int | None] | None = None,
+                 reconcile: Callable[[str], dict] | None = None):
         self.engine = engine
         self._crawler_factory = crawler_factory
         self._wp_sync = wp_sync
         self._graph_build = graph_build
         self._probe = probe
+        self._reconcile = reconcile
 
     # ------------------------------------------------------------------ status persistence (sync_runs.notes = JSON state)
     def _persist(self, st: PipelineState) -> None:
@@ -181,13 +184,24 @@ class WordPressSyncOrchestrator:
             if stage == "full":
                 self._step(st, "resolve", lambda: self._resolve(site_id))
                 try:
+                    errors_before_sync = len(st.errors)
                     self._wordpress_steps(st, site_id)
                 except Exception:
                     # Public crawling can still collect current SEO evidence when
                     # the WordPress REST endpoint is unavailable or times out.
                     self._mark(st, "category_intelligence", "skipped", {"reason": "wordpress sync failed"})
+                    self._mark(st, "reconcile_content", "skipped", {"reason": "wordpress sync failed"})
                 else:
+                    partial_wordpress_sync = len(st.errors) > errors_before_sync
                     self._step(st, "category_intelligence", lambda: self._category_intelligence(site_id))
+                    if partial_wordpress_sync:
+                        self._mark(st, "reconcile_content", "skipped", {"reason": "wordpress sync incomplete"})
+                    elif not self._has_content_plans(site_id):
+                        self._mark(st, "reconcile_content", "skipped", {"reason": "no content plans"})
+                    elif self._reconcile is None and not self._has_wordpress_auth(site_id):
+                        self._mark(st, "reconcile_content", "skipped", {"reason": "WordPress Application Password missing"})
+                    else:
+                        self._step(st, "reconcile_content", lambda: self._reconcile_content(site_id))
                 if crawl:
                     self._step(st, "crawl", lambda: self._crawl(site_id, max_urls))
                 else:
@@ -274,6 +288,22 @@ class WordPressSyncOrchestrator:
         if row and row[0]:
             site.wp_url = row[0]
         return site
+
+    def _has_content_plans(self, site_id: str) -> bool:
+        with self.engine.connect() as cx:
+            return bool(cx.execute(text("SELECT 1 FROM content_plans WHERE site_id=:s LIMIT 1"), {"s": site_id}).first())
+
+    @staticmethod
+    def _has_wordpress_auth(site_id: str) -> bool:
+        from .auth import resolve_auth
+        return resolve_auth(site_id) is not None
+
+    def _reconcile_content(self, site_id: str) -> dict:
+        if self._reconcile is not None:
+            return self._reconcile(site_id)
+        from ..brain.planner.wordpress_reconcile import apply_with_backup, live_actions
+        actions, posts = live_actions(self.engine, site_id)
+        return {"wordpress_posts": posts, **apply_with_backup(self.engine, site_id, actions)}
 
     def _wordpress_steps(self, st: PipelineState, site_id: str) -> None:
         """taxonomies / categories / pages / posts / media come from ONE read-only REST pass (sync_wordpress); the progress hook

@@ -52,7 +52,7 @@ def update_site(body: SiteUpdate, site: Site = Depends(require_site), repo: Site
 
 # tables that reference sites(site_id); a site with data is only deleted with ?force=true
 # dependency order: dependents first (entity_mentions→entities, post_terms→posts, gsc_query_page→queries, graph_edges→graph_nodes)
-_CHILD_TABLES = ("issue_case_observations", "issue_case_events", "issue_cases", "content_plan_generation_jobs", "content_plan_recommendations", "content_plan_sources", "content_plan_imports", "content_plan_events", "content_plan_keywords", "content_plans", "content_clusters", "content_categories", "content_knowledge_packs",
+_CHILD_TABLES = ("research_competitor_pages", "ai_visibility_observations", "ai_visibility_prompts", "ai_visibility_official_daily", "ga4_ai_referrals_daily", "issue_case_observations", "issue_case_events", "issue_cases", "content_plan_generation_jobs", "content_plan_recommendations", "content_plan_sources", "content_plan_imports", "content_plan_events", "content_plan_keywords", "content_plans", "content_clusters", "content_categories", "content_knowledge_packs",
                  "generation_runs", "draft_feedback", "memory_snapshots", "link_suggestions", "link_page_stats", "link_patterns", "content_scores", "content_reviews", "content_drafts", "content_metrics", "content_insights", "site_settings", "content_briefs", "content_events", "content_items", "keyword_opportunities", "keywords", "keyword_clusters", "keyword_imports",
                  "entity_mentions", "post_terms", "links", "gsc_query_page", "gsc_daily", "graph_edges", "seo_problems",
                  "seo_opportunities", "media", "schemas", "entities", "queries", "pages", "posts", "categories", "tags",
@@ -63,6 +63,12 @@ def _related_counts(eng: Engine, site_id: str) -> dict[str, int]:
     out: dict[str, int] = {}
     existing = set(inspect(eng).get_table_names())
     with eng.connect() as cx:
+        if {"ai_visibility_citations", "ai_visibility_observations"} <= existing:
+            count = cx.execute(text("""SELECT COUNT(*) FROM ai_visibility_citations c
+                JOIN ai_visibility_observations o ON o.id=c.observation_id WHERE o.site_id=:s"""),
+                {"s": site_id}).scalar() or 0
+            if count:
+                out["ai_visibility_citations"] = int(count)
         for t in _CHILD_TABLES:
             if t not in existing:
                 continue
@@ -83,6 +89,9 @@ def delete_site(site_id: str, force: bool = Query(False, description="also delet
                        code="site_has_data", details=related)
     existing = set(inspect(eng).get_table_names())
     with eng.begin() as cx:
+        if {"ai_visibility_citations", "ai_visibility_observations"} <= existing:
+            cx.execute(text("""DELETE FROM ai_visibility_citations WHERE observation_id IN
+                (SELECT id FROM ai_visibility_observations WHERE site_id=:s)"""), {"s": site_id})
         if "generation_artifacts" in existing:   # keyed by run_id, not site_id
             cx.execute(text("DELETE FROM generation_artifacts WHERE run_id IN (SELECT run_id FROM generation_runs WHERE site_id = :s)"), {"s": site_id})
         for t in _CHILD_TABLES:

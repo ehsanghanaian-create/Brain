@@ -8,6 +8,7 @@ import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from '@/compon
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
 import { JalaliDateInput } from '@/features/content/components/jalali-date-input';
+import { PublicationReadiness } from '@/features/content/components/publication-readiness';
 import { jalaliLong } from '@/features/content/constants';
 import { PLAN_STATUS_COLOR, PLAN_STATUS_FA } from '@/features/content-planner/constants';
 import { parseTags } from '@/features/content-planner/lib';
@@ -18,6 +19,7 @@ import { toast } from 'sonner';
 
 type Form = { title: string; primary_keyword: string; secondary_keywords: string; category_id: string; publish_date: string | null; publish_time: string; seo_title: string; meta_description: string; provider: string; model: string; tone: string; word_count: string; prompt: string };
 import type { EditorTarget } from './article-editor-sheet';
+import { PlanPublicationReadiness } from './plan-publication-readiness';
 
 type Props = { siteId: string; pid: number | 'new' | null; defaultDate: string | null; categories: PlanCategory[]; opts: WsOptions | null; onClose: () => void; onChanged: () => void; onOpenEditor: (target: EditorTarget) => void };
 
@@ -63,11 +65,13 @@ export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClo
   const [f, setF] = useState<Form>(EMPTY);
   const [busy, setBusy] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [publishReady, setPublishReady] = useState(false);
   const open = pid !== null;
 
   const load = useCallback(async (planId: number) => { try { const d = await endpoints.plan(siteId, planId); setP(d); setF(fromPlan(d)); } catch (e) { err(e); } }, [siteId]);
   useEffect(() => {
     if (pid === null) return;
+    setP(null); setPublishReady(false);
     if (pid === 'new') { setP(null); setId(null); setF({ ...EMPTY, publish_date: defaultDate }); return; }
     setId(pid); load(pid);
   }, [pid, defaultDate, load]);
@@ -80,7 +84,8 @@ export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClo
 
   async function persist(): Promise<number> {
     if (!f.title.trim()) throw new Error('عنوان مقاله لازم است');
-    const body = toBody(f, p);
+    const current = id === null ? null : await endpoints.plan(siteId, id);
+    const body = toBody(f, current);
     if (id === null) { const created = await endpoints.planCreate(siteId, body); setId(created.id); return created.id; }
     await endpoints.planPatch(siteId, id, body);
     return id;
@@ -109,6 +114,7 @@ export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClo
   });
   const publish = () => {
     if (!p) return;
+    if (!publishReady) { toast.error('ابتدا بررسی‌های انتشار و تأییدهای سردبیر را کامل کنید.'); return; }
     const future = isFuture(f.publish_date, f.publish_time);
     const when = f.publish_date ? `${jalaliLong(f.publish_date)} ساعت ${f.publish_time || '09:00'}` : 'همین حالا';
     if (!confirm(future ? `مقاله در وردپرس زمان‌بندی شود و رأس ${when} منتشر گردد؟` : `مقاله همین حالا در وردپرس منتشر شود؟ (تاریخ: ${when})`)) return;
@@ -197,14 +203,18 @@ export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClo
             </div>
           </details>
 
+          {p && <PlanPublicationReadiness siteId={siteId} plan={p} />}
+
           {note && <p className='text-muted-foreground animate-pulse text-xs'>{note}</p>}
+
+          {p?.content_item && !pub.wp_post_id && <PublicationReadiness key={`${p.content_item.id}:${p.content_item.draft_count}:${p.content_item.status}`} siteId={siteId} cid={p.content_item.id} categoryId={f.category_id} onReadyChange={setPublishReady} />}
 
           <div className='flex flex-wrap items-center gap-1'>
             <Button size='sm' variant='outline' disabled={!!busy || !f.title.trim()} onClick={save}>{busy === 'save' ? '…' : 'ذخیره'}</Button>
             <Button size='sm' disabled={!!busy || !f.title.trim()} onClick={writeWithAi}>{busy === 'gen' ? 'در حال نوشتن…' : draftCount ? 'بازنویسی با هوش مصنوعی' : 'نوشتن با هوش مصنوعی'}</Button>
             {p?.content_item && <Button size='sm' variant='secondary' disabled={!!busy} onClick={() => { const t: EditorTarget = { cid: p.content_item!.id, planId: p.id, title: p.title, keyword: p.primary_keyword ?? undefined, featured: (p.metadata?.featured_media as EditorTarget['featured']) ?? null }; onClose(); onOpenEditor(t); }}>ویرایش متن</Button>}
             {p && p.allowed_transitions.includes('approved') && <Button size='sm' variant='secondary' disabled={!!busy} onClick={() => run('ok', () => endpoints.planTransition(siteId, p.id, 'approved'), 'تأیید شد')}>تأیید</Button>}
-            {p?.content_item && !pub.wp_post_id && <Button size='sm' variant='secondary' disabled={!!busy || !draftCount} onClick={publish}>{busy === 'pub' ? '…' : isFuture(f.publish_date, f.publish_time) ? 'زمان‌بندی در وردپرس' : 'انتشار در وردپرس'}</Button>}
+            {p?.content_item && !pub.wp_post_id && <Button size='sm' variant='secondary' disabled={!!busy || !draftCount || !publishReady} onClick={publish}>{busy === 'pub' ? '…' : isFuture(f.publish_date, f.publish_time) ? 'زمان‌بندی در وردپرس' : 'انتشار در وردپرس'}</Button>}
             {p && <Button size='sm' variant='ghost' className='text-destructive ms-auto' disabled={!!busy} onClick={remove}>حذف</Button>}
           </div>
           {p && !p.content_item && <p className='text-muted-foreground text-[11px]'>بعد از نوشتن با هوش مصنوعی، دکمه‌های «ویرایش متن» و «انتشار» فعال می‌شوند.</p>}

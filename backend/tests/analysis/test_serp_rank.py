@@ -1,6 +1,11 @@
 """Independent SERP snapshots: no GSC fallback, daily cadence, quota, and site isolation."""
 from datetime import datetime, timezone
+from io import BytesIO
 import json
+from urllib.error import HTTPError
+from urllib.request import Request
+
+import pytest
 
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -134,6 +139,18 @@ def test_serpkite_contract_uses_unmodified_google_organic_results(monkeypatch):
                                 "fields": "results.position,results.link,results.domain"}
     assert [row["position"] for row in result.organic] == [1, 3]
     assert result.task_id == "sample"
+
+
+def test_key_monthly_limit_is_reported_as_quota_not_bad_credentials(monkeypatch):
+    def limited(request, timeout):
+        raise HTTPError(request.full_url, 403, "Forbidden", {},
+                        BytesIO(b'{"error":{"code":"key_limit_reached"}}'))
+
+    monkeypatch.setattr(serp_rank, "urlopen", limited)
+    with pytest.raises(serp_rank.ProviderError) as caught:
+        serp_rank._fetch_json(Request("https://api.serpkite.com/v1/search"))
+    assert caught.value.code == "provider_quota_or_rate_limit"
+    assert caught.value.stop_run
 
 
 def test_rank_api_requires_provider_and_scopes_settings(tmp_path, monkeypatch):

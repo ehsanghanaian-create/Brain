@@ -114,10 +114,16 @@ def _fetch_json(request: Request) -> dict:
         with urlopen(request, timeout=35) as response:
             raw = response.read(2_000_001)
     except HTTPError as error:
+        try:
+            detail = json.loads(error.read(4096))
+            provider_code = str((detail.get("error") or {}).get("code") or "")
+        except (ValueError, AttributeError, TypeError):
+            provider_code = ""
+        if error.code in (402, 429) or provider_code in (
+                "key_limit_reached", "spend_cap_reached", "daily_limit_reached", "insufficient_credits"):
+            raise ProviderError("provider_quota_or_rate_limit", stop_run=True) from None
         if error.code in (401, 403):
             raise ProviderError("provider_auth_failed", stop_run=True) from None
-        if error.code in (402, 429):
-            raise ProviderError("provider_quota_or_rate_limit", stop_run=True) from None
         raise ProviderError("provider_http_error", stop_run=error.code >= 500) from None
     except (URLError, TimeoutError):
         raise ProviderError("provider_network_error") from None

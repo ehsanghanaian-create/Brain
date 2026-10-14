@@ -204,6 +204,7 @@ export function ResearchDashboard({
     recent != null &&
     recent <= 4 &&
     ['succeeded', 'completed'].includes(data?.gsc.latest_sync?.status ?? '');
+  const googleReconnect = data?.gsc.latest_sync?.status === 'not_authorized';
   const newlySeen =
     data?.gsc.candidates.filter((row) => row.signal === 'new_in_sample').length ?? 0;
   const seenQuestions = data?.questions.observed_search_questions.length ?? 0;
@@ -326,7 +327,7 @@ export function ResearchDashboard({
         {data && (
           <span className='text-muted-foreground me-auto text-xs'>
             آخرین دادهٔ جست‌وجو: {dateLabel(data.gsc.latest_date)} · همگام‌سازی:{' '}
-            {data.gsc.latest_sync?.status ?? 'نامشخص'}
+            {googleReconnect ? 'نیاز به اتصال دوباره' : (data.gsc.latest_sync?.status ?? 'نامشخص')}
           </span>
         )}
       </div>
@@ -353,8 +354,16 @@ export function ResearchDashboard({
           >
             <CardContent className='flex flex-wrap items-start justify-between gap-3 py-4 text-sm'>
               <div>
-                <strong>{gscReady ? 'دادهٔ GSC به‌روز است' : 'پوشش داده نیاز به بررسی دارد'}</strong>
+                <strong>
+                  {googleReconnect
+                    ? 'اتصال گوگل منقضی شده است'
+                    : gscReady
+                      ? 'دادهٔ GSC به‌روز است'
+                      : 'پوشش داده نیاز به بررسی دارد'}
+                </strong>
                 <p className='text-muted-foreground mt-1 leading-6'>
+                  {googleReconnect &&
+                    'تا اتصال دوبارهٔ حساب گوگل، عبارت‌های جدید وارد نمی‌شوند. داده‌های قبلی برای بررسی باقی می‌مانند. '}
                   {data.gsc.latest_date
                     ? `آخرین روز ${dateLabel(data.gsc.latest_date)}؛ پوشش ${n(data.gsc.current_days)} از ${n(days)} روز در بازهٔ انتخابی.`
                     : 'هنوز دادهٔ query/page وارد نشده است.'}{' '}
@@ -365,7 +374,8 @@ export function ResearchDashboard({
                 href='/dashboard/sites'
                 className='text-primary inline-flex items-center gap-1 text-xs font-medium underline-offset-4 hover:underline'
               >
-                وضعیت اتصال و همگام‌سازی <IconArrowUpRight size={15} aria-hidden='true' />
+                {googleReconnect ? 'اتصال دوبارهٔ گوگل' : 'وضعیت اتصال و همگام‌سازی'}{' '}
+                <IconArrowUpRight size={15} aria-hidden='true' />
               </a>
             </CardContent>
           </Card>

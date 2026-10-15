@@ -11,7 +11,7 @@ export function createIpBlockController(domain: string, api: SecurityApi) {
   let generation = 0;
   let state = {
     siteId: null as string | null,
-    status: 'loading' as 'loading' | 'ready' | 'unavailable' | 'error',
+    status: 'loading' as 'loading' | 'ready' | 'stale' | 'unavailable' | 'error',
     message: '',
     blockedIps: new Set<string>(),
     pendingIps: new Set<string>()
@@ -52,11 +52,16 @@ export function createIpBlockController(domain: string, api: SecurityApi) {
         if (!result.connected) throw new Error(result.message || 'unavailable');
         update({ status: 'ready', blockedIps: new Set(result.items.map((item) => item.ip)), message: '' });
       } catch {
-        if (request === generation) update({ status: 'error', message: 'وضعیت تازهٔ بلاک دریافت نشد؛ دوباره تلاش کنید.' });
+        if (request === generation && (state.status === 'ready' || state.status === 'stale')) {
+          // Keep the last confirmed list available for new, idempotent block
+          // requests. The UI disables unblocking until a fresh list arrives.
+          update({ status: 'stale', message: 'ارتباط موقت با افزونه قطع شد؛ فهرست بلاک بر اساس آخرین دریافت است. ثبت بلاک جدید ممکن است، اما رفع بلاک تا دریافت وضعیت تازه غیرفعال است.' });
+        }
       }
     },
     async toggle(ip: string): Promise<BlockResult | null> {
-      if (!ip || state.status !== 'ready' || !state.siteId || state.pendingIps.has(ip)) return null;
+      if (!ip || !['ready', 'stale'].includes(state.status) || !state.siteId || state.pendingIps.has(ip)
+          || (state.status === 'stale' && state.blockedIps.has(ip))) return null;
       const request = generation;
       const blocked = state.blockedIps.has(ip);
       const siteId = state.siteId;

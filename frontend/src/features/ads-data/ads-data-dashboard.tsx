@@ -87,6 +87,7 @@ type IpRow = {
 
 type EventRow = {
   id: number;
+  visitor_number: number | null;
   event_uuid: string;
   event_type: string;
   occurred_at_client: string | null;
@@ -527,7 +528,8 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
   }
   function ipBlockControl(ip: string) {
     return <IpBlockToggle ip={ip} blocked={blockedIps.has(ip)} busy={ipBlockState.pendingIps.has(ip)}
-      ready={ipBlockState.status === 'ready'} onToggle={() => void toggleIpBlock(ip)} />;
+      ready={ipBlockState.status === 'ready' || (ipBlockState.status === 'stale' && !blockedIps.has(ip))}
+      onToggle={() => void toggleIpBlock(ip)} />;
   }
   const [hours, setHours] = useState(24);
   const [tab, setTab] = useState<DashboardTab>('sessions');
@@ -831,28 +833,33 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
   };
 
   const logUsers = useMemo(() => {
-    const counts = new Map<string, number>();
+    const counts = new Map<string, { count: number; number: number | null }>();
     for (const row of visibleEvents) {
       const identity = logIdentity(row);
-      counts.set(identity, (counts.get(identity) ?? 0) + 1);
+      const previous = counts.get(identity);
+      counts.set(identity, {
+        count: (previous?.count ?? 0) + 1,
+        number: row.visitor_number ?? previous?.number ?? null
+      });
     }
     const shortLabelCounts = new Map<number, number>();
-    for (const identity of counts.keys()) {
+    for (const [identity, value] of counts) {
+      if (value.number !== null) continue;
       const shortNumber = 100 + (identityNumber(identity) % 900);
       shortLabelCounts.set(shortNumber, (shortLabelCounts.get(shortNumber) ?? 0) + 1);
     }
     const users = new Map<string, { label: string; count: number; color: (typeof LOG_USER_COLORS)[number] }>();
-    for (const [identity, count] of counts) {
+    for (const [identity, value] of counts) {
       const hash = identityNumber(identity);
       const shortNumber = 100 + (hash % 900);
-      const collisionSuffix = (shortLabelCounts.get(shortNumber) ?? 0) > 1
+      const collisionSuffix = value.number === null && (shortLabelCounts.get(shortNumber) ?? 0) > 1
         ? `-${hash.toString(36).slice(-2).toUpperCase()}`
         : '';
       users.set(identity, {
-        // Keep the friendly short label. Only add a stable suffix when two
-        // unrelated visitors would otherwise receive the same display number.
-        label: `کاربر ${fa.format(shortNumber)}${collisionSuffix}`,
-        count,
+        // Server-issued numbers never collide and remain stable across ranges.
+        // The old label is only a fallback while an older API response is cached.
+        label: `کاربر ${fa.format(value.number ?? shortNumber)}${collisionSuffix}`,
+        count: value.count,
         color: LOG_USER_COLORS[hash % LOG_USER_COLORS.length]
       });
     }
@@ -1007,7 +1014,7 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
                     <Badge variant='outline' className={riskInfo(row.risk_score).badge}>{riskInfo(row.risk_score).label}</Badge>
                   </div>
                   <p className='text-muted-foreground mt-2 text-[11px] leading-5'>
-                    {fa.format(row.gclids)} کلیک Ads یکتا · {fa.format(row.ads_sessions)} نشست Ads · {fa.format(row.ads_landings)} مراجعه Ads · {fa.format(row.ads_tel_clicks)} تماس
+                    {fa.format(row.gclids)} شناسه تبلیغاتی یکتا در سایت · {fa.format(row.ads_sessions)} نشست دارای شناسه Ads · {fa.format(row.ads_landings)} مراجعه دارای شناسه Ads · {fa.format(row.ads_tel_clicks)} تماس
                   </p>
                   <span className='text-primary mt-2 inline-flex items-center gap-1 text-[11px]'>مشاهدهٔ شواهد <IconChevronLeft className='size-3.5' /></span>
                 </button>
@@ -1016,20 +1023,24 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
           )}
 
           <div className='border-border/60 flex flex-col gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between'>
-            <p className='text-muted-foreground text-[11px]'>عدد «کلیک Ads» فقط شناسهٔ یکتای تبلیغ است؛ بازدید صفحه و heartbeat در آن شمرده نمی‌شود.</p>
+            <p className='text-muted-foreground text-[11px]'>شناسه‌های تبلیغاتی از ورود به سایت ثبت می‌شوند و معادل کلیک‌های گزارش‌شده در حساب Google Ads نیستند.</p>
             <Button size='sm' variant={highRisk.length ? 'default' : 'outline'} onClick={() => { setRiskFilter(highRisk.length ? 'high' : suspicious.length ? 'review' : 'all'); setTab('ips'); }}>
               {highRisk.length ? 'بررسی موارد پرخطر' : suspicious.length ? 'بررسی موارد مشکوک' : 'مشاهدهٔ پایش IP'}<IconChevronLeft />
             </Button>
           </div>
         </section>
 
+        <div className='rounded-xl border border-amber-500/35 bg-amber-500/[0.07] px-4 py-3 text-xs leading-6 text-amber-900 dark:text-amber-200' role='note'>
+          این بخش کلیک و هزینهٔ حساب Google Ads را نمایش نمی‌دهد. عددهای زیر فقط رویدادهای ثبت‌شده در سایت در بازهٔ «{rangeLabel(hours)}» هستند. برای سنجش اختلاف، گزارش Ads را با همان تاریخ و منطقهٔ زمانی مقایسه کنید.
+        </div>
+
         <section className='grid gap-3 sm:grid-cols-2 xl:grid-cols-3'>
           <MetricCard label='سشن‌های واقعی' value={summary?.totals.sessions ?? sessions.length} hint={hours === 0 ? 'از شروع ثبت داده' : `در ${rangeLabel(hours)} اخیر`} icon={IconUsers} />
           <MetricCard label='سشن درگیرشده' value={engagedSessions} hint='حداقل دو صفحه، تعامل یا اسکرول' icon={IconEye} />
           <MetricCard label='کلیک تماس' value={summary?.totals.tel_clicks ?? 0} hint='از همهٔ مسیرهای ورودی سایت' icon={IconListDetails} />
           <MetricCard label='ارسال فرم' value={summary?.totals.form_submits ?? 0} hint='فرم‌های تکمیل‌شدهٔ ثبت‌شده' icon={IconCheck} />
-          <MetricCard label='سشن ورودی Google Ads' value={summary?.totals.google_ads_sessions ?? 0} hint='هر سشن فقط یک‌بار؛ نه heartbeat و scroll' icon={IconWorld} />
-          <MetricCard label='شناسه کلیک یکتای Ads' value={summary?.totals.google_ads_click_ids ?? 0} hint='GCLID / GBRAID / WBRAID یکتا' icon={IconChartBar} />
+          <MetricCard label='سشن دارای شناسه Ads' value={summary?.totals.google_ads_sessions ?? 0} hint='سشن‌های ثبت‌شده در سایت؛ نه تعداد کلیک در حساب Ads' icon={IconWorld} />
+          <MetricCard label='شناسه تبلیغاتی دیده‌شده در سایت' value={summary?.totals.google_ads_click_ids ?? 0} hint='GCLID / GBRAID / WBRAID یکتا؛ معادل همهٔ کلیک‌های Ads نیست' icon={IconChartBar} />
         </section>
 
         <Tabs value={tab} onValueChange={(value) => setTab(value as DashboardTab)} className='gap-4'>
@@ -1404,7 +1415,8 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
           <TabsContent value='logs' className='space-y-4'>
             {ipBlockState.status !== 'ready' && <div role='status' className='flex flex-wrap items-center gap-2 rounded-lg border p-3 text-sm'>
               <span>{ipBlockState.status === 'loading' ? 'در حال دریافت وضعیت بلاک IPها…' : ipBlockState.message}</span>
-              {ipBlockState.status !== 'loading' && <Button size='sm' variant='outline' onClick={() => void ipBlockController.load()}>تلاش دوباره</Button>}
+              {ipBlockState.status !== 'loading' && <Button size='sm' variant='outline'
+                onClick={() => void (ipBlockState.status === 'stale' ? ipBlockController.refresh() : ipBlockController.load())}>تلاش دوباره</Button>}
             </div>}
             <Card className='border-border/70'>
               <CardHeader className='gap-4'>
@@ -1444,13 +1456,18 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
                     <thead className='bg-muted/60 text-muted-foreground sticky top-0 z-10 border-y text-xs'><tr>{['زمان و رفتار', 'کاربر', 'IP و وضعیت', 'منبع ورود', 'صفحه', 'نشانه مهم', ''].map((heading) => <th key={heading} className='px-4 py-3 text-start font-medium'>{heading}</th>)}</tr></thead>
                     <tbody>{visibleEvents.map((row) => {
                       const user = logUsers.get(logIdentity(row))!;
+                      const adKeyword = row.keyword || row.utm_term;
                       return <tr key={row.id} className={`hover:bg-muted/40 align-top border-b transition-colors last:border-0 ${isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'bg-destructive/10 hover:bg-destructive/15' : logRowTone(row)}`}>
                       <td className='sticky right-0 z-[1] bg-background/95 px-4 py-3 backdrop-blur'><Badge variant='outline'>{EVENT_FA[row.event_type] ?? row.event_type}</Badge><p className='mt-2 whitespace-nowrap text-xs'>{time.format(new Date(row.received_at))}</p><p className='text-muted-foreground mt-1 font-mono text-[10px]' dir='ltr'>ID: {row.id}</p></td>
                       <td className='max-w-56 px-4 py-3 text-[11px]'><Badge variant='outline' className={isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'border-destructive/40 bg-destructive/15 text-destructive' : user.color.badge}><span className={`me-1.5 size-2 rounded-full ${isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'bg-destructive' : user.color.dot}`} />{user.label}</Badge><p className='text-muted-foreground mt-1'>{fa.format(user.count)} رویداد در این صفحه</p><p className='text-muted-foreground mt-2 truncate font-mono' dir='ltr'>session: {row.session_id ?? '—'}</p></td>
                       <td className='px-4 py-3 text-xs'><p className='font-mono font-semibold' dir='ltr'>{row.ip_address}</p><Badge variant='outline' className={`mt-2 text-[10px] ${confidenceInfo(row.ip_confidence).className}`}>{confidenceInfo(row.ip_confidence).label}</Badge>{isBlocked(row.ip_address, row.gclid, row.ip_confidence) && <div className='mt-1'><AccessBadge status={accessStatus} ip={row.ip_address} gclid={row.gclid} trustedIp={row.ip_confidence === 'trusted_proxy' || row.ip_confidence === 'direct_peer'} legacyBlocked={blockedIps.has(row.ip_address)} /></div>}</td>
                       <td className='max-w-56 px-4 py-3 text-xs'><Badge variant='outline' className={eventAdsInfo(row).className}>{eventAdsInfo(row).label}</Badge><p className='text-muted-foreground mt-2 truncate font-mono' dir='ltr'>{row.utm_source || row.referrer || 'ورود مستقیم'}</p></td>
                       <td className='max-w-72 px-4 py-3 font-mono text-[11px]' dir='ltr'><p className='break-all'>{row.page_path || row.landing_path || '—'}</p></td>
-                      <td className='max-w-64 px-4 py-3 text-[11px]'>{row.gclid || row.gbraid || row.wbraid ? <><p className='font-medium'>شناسه تبلیغ ثبت شده</p><p className='text-muted-foreground mt-1 truncate font-mono' dir='ltr'>{row.gclid || row.gbraid || row.wbraid}</p></> : row.utm_campaign || row.campaign_id ? <><p className='font-medium'>کمپین ثبت شده</p><p className='text-muted-foreground mt-1 truncate font-mono' dir='ltr'>{row.utm_campaign || row.campaign_id}</p></> : <span className='text-muted-foreground'>بدون دادهٔ تبلیغاتی</span>}</td>
+                      <td className='max-w-64 px-4 py-3 text-[11px]'>
+                        {adKeyword && <p className='break-words font-medium' dir='auto'>کلمهٔ ثبت‌شده در لینک تبلیغ: {adKeyword}</p>}
+                        {adKeyword && <p className='text-muted-foreground mt-1'>عبارت جست‌وجوی دقیق کاربر نیست</p>}
+                        {row.gclid || row.gbraid || row.wbraid ? <><p className={adKeyword ? 'mt-2 font-medium' : 'font-medium'}>شناسه تبلیغ ثبت شده</p><p className='text-muted-foreground mt-1 truncate font-mono' dir='ltr'>{row.gclid || row.gbraid || row.wbraid}</p></> : row.utm_campaign || row.campaign_id ? <><p className={adKeyword ? 'mt-2 font-medium' : 'font-medium'}>کمپین ثبت شده</p><p className='text-muted-foreground mt-1 truncate font-mono' dir='ltr'>{row.utm_campaign || row.campaign_id}</p></> : !adKeyword && <span className='text-muted-foreground'>بدون دادهٔ تبلیغاتی</span>}
+                      </td>
                       <td className='px-4 py-3'><div className='flex flex-wrap items-center gap-2'>{ipBlockControl(row.ip_address)}<Button size='sm' variant='outline' onClick={() => setSelectedEvent(row)}><IconEye />جزئیات کامل</Button></div></td>
                     </tr>})}</tbody>
                   </table>
@@ -1458,7 +1475,7 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
                 <div className='divide-y md:hidden'>
                   {visibleEvents.map((row) => {
                     const user = logUsers.get(logIdentity(row))!;
-                    return <div key={row.id} className={`hover:bg-muted/40 w-full p-4 text-start ${isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'bg-destructive/10' : logRowTone(row)}`}><div className='flex items-center justify-between gap-3'><div className='flex flex-wrap gap-1'><Badge variant='outline' className={isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'border-destructive/40 bg-destructive/15 text-destructive' : user.color.badge}><span className={`me-1.5 size-2 rounded-full ${isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'bg-destructive' : user.color.dot}`} />{user.label}</Badge><Badge variant='outline'>{EVENT_FA[row.event_type] ?? row.event_type}</Badge><Badge variant='outline' className={eventAdsInfo(row).className}>{eventAdsInfo(row).label}</Badge></div><span className='text-muted-foreground text-[11px]'>{time.format(new Date(row.received_at))}</span></div><p className='mt-3 font-mono text-sm font-semibold' dir='ltr'>{row.ip_address}</p><p className='text-muted-foreground mt-1 text-[11px]'>{fa.format(user.count)} رویداد از همین کاربر در این صفحه</p><Badge variant='outline' className={`mt-2 text-[10px] ${confidenceInfo(row.ip_confidence).className}`}>{confidenceInfo(row.ip_confidence).label}</Badge><div className='text-muted-foreground mt-2 space-y-1 font-mono text-[11px]' dir='ltr'><p className='truncate'>page: {row.page_path ?? '—'}</p><p className='truncate'>campaign: {row.utm_campaign ?? row.campaign_id ?? '—'}</p><p className='truncate'>gclid: {row.gclid ?? '—'}</p><p className='truncate'>session: {row.session_id ?? '—'}</p></div><div className='mt-3 flex flex-wrap items-center gap-2'>{ipBlockControl(row.ip_address)}<Button size='sm' variant='outline' onClick={() => setSelectedEvent(row)}>جزئیات کامل <IconChevronLeft className='size-4' /></Button></div></div>})}
+                    return <div key={row.id} className={`hover:bg-muted/40 w-full p-4 text-start ${isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'bg-destructive/10' : logRowTone(row)}`}><div className='flex items-center justify-between gap-3'><div className='flex flex-wrap gap-1'><Badge variant='outline' className={isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'border-destructive/40 bg-destructive/15 text-destructive' : user.color.badge}><span className={`me-1.5 size-2 rounded-full ${isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'bg-destructive' : user.color.dot}`} />{user.label}</Badge><Badge variant='outline'>{EVENT_FA[row.event_type] ?? row.event_type}</Badge><Badge variant='outline' className={eventAdsInfo(row).className}>{eventAdsInfo(row).label}</Badge></div><span className='text-muted-foreground text-[11px]'>{time.format(new Date(row.received_at))}</span></div><p className='mt-3 font-mono text-sm font-semibold' dir='ltr'>{row.ip_address}</p><p className='text-muted-foreground mt-1 text-[11px]'>{fa.format(user.count)} رویداد از همین کاربر در این صفحه</p><Badge variant='outline' className={`mt-2 text-[10px] ${confidenceInfo(row.ip_confidence).className}`}>{confidenceInfo(row.ip_confidence).label}</Badge>{(row.keyword || row.utm_term) && <p className='mt-2 break-words text-xs font-medium' dir='auto'>کلمهٔ ثبت‌شده در لینک تبلیغ: {row.keyword || row.utm_term}<span className='text-muted-foreground block text-[11px] font-normal'>عبارت جست‌وجوی دقیق کاربر نیست</span></p>}<div className='text-muted-foreground mt-2 space-y-1 font-mono text-[11px]' dir='ltr'><p className='truncate'>page: {row.page_path ?? '—'}</p><p className='truncate'>campaign: {row.utm_campaign ?? row.campaign_id ?? '—'}</p><p className='truncate'>gclid: {row.gclid ?? '—'}</p><p className='truncate'>session: {row.session_id ?? '—'}</p></div><div className='mt-3 flex flex-wrap items-center gap-2'>{ipBlockControl(row.ip_address)}<Button size='sm' variant='outline' onClick={() => setSelectedEvent(row)}>جزئیات کامل <IconChevronLeft className='size-4' /></Button></div></div>})}
                 </div>
                 {!visibleEvents.length && <EmptyState title='لاگی مطابق این فیلتر نیست' description='بازه زمانی را روی «همه داده‌ها» بگذارید یا جست‌وجو و نوع رفتار را تغییر دهید.' />}
                 <div className='flex flex-col items-center justify-between gap-3 border-t p-4 sm:flex-row'>
@@ -1548,6 +1565,10 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
                 <SheetDescription>{time.format(new Date(selectedEvent.received_at))} · <span className='font-mono' dir='ltr'>{selectedEvent.ip_address}</span></SheetDescription>
               </SheetHeader>
               <div className='space-y-5 p-5'>
+                <div className='rounded-lg border border-sky-500/30 bg-sky-500/5 p-3 text-xs leading-6' role='note'>
+                  <p className='font-semibold'>کلمهٔ ثبت‌شده در لینک تبلیغ: {selectedEvent.keyword || selectedEvent.utm_term || 'ثبت نشده'}</p>
+                  <p className='text-muted-foreground'>این مقدار از پارامترهای تبلیغ در سایت ثبت شده است؛ عبارت واقعی جست‌وجوی همین کاربر را نشان نمی‌دهد.</p>
+                </div>
                 {[
                   ['شناسه رکورد', selectedEvent.id],
                   ['Event UUID', selectedEvent.event_uuid],

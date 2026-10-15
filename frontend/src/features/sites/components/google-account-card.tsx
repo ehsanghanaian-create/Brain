@@ -90,7 +90,7 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
       previousConnection.current = status?.connected_at ?? null;
       awaitingRef.current = true;
       setAwaiting(true);
-      toast.info('حساب موردنظر را در صفحهٔ رسمی گوگل انتخاب کنید؛ اگر لازم بود همان‌جا وارد شوید و دسترسی‌ها را تأیید کنید');
+      toast.info('مجوزهای Search Console، Analytics و Google Ads را در صفحهٔ رسمی گوگل بررسی و تأیید کنید');
     } catch (e) {
       tab.close();
       toast.error(e instanceof ApiError ? e.message : String(e));
@@ -137,7 +137,7 @@ export function GoogleAccountCard({ onChange, simple = false }: { onChange?: () 
       badge={view.state === 'connected' ? 'متصل' : view.state === 'needs_reconnect' ? 'نیازمند اتصال دوباره'
         : view.state === 'temporary_error' ? 'خطای موقت' : view.state === 'no_client' ? 'پیکربندی ناقص' : 'متصل نیست'}
       badgeVariant={view.state === 'connected' ? 'secondary' : ['no_client', 'needs_reconnect'].includes(view.state) ? 'destructive' : 'outline'}
-      description='یک ورود گوگل برای دسترسی فقط‌خواندنی به Search Console و Google Analytics. توکن به‌صورت رمزگذاری‌شده روی سرور نگه‌داری می‌شود.'
+      description='Search Console و Analytics فقط‌خواندنی‌اند؛ مجوز Google Ads امکان خواندن و مدیریت حساب تبلیغاتی را می‌دهد. توکن به‌صورت رمزگذاری‌شده روی سرور نگه‌داری می‌شود.'
     >
       {view.state === 'connected' ? (
         <div className='grid gap-2 text-sm' data-testid='google-connected'>

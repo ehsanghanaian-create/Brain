@@ -1,6 +1,7 @@
 'use client';
 
 import { Badge } from '@/components/ui/badge';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -44,6 +45,13 @@ type Summary = {
   hourly: { hour: string; events: number; unique_ips: number; landings: number; tel_clicks: number }[];
   event_types: { event_type: string; count: number }[];
   campaigns: { campaign: string; events: number; sessions: number; landings: number; tel_clicks: number }[];
+};
+
+type OfficialAdsReport = {
+  source: 'google_ads_api'; generated_at: string; date: string;
+  customer_id: string; currency_code: string; time_zone: string;
+  totals: { impressions: number; clicks: number; invalid_clicks: number; cost_micros: number };
+  campaigns: { id: string; name: string; impressions: number; clicks: number; invalid_clicks: number; cost_micros: number }[];
 };
 
 type IpRow = {
@@ -510,6 +518,47 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
   const ipBlockController = useMemo(() => createIpBlockController(siteId, endpoints), [siteId]);
   const ipBlockState = useSyncExternalStore(ipBlockController.subscribe, ipBlockController.getSnapshot, ipBlockController.getSnapshot);
   const blockedIps = ipBlockState.blockedIps;
+  const [adsExclusions, setAdsExclusions] = useState<Record<string, string>>({});
+  const [adsExclusionsStatus, setAdsExclusionsStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [adsExclusionsError, setAdsExclusionsError] = useState('');
+  const [adsCustomerId, setAdsCustomerId] = useState('');
+  const [adsExclusionTarget, setAdsExclusionTarget] = useState<string | null>(null);
+  const [adsExclusionConfirmation, setAdsExclusionConfirmation] = useState('');
+  const [adsExclusionBusy, setAdsExclusionBusy] = useState(false);
+  const loadAdsExclusions = useCallback(async () => {
+    try {
+      const result = await api<{ customer_id: string; items: Record<string, string> }>('/ads-data/google-ads/ip-exclusions');
+      setAdsExclusions(result.items);
+      setAdsCustomerId(result.customer_id);
+      setAdsExclusionsStatus('ready');
+      setAdsExclusionsError('');
+    } catch (error) {
+      setAdsExclusionsStatus('error');
+      setAdsExclusionsError(error instanceof Error ? error.message : 'فهرست IP exclusion گوگل دریافت نشد.');
+    }
+  }, []);
+  useEffect(() => { void loadAdsExclusions(); }, [loadAdsExclusions]);
+  async function submitAdsExclusion() {
+    const ip = adsExclusionTarget;
+    if (!ip || adsExclusionConfirmation !== ip || adsExclusionBusy) return;
+    setAdsExclusionBusy(true);
+    try {
+      const result = await api<{ status: string; resource_name: string; customer_id: string }>(
+        '/ads-data/google-ads/ip-exclusions', {
+          method: 'POST', json: { site_id: siteId, ip_address: ip, confirmation_ip: adsExclusionConfirmation }
+        });
+      setAdsExclusions((previous) => ({ ...previous, [ip]: result.resource_name }));
+      setAdsCustomerId(result.customer_id);
+      setAdsExclusionTarget(null);
+      setAdsExclusionConfirmation('');
+      toast.success(result.status === 'already_excluded' ? 'این IP از قبل در Google Ads استثنا شده بود.' : 'IP در فهرست استثناهای Google Ads ثبت شد.');
+      void loadAdsExclusions();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'ثبت IP در Google Ads ناموفق بود.');
+    } finally {
+      setAdsExclusionBusy(false);
+    }
+  }
   const accessStatus = useAccessStatus(siteId);
   function isBlocked(ip: string, gclid: string | null, confidence: string) {
     return blockedIps.has(ip) || matchAccess(accessStatus, ip, gclid, confidence === 'trusted_proxy' || confidence === 'direct_peer')?.status === 'blocked';
@@ -527,13 +576,20 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
     }
   }
   function ipBlockControl(ip: string) {
-    return <IpBlockToggle ip={ip} blocked={blockedIps.has(ip)} busy={ipBlockState.pendingIps.has(ip)}
+    return <><IpBlockToggle ip={ip} blocked={blockedIps.has(ip)} busy={ipBlockState.pendingIps.has(ip)}
       ready={ipBlockState.status === 'ready' || (ipBlockState.status === 'stale' && !blockedIps.has(ip))}
-      onToggle={() => void toggleIpBlock(ip)} />;
+      onToggle={() => void toggleIpBlock(ip)} />
+      {adsExclusions[ip]
+        ? <Badge variant='outline' className='border-emerald-500/40 text-emerald-600' title={`Google Ads: ${adsExclusions[ip]}`}>در IP exclusion ادز</Badge>
+        : <Button type='button' size='sm' variant='outline' disabled={adsExclusionsStatus !== 'ready' || !ip}
+            title={adsExclusionsStatus === 'ready' ? 'افزودن IP به استثناهای کل حساب Google Ads' : 'وضعیت Google Ads هنوز دریافت نشده است'}
+            onClick={() => { setAdsExclusionTarget(ip); setAdsExclusionConfirmation(''); }}>بلاک در Ads</Button>}</>;
   }
   const [hours, setHours] = useState(24);
   const [tab, setTab] = useState<DashboardTab>('sessions');
   const [summary, setSummary] = useState<Summary | null>(null);
+  const [officialAds, setOfficialAds] = useState<OfficialAdsReport | null>(null);
+  const [officialAdsError, setOfficialAdsError] = useState(false);
   const [liveAlerts, setLiveAlerts] = useState<LiveAlerts | null>(null);
   const [pageReport, setPageReport] = useState<PageReport>({ pages: [], entries: [], actions: [] });
   const [ips, setIps] = useState<IpRow[]>([]);
@@ -566,6 +622,7 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
   const lastPhoneEventIdRef = useRef<number | null>(null);
   const lastAdEntryIdRef = useRef<number | null>(null);
   const knownLiveSuspectsRef = useRef<Set<string> | null>(null);
+  const loadRequestIdRef = useRef(0);
 
   const ensureAudio = useCallback(() => {
     if (typeof window === 'undefined') return null;
@@ -683,6 +740,7 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
   }, [unlockAudio]);
 
   const load = useCallback(async (quiet = false) => {
+    const requestId = ++loadRequestIdRef.current;
     if (!quiet) setLoading(true);
     try {
       const [nextSummary, nextIps, nextEvents, nextSessions, nextKeywords, nextPages] = await Promise.all([
@@ -698,6 +756,8 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
         api<{ items: Keyword[] }>(`/ads-data/keywords?site_id=${siteQuery}&hours=${hours}&limit=500`),
         api<PageReport>(`/ads-data/pages?site_id=${siteQuery}&hours=${hours}&limit=100`)
       ]);
+      // A newer refresh may have started while this one was in flight.
+      if (requestId !== loadRequestIdRef.current) return;
       setSummary(nextSummary);
       setIps(nextIps.items);
       setEvents(nextEvents.items);
@@ -708,11 +768,26 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
       setLastUpdated(new Date());
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (requestId === loadRequestIdRef.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestIdRef.current) setLoading(false);
     }
   }, [adsFilter, eventFilter, eventPage, hours, logQuery, siteQuery]);
+
+  const loadOfficialAds = useCallback(async () => {
+    try {
+      setOfficialAds(await api<OfficialAdsReport>('/ads-data/google-ads/today'));
+      setOfficialAdsError(false);
+    } catch {
+      setOfficialAdsError(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadOfficialAds();
+    const id = window.setInterval(() => void loadOfficialAds(), 300_000);
+    return () => window.clearInterval(id);
+  }, [loadOfficialAds]);
 
   useEffect(() => {
     void load();
@@ -737,32 +812,39 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
     return () => window.clearInterval(id);
   }, [loadAlerts]);
 
-  // هشدار صوتی مستقل از بازه گزارش است: تماس از همه کانال‌ها دینگ می‌زند،
-  // ولی آژیر حمله فقط از پنجره زنده پنج‌دقیقه‌ای Google Ads می‌آید.
+  // The alerts endpoint sees new activity before the slower dashboard cycle.
+  // Refresh the visible data first, then sound the alert so they arrive together.
   useEffect(() => {
     if (!liveAlerts) return;
     const newestPhoneId = liveAlerts.phone_events[0]?.id ?? null;
     const previousPhoneId = lastPhoneEventIdRef.current;
-    if (soundOn && audioReady && previousPhoneId !== null) {
-      const freshCount = liveAlerts.phone_events.filter((event) => event.id > previousPhoneId).length;
-      for (let index = 0; index < Math.min(freshCount, 4); index += 1) {
-        window.setTimeout(() => playDing(), index * 650);
-      }
-    }
+    const freshCount = previousPhoneId === null ? 0 : liveAlerts.phone_events.filter((event) => event.id > previousPhoneId).length;
     if (newestPhoneId !== null) lastPhoneEventIdRef.current = Math.max(previousPhoneId ?? 0, newestPhoneId);
 
     const newestAdId = liveAlerts.ad_entries[0]?.id ?? null;
     const previousAdId = lastAdEntryIdRef.current;
-    if (soundOn && audioReady && previousAdId !== null && newestAdId !== null && newestAdId > previousAdId) playEntryTick();
+    const freshAdEntry = previousAdId !== null && newestAdId !== null && newestAdId > previousAdId;
     if (newestAdId !== null) lastAdEntryIdRef.current = Math.max(previousAdId ?? 0, newestAdId);
 
     const dangerHashes = liveAlerts.suspects.filter((row) => row.level === 'danger').map((row) => row.ip_hash);
     const known = knownLiveSuspectsRef.current;
-    if (soundOn && audioReady && known !== null && dangerHashes.some((hash) => !known.has(hash))) playSiren();
+    const freshDanger = known !== null && dangerHashes.some((hash) => !known.has(hash));
     const nextKnown = known ?? new Set<string>();
     dangerHashes.forEach((hash) => nextKnown.add(hash));
     knownLiveSuspectsRef.current = nextKnown;
-  }, [audioReady, liveAlerts, playDing, playEntryTick, playSiren, soundOn]);
+
+    if (!freshCount && !freshAdEntry && !freshDanger) return;
+    void load(true).finally(() => {
+      window.requestAnimationFrame(() => {
+        if (!soundOn || !audioReady) return;
+        for (let index = 0; index < Math.min(freshCount, 4); index += 1) {
+          window.setTimeout(() => playDing(), index * 650);
+        }
+        if (freshAdEntry) playEntryTick();
+        if (freshDanger) playSiren();
+      });
+    });
+  }, [audioReady, liveAlerts, load, playDing, playEntryTick, playSiren, soundOn]);
 
   // When a session is opened, load its full chronological event timeline.
   useEffect(() => {
@@ -1030,14 +1112,44 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
           </div>
         </section>
 
+        <Card className='border-blue-500/30'>
+          <CardHeader>
+            <CardTitle>آمار رسمی Google Ads</CardTitle>
+            <CardDescription>
+              {officialAds
+                ? `امروز ${officialAds.date} در منطقهٔ زمانی حساب ${officialAds.time_zone} · حساب ${officialAds.customer_id} · همهٔ کمپین‌ها`
+                : 'آمار مستقیم از حساب Google Ads؛ مستقل از رویدادهای ثبت‌شده در سایت'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className='space-y-3'>
+            {officialAds ? <>
+              <div className='grid gap-3 sm:grid-cols-3'>
+                <MetricCard label='کلیک‌های Google Ads' value={officialAds.totals.clicks} hint='ستون Clicks در حساب Ads' icon={IconChartBar} />
+                <MetricCard label='کلیک نامعتبر' value={officialAds.totals.invalid_clicks} hint='شناسایی‌شده و فیلترشده توسط گوگل' icon={IconShieldCheck} />
+                <MetricCard label={`هزینهٔ Ads (${officialAds.currency_code})`} value={officialAds.totals.cost_micros / 1_000_000} hint='مبلغ گزارش‌شده در حساب؛ لزوماً خسارت نیست' icon={IconListDetails} />
+              </div>
+              <div className='overflow-x-auto rounded-lg border text-xs'>
+                <table className='w-full min-w-[500px] text-start'>
+                  <thead className='bg-muted/50'><tr><th className='p-2 text-start'>کمپین</th><th className='p-2 text-start'>کلیک</th><th className='p-2 text-start'>نامعتبر</th><th className='p-2 text-start'>هزینه ({officialAds.currency_code})</th></tr></thead>
+                  <tbody>{officialAds.campaigns.map((campaign) => <tr key={campaign.id} className='border-t'><td className='p-2' dir='ltr'>{campaign.name}</td><td className='p-2'>{fa.format(campaign.clicks)}</td><td className='p-2'>{fa.format(campaign.invalid_clicks)}</td><td className='p-2'>{fa.format(campaign.cost_micros / 1_000_000)}</td></tr>)}</tbody>
+                </table>
+              </div>
+              <p className='text-muted-foreground text-[11px] leading-5'>آمار Google Ads ممکن است با شناسایی دیرترِ کلیک نامعتبر تغییر کند. کلیک نامعتبرِ این ستون از هزینهٔ Ads حذف شده است.</p>
+            </> : <div className='flex items-center gap-3 text-xs'>
+              <span>{officialAdsError ? 'دریافت گزارش رسمی ممکن نشد.' : 'در حال دریافت گزارش رسمی…'}</span>
+              {officialAdsError && <Button size='sm' variant='outline' onClick={() => void loadOfficialAds()}>تلاش دوباره</Button>}
+            </div>}
+          </CardContent>
+        </Card>
+
         <div className='rounded-xl border border-amber-500/35 bg-amber-500/[0.07] px-4 py-3 text-xs leading-6 text-amber-900 dark:text-amber-200' role='note'>
-          این بخش کلیک و هزینهٔ حساب Google Ads را نمایش نمی‌دهد. عددهای زیر فقط رویدادهای ثبت‌شده در سایت در بازهٔ «{rangeLabel(hours)}» هستند. برای سنجش اختلاف، گزارش Ads را با همان تاریخ و منطقهٔ زمانی مقایسه کنید.
+          عددهای زیر فقط رویدادهای ثبت‌شده در سایت در بازهٔ «{rangeLabel(hours)}» هستند. آن‌ها با کلیک و هزینهٔ رسمی Ads در بخش بالا یکسان نیستند. تماسِ شماره‌گیری‌شده از خود آگهی یا شمارهٔ ذخیره‌شده، رویداد سایت ایجاد نمی‌کند.
         </div>
 
         <section className='grid gap-3 sm:grid-cols-2 xl:grid-cols-3'>
           <MetricCard label='سشن‌های واقعی' value={summary?.totals.sessions ?? sessions.length} hint={hours === 0 ? 'از شروع ثبت داده' : `در ${rangeLabel(hours)} اخیر`} icon={IconUsers} />
           <MetricCard label='سشن درگیرشده' value={engagedSessions} hint='حداقل دو صفحه، تعامل یا اسکرول' icon={IconEye} />
-          <MetricCard label='کلیک تماس' value={summary?.totals.tel_clicks ?? 0} hint='از همهٔ مسیرهای ورودی سایت' icon={IconListDetails} />
+          <MetricCard label='کلیک تماس در سایت' value={summary?.totals.tel_clicks ?? 0} hint='لمس لینک تلفن؛ نه تعداد تماس برقرارشده' icon={IconListDetails} />
           <MetricCard label='ارسال فرم' value={summary?.totals.form_submits ?? 0} hint='فرم‌های تکمیل‌شدهٔ ثبت‌شده' icon={IconCheck} />
           <MetricCard label='سشن دارای شناسه Ads' value={summary?.totals.google_ads_sessions ?? 0} hint='سشن‌های ثبت‌شده در سایت؛ نه تعداد کلیک در حساب Ads' icon={IconWorld} />
           <MetricCard label='شناسه تبلیغاتی دیده‌شده در سایت' value={summary?.totals.google_ads_click_ids ?? 0} hint='GCLID / GBRAID / WBRAID یکتا؛ معادل همهٔ کلیک‌های Ads نیست' icon={IconChartBar} />
@@ -1346,6 +1458,10 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
           </TabsContent>
 
           <TabsContent value='ips' className='space-y-4'>
+            <div className='flex flex-wrap items-center gap-2 text-xs'>
+              <Badge variant='outline'>{adsExclusionsStatus === 'ready' ? `${fa.format(Object.keys(adsExclusions).length)} IP در exclusion حساب Ads ${adsCustomerId}` : adsExclusionsStatus === 'loading' ? 'در حال دریافت IP exclusion ادز…' : 'ارتباط IP exclusion ادز برقرار نیست'}</Badge>
+              {adsExclusionsStatus === 'error' && <><span className='text-muted-foreground'>{adsExclusionsError}</span><Button size='xs' variant='outline' onClick={() => void loadAdsExclusions()}>تلاش دوباره</Button></>}
+            </div>
             <Card className='border-border/70'>
               <CardHeader className='gap-4'>
                 <div className='flex flex-col justify-between gap-3 lg:flex-row lg:items-start'>
@@ -1413,6 +1529,10 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
           </TabsContent>
 
           <TabsContent value='logs' className='space-y-4'>
+            {adsExclusionsStatus === 'error' && <div role='status' className='flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 p-3 text-sm'>
+              <span>وضعیت IP exclusion در Google Ads دریافت نشد: {adsExclusionsError}</span>
+              <Button size='sm' variant='outline' onClick={() => void loadAdsExclusions()}>تلاش دوباره</Button>
+            </div>}
             {ipBlockState.status !== 'ready' && <div role='status' className='flex flex-wrap items-center gap-2 rounded-lg border p-3 text-sm'>
               <span>{ipBlockState.status === 'loading' ? 'در حال دریافت وضعیت بلاک IPها…' : ipBlockState.message}</span>
               {ipBlockState.status !== 'loading' && <Button size='sm' variant='outline'
@@ -1475,7 +1595,7 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
                 <div className='divide-y md:hidden'>
                   {visibleEvents.map((row) => {
                     const user = logUsers.get(logIdentity(row))!;
-                    return <div key={row.id} className={`hover:bg-muted/40 w-full p-4 text-start ${isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'bg-destructive/10' : logRowTone(row)}`}><div className='flex items-center justify-between gap-3'><div className='flex flex-wrap gap-1'><Badge variant='outline' className={isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'border-destructive/40 bg-destructive/15 text-destructive' : user.color.badge}><span className={`me-1.5 size-2 rounded-full ${isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'bg-destructive' : user.color.dot}`} />{user.label}</Badge><Badge variant='outline'>{EVENT_FA[row.event_type] ?? row.event_type}</Badge><Badge variant='outline' className={eventAdsInfo(row).className}>{eventAdsInfo(row).label}</Badge></div><span className='text-muted-foreground text-[11px]'>{time.format(new Date(row.received_at))}</span></div><p className='mt-3 font-mono text-sm font-semibold' dir='ltr'>{row.ip_address}</p><p className='text-muted-foreground mt-1 text-[11px]'>{fa.format(user.count)} رویداد از همین کاربر در این صفحه</p><Badge variant='outline' className={`mt-2 text-[10px] ${confidenceInfo(row.ip_confidence).className}`}>{confidenceInfo(row.ip_confidence).label}</Badge>{(row.keyword || row.utm_term) && <p className='mt-2 break-words text-xs font-medium' dir='auto'>کلمهٔ ثبت‌شده در لینک تبلیغ: {row.keyword || row.utm_term}<span className='text-muted-foreground block text-[11px] font-normal'>عبارت جست‌وجوی دقیق کاربر نیست</span></p>}<div className='text-muted-foreground mt-2 space-y-1 font-mono text-[11px]' dir='ltr'><p className='truncate'>page: {row.page_path ?? '—'}</p><p className='truncate'>campaign: {row.utm_campaign ?? row.campaign_id ?? '—'}</p><p className='truncate'>gclid: {row.gclid ?? '—'}</p><p className='truncate'>session: {row.session_id ?? '—'}</p></div><div className='mt-3 flex flex-wrap items-center gap-2'>{ipBlockControl(row.ip_address)}<Button size='sm' variant='outline' onClick={() => setSelectedEvent(row)}>جزئیات کامل <IconChevronLeft className='size-4' /></Button></div></div>})}
+                    return <div key={row.id} className={`hover:bg-muted/40 w-full p-4 text-start ${isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'bg-destructive/10' : logRowTone(row)}`}><div className='flex items-center justify-between gap-3'><div className='flex flex-wrap gap-1'><Badge variant='outline' className={isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'border-destructive/40 bg-destructive/15 text-destructive' : user.color.badge}><span className={`me-1.5 size-2 rounded-full ${isBlocked(row.ip_address, row.gclid, row.ip_confidence) ? 'bg-destructive' : user.color.dot}`} />{user.label}</Badge><Badge variant='outline'>{EVENT_FA[row.event_type] ?? row.event_type}</Badge><Badge variant='outline' className={eventAdsInfo(row).className}>{eventAdsInfo(row).label}</Badge></div><span className='text-muted-foreground text-[11px]'>{time.format(new Date(row.received_at))}</span></div><p className='mt-3 font-mono text-sm font-semibold' dir='ltr'>{row.ip_address}</p><p className='text-muted-foreground mt-1 text-[11px]'>{fa.format(user.count)} رویداد از همین کاربر در این صفحه</p><Badge variant='outline' className={`mt-2 text-[10px] ${confidenceInfo(row.ip_confidence).className}`}>{confidenceInfo(row.ip_confidence).label}</Badge><div className='text-muted-foreground mt-2 space-y-1 font-mono text-[11px]' dir='ltr'><p className='truncate'>page: {row.page_path ?? '—'}</p><p className='truncate'>campaign: {row.utm_campaign ?? row.campaign_id ?? '—'}</p><p className='truncate'>gclid: {row.gclid ?? '—'}</p><p className='truncate'>session: {row.session_id ?? '—'}</p></div><div className='mt-3 flex flex-wrap items-center gap-2'>{ipBlockControl(row.ip_address)}<Button size='sm' variant='outline' onClick={() => setSelectedEvent(row)}>جزئیات کامل <IconChevronLeft className='size-4' /></Button></div></div>})}
                 </div>
                 {!visibleEvents.length && <EmptyState title='لاگی مطابق این فیلتر نیست' description='بازه زمانی را روی «همه داده‌ها» بگذارید یا جست‌وجو و نوع رفتار را تغییر دهید.' />}
                 <div className='flex flex-col items-center justify-between gap-3 border-t p-4 sm:flex-row'>
@@ -1645,6 +1765,11 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
                     <div key={label} className='bg-muted/50 rounded-xl p-3 text-center'><p className='text-base font-bold'>{value}</p><p className='text-muted-foreground mt-1 text-[11px]'>{label}</p></div>
                   ))}
                 </section>
+                {selectedSession.gclid && selectedSession.landings > 1 && (
+                  <p className='rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-3 text-xs leading-6'>
+                    در این نشست {fa.format(selectedSession.landings)} رویداد ورود با یک GCLID دیده شده است. باز شدن دوبارهٔ صفحه، کلیک تازهٔ Google Ads را ثابت نمی‌کند.
+                  </p>
+                )}
 
                 {selectedSession.risk_reasons.length > 0 && (
                   <section className='rounded-xl border border-amber-500/30 bg-amber-500/[0.05] p-4'>
@@ -1702,6 +1827,22 @@ export function AdsDataDashboard({ siteId, siteLabel }: { siteId: string; siteLa
           )}
         </SheetContent>
       </Sheet>
+      <AlertDialog open={Boolean(adsExclusionTarget)} onOpenChange={(open) => { if (!open && !adsExclusionBusy) { setAdsExclusionTarget(null); setAdsExclusionConfirmation(''); } }}>
+        <AlertDialogContent dir='rtl' className='sm:max-w-md'>
+          <AlertDialogHeader>
+            <AlertDialogTitle>افزودن IP به استثناهای Google Ads</AlertDialogTitle>
+            <AlertDialogDescription className='leading-6'>این تغییر در کل حساب Google Ads {adsCustomerId || ''} اعمال می‌شود و ممکن است نمایش آگهی به کاربران دیگرِ همین IP را هم محدود کند. برای تأیید، IP زیر را دقیق وارد کنید.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <p className='rounded-md bg-muted p-2 text-center font-mono text-sm' dir='ltr'>{adsExclusionTarget}</p>
+          <Input dir='ltr' autoComplete='off' spellCheck={false} aria-label='تأیید IP برای Google Ads'
+            value={adsExclusionConfirmation} onChange={(event) => setAdsExclusionConfirmation(event.target.value)} />
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={adsExclusionBusy}>انصراف</AlertDialogCancel>
+            <AlertDialogAction disabled={adsExclusionBusy || adsExclusionConfirmation !== adsExclusionTarget}
+              onClick={() => void submitAdsExclusion()}>{adsExclusionBusy ? 'در حال ثبت…' : 'ثبت در IP exclusion ادز'}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </main>
   );
 }

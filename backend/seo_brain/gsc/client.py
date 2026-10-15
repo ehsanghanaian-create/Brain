@@ -143,7 +143,8 @@ def get_credentials(interactive: bool = True):
         creds = None
         raw = read_token_json()
         if raw:
-            creds = Credentials.from_authorized_user_info(json.loads(raw), SCOPES)
+            token_info = json.loads(raw)
+            creds = Credentials.from_authorized_user_info(token_info, token_info.get("scopes") or SCOPES)
         if creds and creds.valid:
             return creds
         if creds and creds.expired and creds.refresh_token:

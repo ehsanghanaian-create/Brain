@@ -278,6 +278,33 @@ def test_late_click_reconciliation_marks_ads_probable(client):
     assert row["source"] == "ads" and row["source_confidence"] == "probable"
 
 
+def test_ads_entry_alert_keeps_first_id_when_one_click_reloads(client):
+    _seed(client)
+    at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+    def landing(event_uuid: str, gclid: str) -> None:
+        with client.eng.begin() as cx:
+            cx.execute(text("""INSERT INTO ads_click_events
+                (event_uuid,site_id,event_type,received_at,ip_address,ip_hash,gclid,landing_path)
+                VALUES (:event_uuid,'demo','landing',:at,'127.0.0.1','same-ip',:gclid,'/page')"""),
+                {"event_uuid": event_uuid, "at": at, "gclid": gclid})
+
+    landing("first-landing", "gclid-first")
+    first = client.get('/api/v1/ads-data/alerts', params={"site_id": "demo"})
+    assert first.status_code == 200, first.text
+    first_id = first.json()["ad_entries"][0]["id"]
+
+    landing("same-click-reload", "gclid-first")
+    repeated = client.get('/api/v1/ads-data/alerts', params={"site_id": "demo"})
+    assert repeated.status_code == 200
+    assert [entry["id"] for entry in repeated.json()["ad_entries"]] == [first_id]
+
+    landing("new-click", "gclid-second")
+    new_click = client.get('/api/v1/ads-data/alerts', params={"site_id": "demo"})
+    assert new_click.status_code == 200
+    assert len(new_click.json()["ad_entries"]) == 2
+
+
 def test_sites_crud_and_workspace(client):
     assert client.get("/api/v1/sites").json() == []
     _seed(client)

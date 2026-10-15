@@ -135,8 +135,8 @@ export function OnboardingWizard() {
                 داده‌های واقعی سایت را وارد چرخه تحلیل کنید
               </h2>
               <p className='mt-2 text-sm leading-7 text-muted-foreground md:text-base'>
-                اتصال‌ها فقط برای خواندن آمار و محتوا هستند. هیچ تغییری در سایت یا حساب گوگل شما
-                ایجاد نمی‌شود.
+                دسترسی Search Console و Analytics فقط‌خواندنی است. اتصال Google Ads مجوز خواندن و مدیریت
+                حساب تبلیغاتی را درخواست می‌کند؛ مجوزها را در صفحهٔ گوگل بررسی کنید.
               </p>
             </div>
           </div>
@@ -256,9 +256,9 @@ export function OnboardingWizard() {
           </Card>
           <Alert className='bg-emerald-500/5 text-right'>
             <IconShieldCheck className='text-emerald-500' />
-            <AlertTitle>دسترسی امن و فقط‌خواندنی</AlertTitle>
+            <AlertTitle>مجوزهای اتصال را بررسی کنید</AlertTitle>
             <AlertDescription>
-              SEO Brain فقط داده لازم برای گزارش و تحلیل را دریافت می‌کند.
+              برای Google Ads مجوز مدیریت هم درخواست می‌شود. تأیید نهایی در صفحهٔ رسمی گوگل انجام می‌شود.
             </AlertDescription>
           </Alert>
         </aside>

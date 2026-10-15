@@ -25,7 +25,8 @@ from ..gsc.client import SCOPES, GscAuthError, _client_config, delete_token, rea
 
 log = logging.getLogger("google.oauth")
 
-WEB_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email", *SCOPES]
+WEB_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email", *SCOPES,
+              "https://www.googleapis.com/auth/adwords"]
 _STATE_TTL = 900
 _states: dict[str, dict[str, Any]] = {}
 

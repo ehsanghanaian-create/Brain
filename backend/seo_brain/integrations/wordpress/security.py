@@ -36,11 +36,11 @@ class WordPressSecurityService:
         self._http = http
 
     # ------------------------------------------------------------------ plumbing (same pattern as WordPressWriter)
-    def _request(self, method: str, url: str, auth: tuple[str, str], **kw) -> httpx.Response:
+    def _request(self, method: str, url: str, auth: tuple[str, str], *, timeout_seconds: float = 25, **kw) -> httpx.Response:
         if self._http:
             return self._http(method, url, auth=auth, **kw)
         from ...common.http import site_proxy
-        return httpx.request(method, url, auth=auth, timeout=25, follow_redirects=True, proxy=site_proxy(),
+        return httpx.request(method, url, auth=auth, timeout=timeout_seconds, follow_redirects=True, proxy=site_proxy(),
                              headers={"User-Agent": "SEO-Brain-Security/1.0"}, **kw)
 
     def _site(self, site_id: str):
@@ -122,7 +122,13 @@ class WordPressSecurityService:
         if err:
             return {**err, "items": []}
         try:
-            r = self._request("GET", f"{base}/security/blocked", auth)
+            # The WordPress connection occasionally stalls for one request. Retry this
+            # read-only call once so a transient timeout does not disable every block
+            # switch on the dashboard. Keep the total under the reverse proxy timeout.
+            try:
+                r = self._request("GET", f"{base}/security/blocked", auth, timeout_seconds=5)
+            except httpx.TimeoutException:
+                r = self._request("GET", f"{base}/security/blocked", auth, timeout_seconds=5)
         except Exception as e:  # noqa: BLE001
             return {"connected": False, **self._map_error(e), "items": []}
         if r.status_code != 200:

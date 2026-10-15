@@ -15,6 +15,7 @@ import ipaddress
 import json
 import math
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any
@@ -29,8 +30,24 @@ from ...common.logging_setup import jsonl_audit_logger
 from ...db.engine import make_engine
 from ...db.migrate import migrate
 from ..deps import engine
+from ..errors import ApiError
+from ...ads.ip_exclusions import GoogleAdsApiError, exclude_ip as exclude_ip_in_google_ads, remove_ip as remove_ip_in_google_ads, list_ip_exclusions, status as google_ads_status
+from .visitor_numbers import visitor_identity_hash, visitor_numbers
 
 router = APIRouter(prefix="/ads-data", tags=["ads-data"])
+
+
+@router.get("/google-ads/today")
+def official_google_ads_today(response: Response) -> dict[str, Any]:
+    """Account-wide Ads metrics, separate from on-site event telemetry."""
+    from ...ads.ip_exclusions import GoogleAdsApiError
+    from ...ads.reporting import today_report
+
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return today_report()
+    except GoogleAdsApiError as exc:
+        raise HTTPException(status_code=502, detail={"code": exc.code, "message": str(exc)}) from exc
 
 EVENT_TYPES = {
     "landing", "page_view", "heartbeat", "scroll", "tel_click",
@@ -113,6 +130,14 @@ class CustomerLinkIn(BaseModel):
     customer_key: str = Field(pattern=r"^[a-f0-9]{64}$")
     visitor_id: str = Field(min_length=8, max_length=100, pattern=r"^[A-Za-z0-9._~-]+$")
     session_id: str = Field(min_length=8, max_length=100, pattern=r"^[A-Za-z0-9._~-]+$")
+
+class GoogleAdsIpExclusionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    site_id: str = Field(min_length=3, max_length=120)
+    ip_address: str = Field(min_length=3, max_length=45)
+    confirmation_ip: str = Field(min_length=3, max_length=45)
+
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -500,6 +525,143 @@ def ads_engine(default: Engine = Depends(engine)) -> Engine:
     return _dedicated_ads_engine(path) if path else default
 
 
+@router.get("/google-ads/status")
+def google_ads_exclusion_status(eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
+    current = google_ads_status()
+    with eng.connect() as cx:
+        recent = [dict(row) for row in cx.execute(text("""
+            SELECT site_id, ip_address, customer_id, status, google_resource_name,
+                   google_request_id, error_code, created_at, completed_at
+            FROM google_ads_ip_exclusions ORDER BY id DESC LIMIT 30
+        """)).mappings()]
+    return {**current, "recent": recent}
+
+
+@router.get("/google-ads/ip-exclusions")
+def google_ads_exclusion_list(response: Response) -> dict[str, Any]:
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        current = google_ads_status()
+        if not current["ready"]:
+            raise ApiError(503, "اتصال Google Ads برای IP exclusion آماده نیست", "google_ads_not_ready")
+        items = list_ip_exclusions()
+        return {"customer_id": current["customer_id"], "items": items, "count": len(items)}
+    except GoogleAdsApiError as exc:
+        raise ApiError(502, str(exc), exc.code, {"google_request_id": exc.request_id}) from exc
+
+
+@router.post("/google-ads/ip-exclusions", status_code=201)
+def google_ads_exclusion_create(payload: GoogleAdsIpExclusionIn, eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
+    site_id = payload.site_id.lower()
+    if site_id not in _allowed_sites():
+        raise ApiError(403, "این سایت برای ثبت رویداد مجاز نیست", "site_not_allowed")
+    try:
+        ip = ipaddress.ip_address(payload.ip_address)
+    except ValueError as exc:
+        raise ApiError(422, "IP معتبر نیست", "invalid_ip") from exc
+    if not ip.is_global:
+        raise ApiError(422, "فقط IP عمومی قابل ثبت است", "non_public_ip")
+    address = str(ip)
+    if payload.confirmation_ip != address:
+        raise ApiError(409, "برای تأیید، همان IP را دقیق وارد کنید", "ip_confirmation_mismatch")
+    current = google_ads_status()
+    if not current["ready"]:
+        raise ApiError(503, "اتصال Google Ads برای IP exclusion آماده نیست", "google_ads_not_ready")
+    with eng.connect() as cx:
+        evidence = cx.execute(text("""
+            SELECT COUNT(*) AS events,
+                   SUM(CASE WHEN COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>''
+                            OR COALESCE(campaign_id,'')<>'' THEN 1 ELSE 0 END) AS ads_events
+            FROM ads_click_events WHERE site_id=:site_id AND ip_address=:ip
+              AND CAST(ip_resolution_version AS INTEGER)>=3
+              AND ip_confidence IN ('trusted_proxy','direct_peer')
+        """), {"site_id": site_id, "ip": address}).mappings().one()
+    if not evidence["events"] or not evidence["ads_events"]:
+        raise ApiError(409, "برای این IP دادهٔ معتبرِ ورودی از تبلیغ ثبت نشده است", "ads_ip_evidence_missing")
+    request_uuid = uuid.uuid4().hex
+    created_at = _iso(_utcnow())
+    with eng.begin() as cx:
+        cx.execute(text("""
+            INSERT INTO google_ads_ip_exclusions
+              (request_uuid, site_id, ip_address, ip_hash, customer_id, status, created_at)
+            VALUES (:request_uuid, :site_id, :ip, :ip_hash, :customer_id, 'pending', :created_at)
+        """), {"request_uuid": request_uuid, "site_id": site_id, "ip": address,
+                "ip_hash": _ip_hash(address), "customer_id": current["customer_id"], "created_at": created_at})
+    try:
+        result = exclude_ip_in_google_ads(address)
+    except GoogleAdsApiError as exc:
+        with eng.begin() as cx:
+            cx.execute(text("""
+                UPDATE google_ads_ip_exclusions
+                SET status='failed', error_code=:code, error_message=:message,
+                    google_request_id=:google_request_id, completed_at=:completed_at
+                WHERE request_uuid=:request_uuid
+            """), {"code": exc.code, "message": str(exc)[:600], "google_request_id": exc.request_id,
+                    "completed_at": _iso(_utcnow()), "request_uuid": request_uuid})
+        raise ApiError(502, str(exc), exc.code, {"google_request_id": exc.request_id}) from exc
+    with eng.begin() as cx:
+        cx.execute(text("""
+            UPDATE google_ads_ip_exclusions
+            SET status=:status, customer_id=:customer_id, google_resource_name=:resource,
+                google_request_id=:google_request_id, completed_at=:completed_at
+            WHERE request_uuid=:request_uuid
+        """), {"status": result["status"], "customer_id": result["customer_id"],
+                "resource": result["resource_name"], "google_request_id": result.get("request_id"),
+                "completed_at": _iso(_utcnow()), "request_uuid": request_uuid})
+    return {**result, "ip_address": address, "manual_approval": True, "request_uuid": request_uuid}
+
+
+@router.delete("/google-ads/ip-exclusions")
+def google_ads_exclusion_remove(payload: GoogleAdsIpExclusionIn, eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
+    site_id = payload.site_id.lower()
+    if site_id not in _allowed_sites():
+        raise ApiError(403, "این سایت برای ثبت رویداد مجاز نیست", "site_not_allowed")
+    try:
+        ip = ipaddress.ip_address(payload.ip_address)
+    except ValueError as exc:
+        raise ApiError(422, "IP معتبر نیست", "invalid_ip") from exc
+    if not ip.is_global:
+        raise ApiError(422, "فقط IP عمومی قابل ثبت است", "non_public_ip")
+    address = str(ip)
+    if payload.confirmation_ip != address:
+        raise ApiError(409, "IP تأیید با IP انتخاب‌شده یکسان نیست", "ip_confirmation_mismatch")
+    current = google_ads_status()
+    if not current["ready"]:
+        raise ApiError(503, "اتصال Google Ads برای رفع بلاک آماده نیست", "google_ads_not_ready")
+    request_uuid = uuid.uuid4().hex
+    with eng.begin() as cx:
+        cx.execute(text("""
+            INSERT INTO google_ads_ip_exclusions
+              (request_uuid, site_id, ip_address, ip_hash, customer_id, source, status, created_at)
+            VALUES (:request_uuid, :site_id, :ip, :ip_hash, :customer_id,
+                    'dashboard_manual_unblock', 'removal_pending', :created_at)
+        """), {"request_uuid": request_uuid, "site_id": site_id, "ip": address,
+                "ip_hash": _ip_hash(address), "customer_id": current["customer_id"],
+                "created_at": _iso(_utcnow())})
+    try:
+        result = remove_ip_in_google_ads(address)
+    except GoogleAdsApiError as exc:
+        with eng.begin() as cx:
+            cx.execute(text("""
+                UPDATE google_ads_ip_exclusions
+                SET status='removal_failed', error_code=:code, error_message=:message,
+                    google_request_id=:google_request_id, completed_at=:completed_at
+                WHERE request_uuid=:request_uuid
+            """), {"code": exc.code, "message": str(exc)[:600],
+                    "google_request_id": exc.request_id, "completed_at": _iso(_utcnow()),
+                    "request_uuid": request_uuid})
+        raise ApiError(502, str(exc), exc.code, {"google_request_id": exc.request_id}) from exc
+    with eng.begin() as cx:
+        cx.execute(text("""
+            UPDATE google_ads_ip_exclusions
+            SET status=:status, google_resource_name=:resource,
+                google_request_id=:google_request_id, completed_at=:completed_at
+            WHERE request_uuid=:request_uuid
+        """), {"status": result["status"], "resource": result["resource_name"],
+                "google_request_id": result.get("request_id"),
+                "completed_at": _iso(_utcnow()), "request_uuid": request_uuid})
+    return {**result, "ip_address": address, "manual_approval": True, "request_uuid": request_uuid}
+
 @router.post("/events", status_code=202)
 def collect_event(payload: AdsEventIn, eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
     site_id = payload.site_id.strip().lower()
@@ -774,16 +936,21 @@ def live_alerts(site_id: str = Query(default="modirankhodro-emdad.com", min_leng
             ORDER BY click_ids DESC, last_seen DESC LIMIT 10
         """), {"site_id": site_id, "five": five_minutes}).mappings()]
         ad_entries = [dict(row) for row in cx.execute(text("""
-            SELECT MAX(id) AS id, MAX(received_at) AS received_at,
-                   MAX(landing_path) AS landing_path, MAX(ip_hash) AS ip_hash
-            FROM ads_click_events
-            WHERE site_id=:site_id AND received_at>=:current
-              AND (COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>'')
-            GROUP BY CASE
-                WHEN COALESCE(gclid,'')<>'' THEN 'g:' || gclid
-                WHEN COALESCE(gbraid,'')<>'' THEN 'b:' || gbraid
-                ELSE 'w:' || wbraid END
-            ORDER BY id DESC LIMIT 20
+            WITH first_landing AS (
+                SELECT MIN(id) AS id
+                FROM ads_click_events
+                WHERE site_id=:site_id AND event_type='landing'
+                  AND (COALESCE(gclid,'')<>'' OR COALESCE(gbraid,'')<>'' OR COALESCE(wbraid,'')<>'')
+                GROUP BY CASE
+                    WHEN COALESCE(gclid,'')<>'' THEN 'g:' || gclid
+                    WHEN COALESCE(gbraid,'')<>'' THEN 'b:' || gbraid
+                    ELSE 'w:' || wbraid END
+            )
+            SELECT e.id, e.received_at, e.landing_path, e.ip_hash
+            FROM ads_click_events AS e
+            JOIN first_landing AS first ON first.id=e.id
+            WHERE e.received_at>=:current
+            ORDER BY e.id DESC LIMIT 20
         """), {"site_id": site_id, "current": fifteen_minutes}).mappings()]
         current = dict(cx.execute(text("""
             SELECT COUNT(DISTINCT CASE
@@ -1078,7 +1245,9 @@ def events(hours: int = Query(default=24, ge=0, le=87_600), limit: int = Query(d
            eng: Engine = Depends(ads_engine)) -> dict[str, Any]:
     with eng.connect() as cx:
         rows, total = _event_rows(cx, site_id, hours, limit, offset, event_type, q, attribution)
+    numbers = visitor_numbers(eng, site_id, _cutoff(0))
     for row in rows:
+        row["visitor_number"] = numbers.get(visitor_identity_hash(row))
         row.pop("metadata_json", None)
     return {
         "generated_at": _iso(_utcnow()), "site_id": site_id, "hours": hours,

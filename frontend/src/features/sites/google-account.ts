@@ -27,7 +27,8 @@ export function googleAccountView(s: Partial<GoogleAccountStatus> | null | undef
     email: s?.email ?? null,
     permissions: [
       { key: 'gsc', fa: 'Search Console (فقط‌خواندنی)', granted: Boolean(s?.gsc_scope) },
-      { key: 'ga4', fa: 'Google Analytics (فقط‌خواندنی)', granted: Boolean(s?.ga4_scope) }
+      { key: 'ga4', fa: 'Google Analytics (فقط‌خواندنی)', granted: Boolean(s?.ga4_scope) },
+      { key: 'ads', fa: 'Google Ads (خواندن و مدیریت)', granted: Boolean(s?.ads_scope) }
     ],
     hint: state === 'no_client'
       ? 'در Google Auth Platform یک OAuth Client از نوع «Web application» بسازید و نشانی بازگشت نمایش‌داده‌شده را در Authorized redirect URIs ثبت کنید.'
@@ -37,6 +38,8 @@ export function googleAccountView(s: Partial<GoogleAccountStatus> | null | undef
         ? 'مجوز ذخیره‌شده حفظ شده است؛ اتصال شبکه را بررسی کنید و چند دقیقه دیگر وضعیت را تازه کنید.'
       : state === 'connected' && !s?.ga4_scope
         ? 'توکن فعلی اسکوپ GA4 ندارد؛ برای فعال‌شدن GA4 یک‌بار «اتصال دوباره» بزنید'
+        : state === 'connected' && !s?.ads_scope
+          ? 'برای آمار Ads باید «اتصال دوباره» را بزنید و مجوز Google Ads را در گوگل تأیید کنید'
         : null
   };
 }

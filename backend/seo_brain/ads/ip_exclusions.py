@@ -34,7 +34,7 @@ class GoogleAdsApiError(RuntimeError):
 
 @dataclass(frozen=True)
 class AdsConfig:
-    developer_token: str
+    developer_token: str | None
     customer_id: str
     login_customer_id: str | None = None
 
@@ -59,8 +59,6 @@ def _config() -> AdsConfig:
     token = _secret_or_env("google-ads-developer-token", "GOOGLE_ADS_DEVELOPER_TOKEN")
     customer_id = _customer_id(_secret_or_env("google-ads-customer-id", "GOOGLE_ADS_CUSTOMER_ID"))
     login_customer_id = _customer_id(_secret_or_env("google-ads-login-customer-id", "GOOGLE_ADS_LOGIN_CUSTOMER_ID"))
-    if not token:
-        raise GoogleAdsApiError("Developer Token گوگل ادز هنوز تنظیم نشده است", code="developer_token_missing")
     if not customer_id:
         raise GoogleAdsApiError("Customer ID ده‌رقمی گوگل ادز تنظیم نشده است", code="customer_id_missing")
     return AdsConfig(token, customer_id, login_customer_id)
@@ -82,7 +80,9 @@ def status() -> dict[str, Any]:
     customer_id = _customer_id(_secret_or_env("google-ads-customer-id", "GOOGLE_ADS_CUSTOMER_ID"))
     login_customer_id = _customer_id(_secret_or_env("google-ads-login-customer-id", "GOOGLE_ADS_LOGIN_CUSTOMER_ID"))
     oauth_scope = _oauth_has_ads_scope()
-    configured = bool(token and customer_id)
+    # Google Ads moved API access levels to Google Cloud projects in September
+    # 2026; the developer-token header is optional and ignored by the API.
+    configured = bool(customer_id)
     return {
         "ready": bool(configured and oauth_scope),
         "configured": configured,
@@ -122,9 +122,10 @@ def _error_message(response: httpx.Response) -> tuple[str, str]:
 def _headers(config: AdsConfig, access_token: str) -> dict[str, str]:
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "developer-token": config.developer_token,
         "Content-Type": "application/json",
     }
+    if config.developer_token:
+        headers["developer-token"] = config.developer_token
     if config.login_customer_id:
         headers["login-customer-id"] = config.login_customer_id
     return headers
@@ -155,7 +156,30 @@ def _request(client: httpx.Client, method: str, url: str, *, headers: dict[str, 
 
 
 def _existing_ip_resource(client: httpx.Client, config: AdsConfig, headers: dict[str, str], ip: str) -> str | None:
-    # ip is parsed by ipaddress before interpolation and therefore cannot alter GAQL.
+    return list_ip_exclusions(client=client, config=config, headers=headers).get(ip)
+
+
+def _normalized_exclusion_ip(address: str) -> str:
+    """Google reports an exact IPv4/IPv6 exclusion as /32 or /128."""
+    try:
+        network = ipaddress.ip_network(address, strict=False)
+        if network.prefixlen == network.max_prefixlen:
+            return str(network.network_address)
+        return str(network)
+    except ValueError:
+        return address
+
+
+def list_ip_exclusions(*, client: httpx.Client | None = None, config: AdsConfig | None = None,
+                       headers: dict[str, str] | None = None) -> dict[str, str]:
+    """Read the account's actual IP exclusions, including ones added outside SEO Brain."""
+    config = config or _config()
+    if headers is None:
+        headers = _headers(config, _access_token(_credentials()))
+    owned_client = client is None
+    client = client or httpx.Client(timeout=45.0, follow_redirects=True,
+                                    proxy=_proxy_from_environment(), trust_env=False)
+    # The query is fixed; visitor input is matched only after the response arrives.
     query = (
         "SELECT customer_negative_criterion.resource_name, "
         "customer_negative_criterion.ip_block.ip_address "
@@ -164,19 +188,27 @@ def _existing_ip_resource(client: httpx.Client, config: AdsConfig, headers: dict
     )
     url = f"{API_BASE}/customers/{config.customer_id}/googleAds:search"
     page_token: str | None = None
-    while True:
-        body: dict[str, Any] = {"query": query, "pageSize": 1000}
-        if page_token:
-            body["pageToken"] = page_token
-        response = _request(client, "POST", url, headers=headers, body=body)
-        payload = response.json()
-        for result in payload.get("results") or []:
-            criterion = result.get("customerNegativeCriterion") or {}
-            if (criterion.get("ipBlock") or {}).get("ipAddress") == ip:
-                return criterion.get("resourceName")
-        page_token = payload.get("nextPageToken")
-        if not page_token:
-            return None
+    items: dict[str, str] = {}
+    try:
+        while True:
+            # Google Ads Search uses a fixed page size; v25 rejects pageSize.
+            body: dict[str, Any] = {"query": query}
+            if page_token:
+                body["pageToken"] = page_token
+            response = _request(client, "POST", url, headers=headers, body=body)
+            payload = response.json()
+            for result in payload.get("results") or []:
+                criterion = result.get("customerNegativeCriterion") or {}
+                address = (criterion.get("ipBlock") or {}).get("ipAddress")
+                resource = criterion.get("resourceName")
+                if address and resource:
+                    items[_normalized_exclusion_ip(address)] = resource
+            page_token = payload.get("nextPageToken")
+            if not page_token:
+                return items
+    finally:
+        if owned_client:
+            client.close()
 
 
 def exclude_ip(ip_address: str) -> dict[str, Any]:
@@ -228,4 +260,40 @@ def exclude_ip(ip_address: str) -> dict[str, Any]:
         }
     finally:
         client.close()
+
+
+def remove_ip(ip_address: str) -> dict[str, Any]:
+    """Remove only the exact account-level IP exclusion currently held by Google."""
+    try:
+        ip = str(ipaddress.ip_address(ip_address.strip()))
+    except ValueError as exc:
+        raise GoogleAdsApiError("IP معتبر نیست", code="invalid_ip") from exc
+
+    config = _config()
+    headers = _headers(config, _access_token(_credentials()))
+    with httpx.Client(timeout=45.0, follow_redirects=True,
+                      proxy=_proxy_from_environment(), trust_env=False) as client:
+        resource = _existing_ip_resource(client, config, headers, ip)
+        if not resource:
+            return {
+                "status": "already_removed", "customer_id": config.customer_id,
+                "resource_name": None, "request_id": None,
+            }
+        expected_prefix = f"customers/{config.customer_id}/customerNegativeCriteria/"
+        if not resource.startswith(expected_prefix):
+            raise GoogleAdsApiError("شناسه exclusion با حساب گوگل تطابق ندارد", code="resource_account_mismatch")
+        url = f"{API_BASE}/customers/{config.customer_id}/customerNegativeCriteria:mutate"
+        response = _request(client, "POST", url, headers=headers, body={
+            "operations": [{"remove": resource}],
+            "partialFailure": False,
+            "validateOnly": False,
+            "responseContentType": "RESOURCE_NAME_ONLY",
+        })
+        results = response.json().get("results") or []
+        if not results or results[0].get("resourceName") != resource:
+            raise GoogleAdsApiError("گوگل حذف IP exclusion را تأیید نکرد", code="google_ads_empty_result")
+        return {
+            "status": "removed", "customer_id": config.customer_id,
+            "resource_name": resource, "request_id": response.headers.get("request-id"),
+        }
 

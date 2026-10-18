@@ -8,10 +8,9 @@ export const dynamic = 'force-dynamic';
 export const metadata = { title: 'داشبورد' };
 
 export default async function OverviewPage() {
-  const [health, portfolio, inbox] = await Promise.all([
-    settle(endpoints.health()),
+  const [portfolio, inbox] = await Promise.all([
     settle(endpoints.portfolioOverview()),
-    settle(endpoints.actionInbox({ limit: 3 }))
+    settle(endpoints.actionInbox({ limit: 4 }))
   ]);
 
   if (!portfolio.error && portfolio.data.totals.sites === 0) {
@@ -19,11 +18,11 @@ export default async function OverviewPage() {
   }
 
   return (
-    <PageContainer pageTitle='داشبورد' pageDescription='مرکز کنترل وضعیت و اقدام‌های بعدی در تمام سایت‌ها'>
+    <PageContainer>
       {portfolio.error ? (
         <BackendError error={portfolio.error} />
       ) : (
-        <PortfolioDashboard data={portfolio.data} health={health.data} inbox={inbox.data} />
+        <PortfolioDashboard data={portfolio.data} inbox={inbox.data} />
       )}
     </PageContainer>
   );

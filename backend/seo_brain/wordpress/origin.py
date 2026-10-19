@@ -9,6 +9,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import re
+import secrets
 
 import httpx
 
@@ -60,6 +61,32 @@ def wordpress_rest_transport(url: str) -> PinnedWordPressTransport | None:
     return PinnedWordPressTransport(pinned_host, origin_host, origin_ip)
 
 
+def fresh_rest_params(url: str, params: dict | None = None) -> dict | None:
+    """Bypass the storefront's public REST cache for the configured WordPress host.
+
+    The storefront may serve a successful but stale response when its origin is
+    unreachable. A unique query parameter makes every sync read a cache miss.
+    Other sites retain their existing request and caching behaviour.
+    """
+    fresh_host = (os.getenv("WP_REST_FRESH_HOST") or "").strip().lower()
+    if not fresh_host or httpx.URL(url).host != fresh_host:
+        return params
+    return {**(params or {}), "_seo_brain_refresh": secrets.token_hex(12)}
+
+
+def require_fresh_rest_response(url: str, response: httpx.Response) -> None:
+    """Never record a cached fallback as a successful WordPress sync."""
+    fresh_host = (os.getenv("WP_REST_FRESH_HOST") or "").strip().lower()
+    if not fresh_host or httpx.URL(url).host != fresh_host or response.status_code >= 400:
+        return
+    cache_status = (response.headers.get("x-cache-status") or "").strip().upper()
+    if cache_status and cache_status not in {"MISS", "BYPASS"}:
+        raise RuntimeError(
+            f"WordPress REST freshness check failed on {httpx.URL(url).path}: "
+            f"X-Cache-Status={cache_status}"
+        )
+
+
 def wordpress_get(url: str, *, auth: tuple[str, str] | None = None, timeout: float = 20.0,
                   user_agent: str = "SEO-Brain/0.2 (+local; read-only)") -> httpx.Response:
     """One-shot GET shared by the connection probe and sync URL resolver."""
@@ -67,4 +94,6 @@ def wordpress_get(url: str, *, auth: tuple[str, str] | None = None, timeout: flo
     with httpx.Client(transport=transport, proxy=None if transport else site_proxy(),
                       timeout=timeout, follow_redirects=True, auth=auth,
                       headers={"User-Agent": user_agent}) as client:
-        return client.get(url)
+        response = client.get(url, params=fresh_rest_params(url))
+        require_fresh_rest_response(url, response)
+        return response

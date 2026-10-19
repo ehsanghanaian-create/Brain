@@ -52,7 +52,9 @@ class WordPressClient:
     # -- low level -------------------------------------------------------------
     def get_json(self, route: str, params: dict | None = None) -> tuple[Any, dict]:
         url = self.base + route
-        r = self.http.get(url, params=params, api="wordpress")
+        from .origin import fresh_rest_params, require_fresh_rest_response
+        r = self.http.get(url, params=fresh_rest_params(url, params), api="wordpress")
+        require_fresh_rest_response(url, r)
         if r.status_code >= 400:
             raise WPError(route, r.status_code, r.text[:300])
         return r.json(), dict(r.headers)

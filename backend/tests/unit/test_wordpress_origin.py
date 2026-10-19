@@ -4,7 +4,13 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from seo_brain.wordpress.origin import PinnedWordPressTransport, wordpress_rest_transport
+from seo_brain.wordpress.client import WordPressClient
+from seo_brain.wordpress.origin import (
+    PinnedWordPressTransport,
+    fresh_rest_params,
+    require_fresh_rest_response,
+    wordpress_rest_transport,
+)
 
 
 def test_wordpress_origin_pin_preserves_host_sni_and_redirect(monkeypatch):
@@ -48,3 +54,37 @@ def test_wordpress_origin_pin_requires_explicit_https_configuration(monkeypatch)
     monkeypatch.setenv("WP_REST_ORIGIN_IP", "not-an-ip")
     with pytest.raises(ValueError):
         wordpress_rest_transport("https://api.salimore.com/wp-json/")
+
+
+def test_uncached_rest_reads_are_scoped_and_reject_stale_success(monkeypatch):
+    monkeypatch.setenv("WP_REST_FRESH_HOST", "salimore.com")
+    url = "https://salimore.com/wp-json/wp/v2/posts"
+    first = fresh_rest_params(url, {"per_page": 1})
+    second = fresh_rest_params(url, {"per_page": 1})
+    assert first["per_page"] == second["per_page"] == 1
+    assert first["_seo_brain_refresh"] != second["_seo_brain_refresh"]
+    assert fresh_rest_params("https://another.example/wp-json/", {"per_page": 1}) == {"per_page": 1}
+    require_fresh_rest_response(url, httpx.Response(200, headers={"X-Cache-Status": "MISS"}))
+    require_fresh_rest_response(url, httpx.Response(200))  # uncached routes omit the header
+    with pytest.raises(RuntimeError, match="X-Cache-Status=STALE"):
+        require_fresh_rest_response(url, httpx.Response(200, headers={"X-Cache-Status": "STALE"}))
+    with pytest.raises(RuntimeError, match="X-Cache-Status=HIT"):
+        require_fresh_rest_response(url, httpx.Response(200, headers={"X-Cache-Status": "HIT"}))
+
+
+def test_wordpress_client_uses_freshness_guard_before_accepting_content(monkeypatch):
+    monkeypatch.setenv("WP_REST_FRESH_HOST", "salimore.com")
+    seen = []
+
+    class FakeHttp:
+        def get(self, url, *, params, api):
+            seen.append((url, params, api))
+            return httpx.Response(200, headers={"X-Cache-Status": "STALE"}, json=[])
+
+    client = object.__new__(WordPressClient)
+    client.base = "https://salimore.com/wp-json"
+    client.http = FakeHttp()
+    with pytest.raises(RuntimeError, match="STALE"):
+        client.get_json("/wp/v2/posts", {"per_page": 1})
+    assert seen[0][1]["per_page"] == 1
+    assert seen[0][1]["_seo_brain_refresh"]

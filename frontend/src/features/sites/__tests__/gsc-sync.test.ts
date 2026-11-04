@@ -20,10 +20,11 @@ describe('GSC Sync Card helpers', () => {
     expect(v.dateRange).toBeNull();
   });
 
-  it('not authorized → disabled with auth-only hint; status label', () => {
+  it('not authorized → disabled with account reconnect hint; status label', () => {
     const v = gscSyncView({ status: 'not_authorized', property: 'sc-domain:example.com', authorized: false, coverage });
     expect(v.canSync).toBe(false);
-    expect(v.syncDisabledReason).toContain('auth-only');
+    expect(v.syncDisabledReason).toContain('حساب گوگل');
+    expect(v.syncDisabledReason).not.toContain('auth-only');
     expect(v.statusFa).toBe('بدون مجوز Google');
   });
 

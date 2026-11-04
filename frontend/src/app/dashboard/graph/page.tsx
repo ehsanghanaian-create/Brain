@@ -19,7 +19,7 @@ export default async function GraphPage({ searchParams }: { searchParams: Promis
   const list = sites.data!;
   const initial = list.find((s) => s.site_id === site)?.site_id ?? list[0]?.site_id;
   return (
-    <PageContainer pageTitle='نقشه تصمیم سایت' pageDescription='یک سؤال انتخاب کنید، شواهد مرتبط را در گراف ببینید و از همان‌جا وارد اقدام شوید.'>
+    <PageContainer>
       {!initial ? <p className='text-muted-foreground text-sm'>ابتدا یک سایت بسازید.</p> : <CommandCenter sites={list} portfolio={portfolio.data ?? null} initialSiteId={initial} initialMode={mode && ['seo', 'content', 'links', 'planner'].includes(mode) ? mode as 'seo' | 'content' | 'links' | 'planner' : 'seo'} />}
     </PageContainer>
   );

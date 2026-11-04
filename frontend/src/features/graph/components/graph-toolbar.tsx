@@ -57,25 +57,25 @@ export function GraphToolbar({
   const activeFilters = state.familyOff.size + state.relationOff.size;
 
   return (
-    <section className='bg-card overflow-hidden rounded-xl border shadow-sm'>
-      <div className='flex flex-col gap-3 p-3'>
+    <section className='graph-panel overflow-hidden rounded-2xl'>
+      <div className='flex flex-col gap-3 p-3 sm:p-4'>
         <div className='flex flex-col gap-3 xl:flex-row xl:items-center'>
           <div className='flex min-w-0 flex-wrap items-center gap-2'>
-            <NativeSelect value={state.siteId} onChange={(event) => onChange({ siteId: event.target.value })} className='w-48' aria-label='سایت'>
+            <NativeSelect value={state.siteId} onChange={(event) => onChange({ siteId: event.target.value })} className='w-full min-w-40 sm:w-48' aria-label='سایت'>
               {sites.map((site) => <NativeSelectOption key={site.site_id} value={site.site_id}>{site.name}</NativeSelectOption>)}
             </NativeSelect>
           </div>
 
           <form className='relative flex min-w-0 flex-1 items-center gap-1' onSubmit={(event) => { event.preventDefault(); onSearchSubmit(); }}>
             <IconSearch className='text-muted-foreground pointer-events-none absolute right-3 size-4' aria-hidden='true' />
-            <Input value={state.query} onChange={(event) => onChange({ query: event.target.value })} placeholder='عنوان صفحه، URL، کلمه کلیدی یا موجودیت…' className='min-w-0 pr-9 pl-20' />
+            <Input value={state.query} onChange={(event) => onChange({ query: event.target.value })} placeholder='جست‌وجوی صفحه، کلمه یا مشکل…' className='min-h-11 min-w-0 bg-background pr-9 pl-20' aria-label='جست‌وجوی گراف' />
             {state.query && <Button type='button' size='icon-sm' variant='ghost' className='absolute left-12' onClick={() => onChange({ query: '' })} aria-label='پاک کردن جست‌وجو'><IconX /></Button>}
             <Button type='submit' size='sm' variant='secondary' className='absolute left-1'>{matches ? `${matches.toLocaleString('fa-IR')} نتیجه` : 'یافتن'}</Button>
           </form>
         </div>
 
-        <div className='flex flex-wrap items-center gap-2 border-t pt-3'>
-          <div className='text-muted-foreground min-w-0 flex-1 text-xs leading-5'>
+        <div className='flex flex-wrap items-center gap-2 border-t border-border pt-3'>
+          <div className='text-muted-foreground min-w-0 basis-full text-xs leading-5 break-words sm:basis-auto sm:flex-1'>
             <span className='font-semibold text-foreground'>{selectedLabel ? 'گره انتخابی:' : 'راهنمای نقشه:'}</span>{' '}
             {selectedLabel || 'یک گره را انتخاب کنید تا شواهد آن را ببینید؛ فلش جهت رابطهٔ ثبت‌شده است.'}
           </div>
@@ -85,19 +85,19 @@ export function GraphToolbar({
             </Button>
           )}
           <Button size='sm' variant='outline' onClick={onFit}><IconArrowsMaximize /> جا دادن در صفحه</Button>
-          <Badge variant='secondary' className='h-8 px-3 tabular-nums'>
+          <Badge variant='secondary' className='min-h-9 border border-border px-3 tabular-nums'>
             {loading ? 'در حال بارگذاری…' : view ? `${view.nodes.length.toLocaleString('fa-IR')} گره · ${view.edges.length.toLocaleString('fa-IR')} رابطه${view.truncated ? ` از ${view.total_nodes.toLocaleString('fa-IR')}` : ''}` : 'بدون داده'}
           </Badge>
         </div>
       </div>
 
-      <details className='group border-t'>
-        <summary className='hover:bg-muted/40 flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium'>
+      <details className='group border-t border-border'>
+        <summary className='flex min-h-11 cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-xs font-medium transition-colors hover:bg-muted'>
           <IconAdjustmentsHorizontal className='size-4' /> فیلتر و چیدمان پیشرفته
           {activeFilters > 0 && <Badge variant='destructive'>{activeFilters.toLocaleString('fa-IR')} فیلتر فعال</Badge>}
-          <span className='text-muted-foreground ms-auto'>برای نمای ساده نیازی به باز کردن این بخش نیست</span>
+          <span className='text-muted-foreground ms-auto'>چیدمان، نوع گره و رابطه</span>
         </summary>
-        <div className='space-y-3 border-t bg-muted/15 p-3'>
+        <div className='space-y-3 border-t border-border bg-muted/30 p-3 sm:p-4'>
           <div className='flex flex-wrap items-center gap-2'>
             <span className='text-muted-foreground text-xs'>چیدمان نقشه</span>
             <div className='flex overflow-x-auto rounded-lg border bg-muted/20 p-1' role='tablist' aria-label='چیدمان گراف'>

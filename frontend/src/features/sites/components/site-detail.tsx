@@ -48,6 +48,16 @@ export function SiteDetail({ site, connections, memory, graph, mission, portfoli
   const [gscRefresh, setGscRefresh] = useState(0);
   const [ga4Refresh, setGa4Refresh] = useState(0);
   const [tab, setTab] = useState<SiteTab>(validTabs.has(initialTab as SiteTab) ? initialTab as SiteTab : 'overview');
+  const integrationHealth = useQuery({
+    queryKey: ['integration-health', site.site_id, gscRefresh, ga4Refresh],
+    queryFn: () => endpoints.integrations(site.site_id),
+    refetchInterval: 60_000
+  });
+  const connectionStatus = (kind: 'wordpress' | 'gsc' | 'ga4') => {
+    const current = integrationHealth.data?.integrations.find((item) => item.kind === kind);
+    if (!current) return undefined;
+    return current.authorized === false ? 'not_authorized' : current.connection.status;
+  };
 
   function changeTab(next: string) {
     const value = next as SiteTab;
@@ -86,13 +96,12 @@ export function SiteDetail({ site, connections, memory, graph, mission, portfoli
   }
 
   const category = BUSINESS_CATEGORIES.find((c) => c.value === site.business_type)?.label ?? site.business_type ?? '—';
-  const connectionEntries = [connections.status.wordpress, connections.status.gsc, connections.status.ga4];
-  const connected = connectionEntries.filter((c) => c?.ok).length;
+  const connected = (['wordpress', 'gsc', 'ga4'] as const).filter((kind) => connectionStatus(kind) === 'ok').length;
   const readiness = portfolioSite?.setup_progress;
 
   return (
     <Tabs value={tab} onValueChange={changeTab} className='gap-5'>
-      <div className='sticky top-14 z-20 -mx-4 border-y bg-background/95 px-4 py-2 backdrop-blur md:-mx-6 md:px-6'>
+      <div className='sticky top-14 z-20 -mx-4 border-y bg-background px-4 py-2 md:-mx-6 md:px-6'>
         <TabsList variant='line' className='h-10 max-w-full justify-start overflow-x-auto'>
           <TabsTrigger value='overview'><IconActivity />نمای کلی</TabsTrigger>
           <TabsTrigger value='urls'><IconWorld />صفحات سایت</TabsTrigger>
@@ -121,7 +130,7 @@ export function SiteDetail({ site, connections, memory, graph, mission, portfoli
               <p className='mt-3 max-w-2xl text-sm leading-7 text-muted-foreground'>{portfolioSite ? `قدم بعدی: ${portfolioSite.next_action}. ${portfolioSite.state_reason}` : 'سلامت داده‌ها، اتصال سرویس‌ها و عملیات این سایت را از اینجا بررسی کنید.'}</p>
             </div>
             <div className='grid grid-cols-3 gap-2 text-center'>
-              <MiniMetric label='اتصال فعال' value={`${connected.toLocaleString('fa-IR')} از ۳`} />
+              <MiniMetric label='اتصال تأییدشده' value={integrationHealth.data ? `${connected.toLocaleString('fa-IR')} از ۳` : '—'} />
               <MiniMetric label='گره گراف' value={graph ? fa.format(graph.nodes) : '—'} />
               <MiniMetric label='یال گراف' value={graph ? fa.format(graph.edges) : '—'} />
             </div>
@@ -133,9 +142,7 @@ export function SiteDetail({ site, connections, memory, graph, mission, portfoli
             <CardHeader><CardTitle className='text-base'>وضعیت راه‌اندازی</CardTitle><CardDescription>موارد لازم برای استفاده کامل از اطلاعات زنده سایت</CardDescription></CardHeader>
             <CardContent className='grid gap-2 sm:grid-cols-2'>
               <CheckItem ok={Boolean(site.workspace_path)} title='فضای کاری سایت' detail={site.workspace_path ? 'آماده است' : 'نیاز به راه‌اندازی دارد'} onClick={() => changeTab('settings')} />
-              <CheckItem ok={Boolean(connections.status.wordpress?.ok)} title='وردپرس' detail={connections.status.wordpress?.message ?? 'بررسی نشده'} onClick={() => changeTab('integrations')} />
-              <CheckItem ok={Boolean(connections.status.gsc?.ok)} title='Search Console' detail={connections.status.gsc?.message ?? 'بررسی نشده'} onClick={() => changeTab('integrations')} />
-              <CheckItem ok={Boolean(connections.status.ga4?.ok)} title='Google Analytics' detail={connections.status.ga4?.message ?? 'بررسی نشده'} onClick={() => changeTab('integrations')} />
+              {(['wordpress', 'gsc', 'ga4'] as const).map((kind) => <CheckItem key={kind} ok={connectionStatus(kind) === 'ok'} title={{ wordpress: 'وردپرس', gsc: 'Search Console', ga4: 'Google Analytics' }[kind]} detail={connectionStatus(kind) === 'not_authorized' ? 'دسترسی نیازمند اتصال دوباره است' : connectionStatus(kind) === 'ok' ? 'دسترسی ثبت شده است؛ تازگی داده را در اتصال‌ها بررسی کنید' : 'دسترسی تأیید نشده؛ اتصال‌ها را بررسی کنید'} onClick={() => changeTab('integrations')} />)}
             </CardContent>
           </Card>
           <Card>
@@ -161,9 +168,9 @@ export function SiteDetail({ site, connections, memory, graph, mission, portfoli
         <div className='flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-card p-4'>
           <div><h2 className='font-medium'>مرکز اتصال داده‌ها</h2><p className='mt-1 text-sm text-muted-foreground'>اتصال، تست و همگام‌سازی هر منبع مستقل است؛ قطع یک سرویس بقیه را متوقف نمی‌کند.</p></div>
           <div className='flex flex-wrap gap-2 text-xs'>
-            <span>WordPress <StatusBadge status={connections.status.wordpress?.status} /></span>
-            <span>GSC <StatusBadge status={connections.status.gsc?.status} /></span>
-            <span>GA4 <StatusBadge status={connections.status.ga4?.status} /></span>
+            <span>WordPress <StatusBadge status={connectionStatus('wordpress')} /></span>
+            <span>GSC <StatusBadge status={connectionStatus('gsc')} /></span>
+            <span>GA4 <StatusBadge status={connectionStatus('ga4')} /></span>
           </div>
         </div>
         <div className='grid items-start gap-4 xl:grid-cols-2'>

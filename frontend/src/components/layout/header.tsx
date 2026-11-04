@@ -21,7 +21,7 @@ export default function Header() {
     return () => window.removeEventListener('keydown', h);
   }, [setOpen]);
   return (
-    <header className='bg-background/70 sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between gap-2 border-b backdrop-blur-md'>
+    <header className='bg-background sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between gap-2 border-b'>
       <div className='flex min-w-0 items-center gap-2 px-3 md:px-4'>
         <SidebarTrigger className='-ms-1' />
         <Separator orientation='vertical' className='me-2 h-4 data-vertical:self-center' />

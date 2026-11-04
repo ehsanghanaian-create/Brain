@@ -1,0 +1,56 @@
+.seo-graph-shell {
+  min-width: 0;
+  width: 100%;
+  color: var(--foreground);
+}
+
+.seo-graph-shell .graph-panel {
+  min-width: 0;
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+}
+
+.seo-graph-shell .graph-panel-muted,
+.seo-graph-shell .graph-map-legend {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+}
+
+.seo-graph-shell .graph-map {
+  background: var(--background);
+}
+
+.seo-graph-shell .react-flow__controls,
+.seo-graph-shell .react-flow__minimap {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: 0 2px 8px rgb(15 23 42 / 0.1);
+}
+
+.seo-graph-shell .react-flow__controls-button {
+  background: var(--card);
+  color: var(--foreground);
+  border-color: var(--border);
+}
+
+.seo-graph-shell .react-flow__controls-button:hover { background: var(--muted); }
+.seo-graph-shell .react-flow__controls-button svg { fill: currentColor; }
+.seo-graph-shell .react-flow__node.selected .seo-node { animation: none; }
+
+.seo-graph-shell :is(button, a, input, select, summary):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .seo-graph-shell .react-flow__minimap { display: none; }
+  .seo-graph-shell .graph-map { min-height: 420px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seo-graph-shell .react-flow__node { transition: none; }
+}

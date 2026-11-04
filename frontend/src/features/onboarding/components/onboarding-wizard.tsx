@@ -122,9 +122,8 @@ export function OnboardingWizard() {
   };
 
   return (
-    <div className='mx-auto grid w-full max-w-[calc(100vw-2rem)] gap-6 lg:max-w-[calc(100vw-11rem)] 2xl:max-w-6xl'>
-      <section className='relative overflow-hidden rounded-2xl border bg-gradient-to-l from-primary/10 via-card to-card p-6 shadow-sm md:p-8'>
-        <div className='pointer-events-none absolute -left-16 -top-20 size-56 rounded-full bg-primary/10 blur-3xl' />
+    <div className='mx-auto grid w-full min-w-0 max-w-screen-2xl gap-5'>
+      <section className='rounded-2xl border border-border bg-card p-5 shadow-sm md:p-7'>
         <div className='relative flex flex-col justify-between gap-5 lg:flex-row lg:items-end'>
           <div className='max-w-2xl space-y-3'>
             <Badge variant='secondary' className='gap-1.5'>
@@ -140,7 +139,7 @@ export function OnboardingWizard() {
               </p>
             </div>
           </div>
-          <div className='min-w-52 rounded-xl border bg-background/70 p-4 backdrop-blur'>
+          <div className='min-w-52 rounded-xl border border-border bg-muted/40 p-4'>
             <div className='mb-2 flex items-center justify-between text-sm'>
               <span>پیشرفت راه‌اندازی</span>
               <b>{step + 1} از ۴</b>
@@ -162,7 +161,7 @@ export function OnboardingWizard() {
               disabled={!complete}
               onClick={() => complete && setStep(index)}
               className={cn(
-                'flex items-center gap-3 rounded-xl border p-3 text-right transition-colors',
+                'flex min-h-16 min-w-0 items-center gap-3 rounded-xl border p-3 text-right transition-colors',
                 active && 'border-primary bg-primary/10',
                 complete && 'cursor-pointer bg-muted/40 hover:bg-muted',
                 !active && !complete && 'opacity-60'
@@ -188,7 +187,7 @@ export function OnboardingWizard() {
         })}
       </nav>
 
-      <div className='grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_280px]'>
+      <div className='grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_280px]'>
         <main>
           {step === 0 && <StepGoogle onReady={() => setStep(1)} />}
           {step === 1 && (
@@ -229,7 +228,7 @@ export function OnboardingWizard() {
           )}
         </main>
 
-        <aside className='grid gap-3 lg:sticky lg:top-20'>
+        <aside className='grid gap-3 xl:sticky xl:top-20'>
           <Card>
             <CardHeader className='pb-3'>
               <CardTitle className='text-base'>خلاصه راه‌اندازی</CardTitle>

@@ -44,7 +44,7 @@ export function gscSyncView(s: Partial<GscSyncStatus> | null | undefined, opts: 
     syncDisabledReason: !configured
       ? 'ابتدا property سرچ‌کنسول را وصل و تست کنید'
       : !authorized
-        ? 'توکن Google موجود نیست؛ یک‌بار «sync-gsc.py --auth-only» را اجرا کنید'
+        ? 'از کارت «حساب گوگل» اتصال دوباره را انجام دهید، سپس همگام‌سازی را اجرا کنید'
         : running
           ? 'همگام‌سازی در حال اجراست'
           : null,

@@ -30,9 +30,11 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useState } from 'react';
+import { SearchDataHealth } from '@/features/sites/components/search-data-health';
 import { toast } from 'sonner';
 
 const fa = new Intl.NumberFormat('fa-IR');
+
 const statusOrder: PortfolioSiteState[] = [
   'attention',
   'partial',
@@ -147,31 +149,27 @@ function FocusSite({
     <section
       id='focus-site-panel'
       aria-labelledby='focus-site-title'
-      className='relative min-w-0 scroll-mt-20 overflow-hidden rounded-[28px] bg-slate-950 p-5 text-white shadow-[0_18px_50px_-32px_rgba(15,23,42,.8)] sm:p-7'
+      className='relative min-w-0 scroll-mt-20 rounded-2xl border border-border bg-card p-4 text-card-foreground shadow-sm sm:p-6'
     >
-      <div
-        aria-hidden='true'
-        className='pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_10%_0%,rgba(45,212,191,.18),transparent_44%)]'
-      />
       <div className='relative flex h-full flex-col'>
         <div className='flex flex-wrap items-start justify-between gap-4'>
           <div className='space-y-1'>
-            <p className='text-[11px] font-bold tracking-[.18em] text-teal-300'>
+            <p className='text-xs font-semibold text-teal-700 dark:text-teal-300'>
               سایت در کانون توجه
             </p>
             <h2 id='focus-site-title' className='text-xl font-bold sm:text-2xl'>
               {site.name}
             </h2>
-            <p dir='ltr' className='text-left text-xs text-slate-400'>
+            <p dir='ltr' className='text-left text-xs text-muted-foreground'>
               {domain(site.canonical_url)}
             </p>
           </div>
-          <label className='w-full max-w-60 text-xs text-slate-300 sm:w-auto sm:min-w-48'>
+          <label className='w-full text-xs text-muted-foreground sm:w-auto sm:min-w-48'>
             <span className='mb-1.5 block'>انتخاب سایت</span>
             <select
               value={site.site_id}
               onChange={(event) => onSelect(event.target.value)}
-              className='h-10 w-full rounded-xl border border-white/20 bg-slate-900 px-3 text-sm text-white outline-none focus-visible:ring-2 focus-visible:ring-teal-300'
+              className='min-h-11 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
             >
               {sites.map((item) => (
                 <option key={item.site_id} value={item.site_id}>
@@ -182,40 +180,40 @@ function FocusSite({
           </label>
         </div>
 
-        <div className='mt-6 flex flex-wrap items-center gap-2'>
-          <span className='inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-[11px] font-medium text-white'>
+        <div className='mt-4 flex flex-wrap items-center gap-2'>
+          <span className='inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-medium'>
             <span className={cn('size-1.5 rounded-full', status[site.state].dot)} />
             {status[site.state].label}
           </span>
-          <span className='text-xs text-slate-400'>
+          <span className='text-xs text-muted-foreground'>
             آخرین اجرا: {formatDate(site.latest_sync?.finished_at ?? site.latest_sync?.started_at)}
           </span>
         </div>
-        <div className='mt-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(220px,.75fr)]'>
-          <div className='rounded-2xl border border-white/10 bg-white/[.06] p-4'>
-            <p className='text-xs text-slate-400'>هدف ثبت‌شده</p>
-            <p className='mt-1.5 line-clamp-2 min-h-12 text-base font-semibold leading-6'>
+        <div className='mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(220px,.75fr)]'>
+          <div className='min-w-0 rounded-xl border border-border bg-background p-4'>
+            <p className='text-xs text-muted-foreground'>هدف ثبت‌شده</p>
+            <p className='mt-1.5 text-sm font-semibold leading-6'>
               {site.mission?.objective || 'برای این سایت هنوز هدف کاری ثبت نشده است.'}
             </p>
-            <p className='mt-2 text-xs leading-5 text-slate-400'>
+            <p className='mt-2 text-xs leading-5 text-muted-foreground'>
               {site.mission?.success_metric
                 ? `معیار موفقیت: ${site.mission.success_metric}`
                 : 'معیار موفقیت را در پروندهٔ سایت مشخص کنید.'}
             </p>
           </div>
-          <div className='rounded-2xl border border-teal-300/20 bg-teal-300/[.08] p-4'>
-            <p className='text-xs text-teal-200'>اقدام بعدی</p>
-            <p className='mt-1.5 min-h-12 text-base font-semibold leading-6'>{nextAction(site)}</p>
+          <div className='min-w-0 rounded-xl border border-teal-600/25 bg-teal-500/[.06] p-4'>
+            <p className='text-xs text-teal-700 dark:text-teal-300'>اقدام بعدی</p>
+            <p className='mt-1.5 text-sm font-semibold leading-6'>{nextAction(site)}</p>
             <Link
               href={nextActionHref(site)}
-              className='mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-teal-200 underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300'
+              className='mt-2 inline-flex min-h-10 items-center gap-1.5 text-sm font-semibold text-teal-700 underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-teal-300'
             >
               رفتن به محل اقدام <IconArrowLeft className='size-4' aria-hidden='true' />
             </Link>
           </div>
         </div>
 
-        <div className='mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4'>
+        <div className='mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4'>
           {(
             [
               ['محتوا', site.counts.content],
@@ -226,31 +224,31 @@ function FocusSite({
           ).map(([label, value]) => (
             <div
               key={label}
-              className='rounded-xl border border-white/10 bg-white/[.04] px-3 py-2.5'
+              className='rounded-xl border border-border bg-background px-3 py-2.5'
             >
               <strong className='block text-xl font-bold tabular-nums'>{fa.format(value)}</strong>
-              <span className='text-[11px] text-slate-400'>{label}</span>
+              <span className='text-xs text-muted-foreground'>{label}</span>
             </div>
           ))}
         </div>
-        <div className='mt-auto pt-6'>
+        <div className='mt-auto pt-4'>
           <div className='flex items-center justify-between gap-3 text-xs'>
-            <span className='text-slate-300'>آمادگی داده و گراف</span>
+            <span className='text-muted-foreground'>آمادگی داده و گراف</span>
             <strong className='tabular-nums'>{fa.format(site.setup_progress)}٪</strong>
           </div>
-          <div className='mt-2 h-1.5 overflow-hidden rounded-full bg-white/15'>
+          <div className='mt-2 h-1.5 overflow-hidden rounded-full bg-muted'>
             <div
-              className='h-full rounded-full bg-teal-300 transition-[width] duration-300 motion-reduce:transition-none'
+              className='h-full rounded-full bg-teal-600 transition-[width] duration-300 motion-reduce:transition-none'
               style={{ width: `${Math.min(100, Math.max(0, site.setup_progress))}%` }}
             />
           </div>
-          <ol className='mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-300 sm:grid-cols-4'>
+          <ol className='mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground sm:grid-cols-4'>
             {steps.map(([label, done]) => (
               <li key={label} className='flex items-center gap-1.5'>
                 <span
                   className={cn(
                     'flex size-4 shrink-0 items-center justify-center rounded-full',
-                    done ? 'bg-teal-300 text-slate-950' : 'border border-white/30 text-slate-400'
+                    done ? 'bg-teal-600 text-white' : 'border border-border text-muted-foreground'
                   )}
                 >
                   {done && <IconCircleCheck className='size-3' aria-hidden='true' />}
@@ -259,31 +257,22 @@ function FocusSite({
               </li>
             ))}
           </ol>
-          <div className='mt-5 flex flex-wrap gap-2'>
+          <div className='mt-4 flex flex-wrap gap-2'>
             <Link
               href={`/dashboard/graph?site=${encodeURIComponent(site.site_id)}`}
-              className={cn(
-                buttonVariants({ size: 'sm' }),
-                'bg-teal-300 text-slate-950 hover:bg-teal-200'
-              )}
+              className={cn(buttonVariants({ size: 'sm' }), 'min-h-10')}
             >
               نقشهٔ تصمیم <IconArrowUpLeft className='size-4' aria-hidden='true' />
             </Link>
             <Link
               href={`/dashboard/sales?site=${encodeURIComponent(site.site_id)}`}
-              className={cn(
-                buttonVariants({ size: 'sm', variant: 'outline' }),
-                'border-white/25 bg-transparent text-white hover:bg-white/10 hover:text-white'
-              )}
+              className={cn(buttonVariants({ size: 'sm', variant: 'outline' }), 'min-h-10')}
             >
               مسیر رشد فروش
             </Link>
             <Link
               href={`/dashboard/sites/${encodeURIComponent(site.site_id)}`}
-              className={cn(
-                buttonVariants({ size: 'sm', variant: 'outline' }),
-                'border-white/25 bg-transparent text-white hover:bg-white/10 hover:text-white'
-              )}
+              className={cn(buttonVariants({ size: 'sm', variant: 'outline' }), 'min-h-10')}
             >
               پروندهٔ سایت
             </Link>
@@ -300,7 +289,7 @@ function PortfolioPulse({ data }: { data: PortfolioOverview }) {
     : 0;
   const goals = data.sites.filter((site) => Boolean(site.mission?.objective)).length;
   return (
-    <Card className='min-w-0 rounded-[28px] border-border/70 py-0 shadow-sm'>
+    <Card className='min-w-0 self-start rounded-2xl border-border/70 py-0 shadow-sm'>
       <CardHeader className='border-b border-border/60 px-5 py-5 sm:px-6'>
         <div className='flex items-start justify-between gap-3'>
           <div>
@@ -312,7 +301,7 @@ function PortfolioPulse({ data }: { data: PortfolioOverview }) {
           </span>
         </div>
       </CardHeader>
-      <CardContent className='flex flex-1 flex-col px-5 py-5 sm:px-6'>
+      <CardContent className='flex flex-col px-5 py-5 sm:px-6'>
         <div className='flex items-end gap-2'>
           <strong className='text-5xl font-bold tracking-tight tabular-nums'>
             {fa.format(data.state_counts.ready)}
@@ -374,7 +363,7 @@ function PortfolioPulse({ data }: { data: PortfolioOverview }) {
             </strong>
           </div>
         </div>
-        <div className='mt-auto grid grid-cols-2 gap-3 border-t border-border/70 pt-5 text-sm'>
+        <div className='mt-5 grid grid-cols-2 gap-3 border-t border-border/70 pt-5 text-sm'>
           <div>
             <strong className='block text-lg tabular-nums'>{fa.format(ready)}٪</strong>
             <span className='text-muted-foreground text-xs'>آمادگی سبد</span>
@@ -448,7 +437,7 @@ function AttentionPanel({
       <CardHeader className='flex flex-row items-start justify-between gap-3'>
         <div>
           <p className='text-muted-foreground text-xs font-semibold'>اولویت‌های اجرایی</p>
-          <h2 className='mt-1 text-base font-semibold'>نیازمند پیگیری</h2>
+          <h2 className='mt-1 text-base font-semibold'>پیگیری پردازش سایت‌ها</h2>
         </div>
         <Badge variant='secondary'>{fa.format(data.totals.needs_attention)}</Badge>
       </CardHeader>
@@ -476,7 +465,8 @@ function AttentionPanel({
         ) : (
           <div className='rounded-xl border border-dashed p-5 text-center'>
             <IconCircleCheck className='mx-auto size-6 text-emerald-600' aria-hidden='true' />
-            <p className='mt-2 text-sm font-medium'>پیگیری فوری ثبت نشده است</p>
+            <p className='mt-2 text-sm font-medium'>خطای پردازش ثبت نشده است</p>
+            <p className='mt-1 text-xs leading-6 text-muted-foreground'>تازگی آمار گوگل را در هشدار بالای صفحه بررسی کنید.</p>
           </div>
         )}
         {graphCandidates.length > 0 && (
@@ -673,7 +663,7 @@ export function PortfolioDashboard({
             از وضعیت داده تا تصمیم بعدی؛ یک سایت را انتخاب کنید و مستقیم به محل اقدام بروید.
           </p>
           <p className='text-muted-foreground mt-2 text-[11px]'>
-            آخرین دریافت داده: {formatDate(data.generated_at)}
+            زمان تهیهٔ این نما: {formatDate(data.generated_at)}
           </p>
         </div>
         <div className='flex shrink-0 flex-wrap gap-2'>
@@ -688,6 +678,8 @@ export function PortfolioDashboard({
           </Link>
         </div>
       </header>
+
+      {selected && <SearchDataHealth siteId={selected.site_id} />}
 
       <div className='grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(310px,1fr)]'>
         {selected && <FocusSite site={selected} sites={data.sites} onSelect={setSelectedId} />}

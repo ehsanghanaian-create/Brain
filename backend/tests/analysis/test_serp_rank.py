@@ -258,6 +258,8 @@ def test_api_resumes_only_remaining_keywords_after_daily_budget_increase(tmp_pat
     resumed = client.post(base + "/run").json()
     assert resumed["status"] == "queued" and resumed["resumed"] is True
     assert resumed["run_id"] == run["run_id"] and resumed["remaining"] == 1
+    during_resume = client.get(base + "/overview").json()
+    assert [row["organic_position"] for row in during_resume["keywords"]] == [4, 4, None]
     assert client.post(base + "/run").json()["status"] == "already_scheduled"
     assert len(queued) == 1
     result = serp_rank.execute_run(engine, "s", run["run_id"], fetch=fetch)

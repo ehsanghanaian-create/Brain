@@ -376,14 +376,14 @@ def overview(engine: Engine, site_id: str, days: int = 30) -> dict:
             SELECT o2.id FROM serp_rank_observations o2 JOIN serp_rank_runs r2 ON r2.id=o2.run_id
             WHERE o2.site_id=k.site_id AND o2.keyword_id=k.id
               AND o2.status IN ('found','not_found_in_results')
-              AND r2.status IN ('succeeded','partial','blocked')
+              AND r2.status IN ('queued','running','succeeded','partial','blocked')
             ORDER BY r2.local_date DESC,o2.id DESC LIMIT 1)
           LEFT JOIN serp_rank_runs r ON r.id=o.run_id
           WHERE k.site_id=:s AND k.status!='ignored' ORDER BY k.id"""), {"s": site_id}).mappings()]
         history = [dict(row) for row in cx.execute(text("""SELECT o.keyword_id,r.local_date,o.organic_position,
           o.status FROM serp_rank_observations o JOIN serp_rank_runs r ON r.id=o.run_id
           WHERE o.site_id=:s AND o.status IN ('found','not_found_in_results')
-            AND r.status IN ('succeeded','partial','blocked')
+            AND r.status IN ('queued','running','succeeded','partial','blocked')
             AND r.local_date >= :earliest
           ORDER BY r.local_date DESC"""),
           {"s": site_id, "earliest": (datetime.now(TZ).date() - timedelta(days=days + 1)).isoformat()}).mappings()]

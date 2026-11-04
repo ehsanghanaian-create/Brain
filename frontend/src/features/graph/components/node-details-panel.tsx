@@ -82,7 +82,7 @@ export function NodeDetailsPanel({
           )}
           {loading && <p className='text-muted-foreground text-xs'>در حال بارگذاری…</p>}
         </div>
-        <Button variant='ghost' size='sm' onClick={onClose}>✕</Button>
+        <Button variant='ghost' size='sm' aria-label='بستن جزئیات گره' onClick={onClose}>✕</Button>
       </header>
       <div className='flex-1 space-y-4 overflow-y-auto p-3 text-sm'>
         {error && <p className='text-destructive'>{error}</p>}
@@ -220,7 +220,7 @@ function PageBody({ d, siteId, onFocus }: { d: NodeDetails; siteId: string; onFo
         <>
           <Separator />
           <Section title='سلامت لینک داخلی'>
-            <KV k='امتیاز (۰–۱۰۰)' v={<Badge style={{ background: (d as any).link_health.score >= 70 ? '#16a34a' : (d as any).link_health.score >= 40 ? '#f59e0b' : '#dc2626' }}>{num((d as any).link_health.score)}</Badge>} />
+            <KV k='امتیاز (۰–۱۰۰)' v={<Badge className='text-white' style={{ background: (d as any).link_health.score >= 70 ? '#15803d' : (d as any).link_health.score >= 40 ? '#92400e' : '#dc2626' }}>{num((d as any).link_health.score)}</Badge>} />
             {Object.entries((d as any).link_health.breakdown ?? {}).map(([k, v]) => <KV key={k} k={k} v={String(v)} ltr />)}
             {(d as any).link_health.flags?.length > 0 && <div className='flex flex-wrap gap-1 pt-1'>{(d as any).link_health.flags.map((f: string) => <Badge key={f} variant='outline'>{f}</Badge>)}</div>}
           </Section>

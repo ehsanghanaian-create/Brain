@@ -30,6 +30,7 @@ import { GraphMission } from './graph-mission';
 import { NodeDetailsPanel } from './node-details-panel';
 import { GroupNode, SeoNode } from './seo-node';
 import { GraphInsights } from './graph-insights';
+import { GraphRelationshipList } from './graph-relationship-list';
 import './graph-workspace.css';
 
 const nodeTypes = { seo: SeoNode, group: GroupNode };
@@ -60,6 +61,7 @@ function CommandCenterInner({ sites, portfolio, initialSiteId, initialMode = 'se
   const [layoutTick, setLayoutTick] = useState(0);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [animating, setAnimating] = useState(false);
+  const [display, setDisplay] = useState<'map' | 'list'>('map');
   // drag & drop: every (site, mode, layout) keeps its own hand-made arrangement, in this browser, across reloads
   const manual = useManualLayout(`kg:${state.siteId}:${state.mode}:${state.grouping}:${state.direction}`);
   const detailsCache = useRef<Map<string, NodeDetails>>(new Map());
@@ -231,6 +233,7 @@ function CommandCenterInner({ sites, portfolio, initialSiteId, initialMode = 'se
       return;
     }
     setDetailsLoading(true);
+    setDetails(null);
     setDetailsError(null);
     endpoints
       .nodeDetails(state.siteId, selectedId)
@@ -272,9 +275,14 @@ function CommandCenterInner({ sites, portfolio, initialSiteId, initialMode = 'se
         onResetFilters={() => patch({ familyOff: new Set(), relationOff: new Set() })}
         selectedLabel={selectedLabel} neighborCount={neighborCount} />
       {error && <BackendError error={error} />}
-      <p className='text-xs leading-6 text-muted-foreground lg:hidden'>نمای اولیه روی صفحهٔ انتخاب‌شده متمرکز است. برای دیدن ارتباط‌ها نقشه را جابه‌جا کنید؛ جزئیات خوانا پایین نقشه قرار دارد.</p>
+      <div role='group' aria-label='روش نمایش ارتباط‌ها' className='flex flex-wrap items-center gap-2'>
+        <button type='button' aria-pressed={display === 'map'} onClick={() => setDisplay('map')} className={`min-h-11 rounded-lg border px-4 text-sm focus-visible:ring-2 focus-visible:ring-ring ${display === 'map' ? 'bg-primary text-primary-foreground' : 'bg-card'}`}>نقشهٔ ارتباط‌ها</button>
+        <button type='button' aria-pressed={display === 'list'} onClick={() => setDisplay('list')} className={`min-h-11 rounded-lg border px-4 text-sm focus-visible:ring-2 focus-visible:ring-ring ${display === 'list' ? 'bg-primary text-primary-foreground' : 'bg-card'}`}>فهرست خوانای ارتباط‌ها</button>
+        <span className='text-xs text-muted-foreground'>شواهد و اقدام هر مورد در پروندهٔ همان گره دیده می‌شود.</span>
+      </div>
       <div className='grid min-w-0 min-h-[640px] gap-3 xl:h-[min(79vh,900px)] xl:grid-cols-[minmax(0,1fr)_360px]'>
-        <div className={`graph-map relative min-w-0 min-h-[500px] overflow-hidden rounded-2xl border border-border ${animating ? 'graph-animating' : ''}`} dir='ltr'>
+        {display === 'list' && view && <GraphRelationshipList view={view} query={state.query} hiddenTypes={hiddenTypes} hiddenRelations={state.relationOff} focusId={state.focusNeighbors ? selectedId : null} onSelect={(id) => setSelectedId(id)} />}
+        <div className={`graph-map relative min-w-0 min-h-[500px] overflow-hidden rounded-2xl border border-border ${display === 'list' ? 'hidden' : ''} ${animating ? 'graph-animating' : ''}`} dir='ltr'>
           {view && view.nodes.length > 0 && <div className='graph-map-legend pointer-events-none absolute top-3 left-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs' dir='rtl'>
             <span><strong>{nodes.filter((node) => node.type === 'seo').length.toLocaleString('fa-IR')}</strong> گره نمایان</span>
             <span className='text-muted-foreground'>•</span>

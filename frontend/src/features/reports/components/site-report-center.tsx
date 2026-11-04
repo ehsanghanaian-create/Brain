@@ -66,7 +66,7 @@ function Delta({ cur, prev, invert = false, digits = 0 }: { cur: number | null |
   if (Math.abs(diff) < 0.05) return <span className='text-muted-foreground text-xs'>بدون تغییر</span>;
   const good = invert ? diff < 0 : diff > 0;
   return (
-    <span className={`text-xs ${good ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+    <span className={`text-xs ${good ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
       {good ? '▲' : '▼'} {fa.format(Number(Math.abs(diff).toFixed(digits)))}
     </span>
   );
@@ -77,7 +77,7 @@ function ChangeCell({ change }: { change: number | null }) {
   if (Math.abs(change) < 0.05) return <span className='text-muted-foreground'>۰</span>;
   const up = change > 0; // change = prev - cur → مثبت یعنی بهبود جایگاه
   return (
-    <span className={up ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}>
+    <span className={up ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}>
       {up ? '▲' : '▼'} {fa.format(Number(Math.abs(change).toFixed(1)))}
     </span>
   );
@@ -917,7 +917,7 @@ function ReportagesPanel({ siteId, onChanged }: { siteId: string; onChanged: () 
     <div className='space-y-3'>
       <div className='text-muted-foreground flex flex-wrap items-center gap-2 text-xs'>
         <span>مجموع: {fa.format(data.totals.total)}</span>
-        <span className='text-emerald-600 dark:text-emerald-400'>لینک سالم: {fa.format(data.totals.link_found)}</span>
+        <span className='text-emerald-700 dark:text-emerald-400'>لینک سالم: {fa.format(data.totals.link_found)}</span>
         <span className='text-red-600 dark:text-red-400'>مشکل‌دار: {fa.format(data.totals.link_missing)}</span>
         {data.totals.cost_total > 0 && <span>هزینه کل: {fa.format(data.totals.cost_total)} تومان</span>}
         <Button size='sm' className='ms-auto' onClick={openNew}>افزودن رپورتاژ</Button>

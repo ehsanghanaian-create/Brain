@@ -8,6 +8,7 @@ import SearchInput from '../search-input';
 import { ThemeModeToggle } from '../themes/theme-mode-toggle';
 import { Button } from '../ui/button';
 import { Icons } from '../icons';
+import { BackgroundJobs } from './background-jobs';
 
 /** Dashboard header: sidebar trigger (Ctrl+B), breadcrumbs, search, focus mode (Ctrl+Shift+F collapses navigation), theme. */
 export default function Header() {
@@ -35,6 +36,7 @@ export default function Header() {
           </Button>
         )}
         <ThemeModeToggle />
+        <BackgroundJobs />
       </div>
     </header>
   );

@@ -70,7 +70,7 @@ export default function AppSidebar() {
         {filteredGroups.map((group) => (
           <SidebarGroup key={group.label || 'ungrouped'} className='py-1'>
             {group.label && (
-              <SidebarGroupLabel className='text-[10px] font-semibold text-sidebar-foreground/55'>
+              <SidebarGroupLabel className='text-xs font-semibold text-muted-foreground'>
                 {group.label}
               </SidebarGroupLabel>
             )}

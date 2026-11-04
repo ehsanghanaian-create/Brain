@@ -60,13 +60,13 @@ export function BackgroundJobs() {
         render={
           <Button
             variant={active.length ? 'default' : 'outline'}
-            className='fixed bottom-4 left-4 z-40 h-10 gap-2 rounded-full px-4 shadow-lg'
+            className='h-10 min-w-10 gap-2 rounded-lg px-3 shadow-none'
             aria-label='کارهای پس‌زمینه'
           />
         }
       >
         {active.length ? <IconLoader2 className='size-4 animate-spin' /> : <IconStack2 className='size-4' />}
-        <span>کارهای پس‌زمینه</span>
+        <span className='hidden sm:inline'>پردازش‌ها</span>
         {active.length > 0 && <Badge variant='secondary'>{active.length.toLocaleString('fa-IR')}</Badge>}
       </SheetTrigger>
       <SheetContent side='left' className='w-[min(92vw,420px)] sm:max-w-[420px]' dir='rtl'>

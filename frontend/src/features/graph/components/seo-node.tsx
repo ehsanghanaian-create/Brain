@@ -27,7 +27,7 @@ function SeoNodeImpl({ data, selected }: NodeProps<SeoFlowNode>) {
       </span>
       <span className='min-w-0 flex-1'>
         <span className='block truncate text-[13px] font-semibold leading-5'>{data.label}</span>
-        <span className='text-muted-foreground block truncate text-[10px] leading-4' dir='ltr'>
+        <span className='text-muted-foreground block truncate text-[11px] leading-4' title={data.metric}>
           {data.metric ?? st?.fa ?? data.nodeType}
         </span>
       </span>

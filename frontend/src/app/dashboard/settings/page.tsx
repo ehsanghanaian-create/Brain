@@ -4,79 +4,26 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { BackendError } from '@/components/seo-brain/backend-error';
 import { BrainNetwork } from '@/features/network/components/brain-network';
 import { endpoints, settle } from '@/lib/api/client';
+import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'تنظیمات' };
 
 export default async function SettingsPage() {
   const health = await settle(endpoints.health());
-  const base = process.env.SEO_BRAIN_API_URL ?? 'http://127.0.0.1:8000';
-  return (
-    <PageContainer pageTitle='تنظیمات' pageDescription='اتصال به بک‌اند، شبکهٔ Brain و وضعیت سیستم'>
-      <div className='space-y-4'>
-        <Card>
-          <CardHeader>
-            <CardTitle>شبکهٔ Brain</CardTitle>
-            <CardDescription>
-              نقشهٔ زندهٔ ارتباط‌ها: Brain به نویسنده‌های هوش مصنوعی (Claude / Grok / …)، Brain به وردپرس هر سایت، هر سایت به Search Console و
-              Google Analytics خودش، و لینک‌های خارجی سایت‌ها به یکدیگر. روی هر گره کلیک کنید تا جزئیاتش را ببینید؛ نقطه‌های روشن جهت جریان داده را نشان می‌دهند.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <BrainNetwork />
-          </CardContent>
-        </Card>
-        <div className='grid gap-4 lg:grid-cols-2'>
-          <Card>
-            <CardHeader>
-              <CardTitle>بک‌اند SEO Brain</CardTitle>
-              <CardDescription>
-                مقادیر از <code dir='ltr'>frontend/.env.local</code> خوانده می‌شوند؛ توکن فقط سمت سرور استفاده می‌شود.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className='space-y-2 text-sm'>
-              <div className='flex justify-between'>
-                <span>آدرس</span>
-                <code dir='ltr'>{base}</code>
-              </div>
-              <div className='flex justify-between'>
-                <span>توکن API</span>
-                <span>{process.env.SEO_BRAIN_API_TOKEN ? 'تنظیم شده' : 'تنظیم نشده (حالت باز روی loopback)'}</span>
-              </div>
-              <div className='flex justify-between'>
-                <span>وضعیت</span>
-                {health.data ? <Badge>متصل · v{health.data.version}</Badge> : <Badge variant='destructive'>قطع</Badge>}
-              </div>
-              {health.data && (
-                <div className='flex justify-between'>
-                  <span>پایگاه داده / مهاجرت‌ها</span>
-                  <code dir='ltr'>
-                    {health.data.database} · {health.data.migrations.applied.join(', ')}
-                  </code>
-                </div>
-              )}
-              {health.error && <BackendError error={health.error} />}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle>راهنما</CardTitle>
-              <CardDescription>راهنمای کامل فارسی هر بخش در فاز ۱۸ اضافه می‌شود.</CardDescription>
-            </CardHeader>
-            <CardContent className='space-y-1 text-sm'>
-              <p>
-                اجرای بک‌اند: <code dir='ltr'>python backend\cli\api.py</code>
-              </p>
-              <p>
-                مستندات API: <code dir='ltr'>{base}/api/docs</code>
-              </p>
-              <p>
-                قرارداد فرانت/بک‌اند: <code dir='ltr'>docs/seo-brain/04-frontend-contract.md</code>
-              </p>
-            </CardContent>
-          </Card>
-        </div>
+  return <PageContainer pageTitle='تنظیمات و اتصال‌ها' pageDescription='منبع داده را بررسی کنید و تنظیمات مربوط به هر سایت را از پروندهٔ همان سایت تغییر دهید.'>
+    <div className='space-y-5'>
+      <div className='grid gap-3 md:grid-cols-3'>
+        {[
+          { href: '/dashboard/sites', title: 'اتصال حساب‌ها و سایت', text: 'وضعیت وردپرس، Search Console و GA4؛ اتصال دوباره و تاریخ آخرین داده.' },
+          { href: '/dashboard/rank-tracking', title: 'تنظیم پایش رتبه', text: 'کلمات تحت پایش، ساعت بررسی، دستگاه و عمق نتایج گوگل.' },
+          { href: '/dashboard/calendar', title: 'نویسنده و انتشار محتوا', text: 'تنظیم نویسندهٔ هوش مصنوعی و بررسی برنامهٔ انتشار در تقویم.' }
+        ].map((item) => <Link key={item.href} href={item.href} className='rounded-xl border bg-card p-5 transition-colors hover:border-primary focus-visible:outline-2 focus-visible:outline-ring'><h2 className='text-base font-semibold text-primary'>{item.title} ←</h2><p className='mt-2 text-sm leading-7 text-muted-foreground'>{item.text}</p></Link>)}
       </div>
-    </PageContainer>
-  );
+      <Card><CardHeader><div className='flex flex-wrap items-center justify-between gap-3'><CardTitle>ارتباط داشبورد با سرویس داده</CardTitle><Badge variant={health.data ? 'secondary' : 'destructive'}>{health.data ? 'متصل' : 'دریافت وضعیت ناموفق'}</Badge></div><CardDescription>این وضعیت فقط دسترسی به سرویس را نشان می‌دهد؛ تازگی آمار هر سایت را جداگانه بررسی کنید.</CardDescription></CardHeader>
+        <CardContent>{health.error && <BackendError error={health.error} />}{health.data && <details className='text-sm'><summary className='min-h-11 cursor-pointer'>جزئیات فنی برای پشتیبانی</summary><dl className='mt-2 grid grid-cols-2 gap-3 rounded-lg bg-muted p-4'><dt>نسخهٔ سرویس</dt><dd dir='ltr'>{health.data.version}</dd><dt>پایگاه داده</dt><dd>{health.data.database}</dd><dt>تغییرات ساختار اعمال‌شده</dt><dd>{health.data.migrations.applied.length.toLocaleString('fa-IR')}</dd><dt>در انتظار اعمال</dt><dd>{health.data.migrations.pending.length.toLocaleString('fa-IR')}</dd></dl></details>}</CardContent>
+      </Card>
+      <details className='rounded-xl border bg-card p-5'><summary className='min-h-11 cursor-pointer font-semibold'>نقشهٔ اتصال سرویس‌ها</summary><p className='mb-4 text-sm leading-7 text-muted-foreground'>ارتباط نویسنده، وردپرس و حساب‌های گوگل هر سایت را اینجا ببینید. برای تغییر اتصال‌ها، پروندهٔ سایت را باز کنید.</p><BrainNetwork /></details>
+    </div>
+  </PageContainer>;
 }

@@ -14,7 +14,7 @@ import { PLAN_STATUS_COLOR, PLAN_STATUS_FA } from '@/features/content-planner/co
 import { parseTags } from '@/features/content-planner/lib';
 import { ApiError, endpoints, type ContentPlan, type PlanCategory, type PlanStatus, type WsOptions } from '@/lib/api/client';
 import { safeHref } from '@/lib/utils';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 type Form = { title: string; primary_keyword: string; secondary_keywords: string; category_id: string; publish_date: string | null; publish_time: string; seo_title: string; meta_description: string; provider: string; model: string; tone: string; word_count: string; prompt: string };
@@ -58,6 +58,9 @@ async function pollJob(runId: string) {
 }
 
 export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClose, onChanged, onOpenEditor }: Props) {
+  const fieldId = useId();
+  const initialForm = useRef<Form>(EMPTY);
+  const request = useRef(0);
   const [id, setIdState] = useState<number | null>(null);
   const idRef = useRef<number | null>(null);
   const setId = (v: number | null) => { idRef.current = v; setIdState(v); };
@@ -68,12 +71,13 @@ export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClo
   const [publishReady, setPublishReady] = useState(false);
   const open = pid !== null;
 
-  const load = useCallback(async (planId: number) => { try { const d = await endpoints.plan(siteId, planId); setP(d); setF(fromPlan(d)); } catch (e) { err(e); } }, [siteId]);
+  const load = useCallback(async (planId: number) => { const current = ++request.current; try { const d = await endpoints.plan(siteId, planId); if (current !== request.current) return; const form = fromPlan(d); initialForm.current = form; setP(d); setF(form); } catch (e) { if (current === request.current) err(e); } }, [siteId]);
   useEffect(() => {
     if (pid === null) return;
     setP(null); setPublishReady(false);
-    if (pid === 'new') { setP(null); setId(null); setF({ ...EMPTY, publish_date: defaultDate }); return; }
-    setId(pid); load(pid);
+    if (pid === 'new') { setP(null); setId(null); initialForm.current = { ...EMPTY, publish_date: defaultDate }; setF(initialForm.current); }
+    else { setId(pid); void load(pid); }
+    return () => { request.current++; };
   }, [pid, defaultDate, load]);
 
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setF((s) => ({ ...s, [k]: e.target.value }));
@@ -92,12 +96,15 @@ export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClo
   }
   async function run(key: string, fn: () => Promise<unknown>, ok?: string) {
     setBusy(key);
-    try { await fn(); if (ok) toast.success(ok); }
+    let succeeded = false;
+    try { await fn(); succeeded = true; if (ok) toast.success(ok); }
     catch (e) { err(e); }
     finally {
       setBusy(null); setNote(null);
-      if (idRef.current !== null) await load(idRef.current).catch(() => null);
-      onChanged();
+      if (succeeded) {
+        if (idRef.current !== null) await load(idRef.current).catch(() => null);
+        onChanged();
+      }
     }
   }
   const save = () => run('save', async () => { const planId = await persist(); await load(planId); }, 'ذخیره شد');
@@ -133,9 +140,13 @@ export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClo
   const remove = () => { if (id !== null && confirm('این مقاله از تقویم حذف شود؟ (متن نوشته‌شده حفظ می‌شود)')) run('del', async () => { await endpoints.planDelete(siteId, id); onClose(); }, 'حذف شد'); };
 
   return (
-    <Sheet open={open} onOpenChange={(o) => !o && !busy && onClose()}>
+    <Sheet open={open} onOpenChange={(o) => {
+      if (o || busy) return;
+      if (JSON.stringify(f) !== JSON.stringify(initialForm.current) && !confirm('تغییرات این مقاله ذخیره نشده است. بدون ذخیره خارج می‌شوید؟')) return;
+      onClose();
+    }}>
       <SheetContent side='left' className='overflow-y-auto p-4 data-[side=left]:w-full data-[side=left]:sm:max-w-xl' dir='rtl'>
-        <SheetHeader className='p-0'>
+        <SheetHeader className='p-0 ps-10'>
           <SheetTitle className='flex flex-wrap items-center gap-2'>
             {p ? p.title : 'مقالهٔ جدید'}
             {p && <Badge style={{ background: PLAN_STATUS_COLOR[p.status] }}>{PLAN_STATUS_FA[p.status]}</Badge>}
@@ -155,31 +166,31 @@ export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClo
         )}
 
         <div className='mt-3 grid gap-3 text-sm'>
-          <div className='grid gap-1'><Label>عنوان مقاله</Label><Input value={f.title} onChange={set('title')} placeholder='مثلاً: راهنمای کامل تعمیر گیربکس اتوماتیک' autoFocus={pid === 'new'} /></div>
+          <div className='grid gap-1'><Label htmlFor={`${fieldId}-title`}>عنوان مقاله</Label><Input id={`${fieldId}-title`} value={f.title} onChange={set('title')} placeholder='مثلاً: راهنمای انتخاب پیراهن مردانه' autoFocus={pid === 'new'} /></div>
           <div className='grid gap-2 md:grid-cols-2'>
-            <div className='grid gap-1'><Label>کلمهٔ کلیدی اصلی</Label><Input value={f.primary_keyword} onChange={set('primary_keyword')} placeholder='تعمیر گیربکس اتوماتیک' /></div>
-            <div className='grid gap-1'><Label>کلمات کلیدی ثانویه (با ویرگول)</Label><Input value={f.secondary_keywords} onChange={set('secondary_keywords')} placeholder='هزینه تعمیر گیربکس، علائم خرابی گیربکس' /></div>
+            <div className='grid gap-1'><Label htmlFor={`${fieldId}-primary_keyword`}>کلمهٔ کلیدی اصلی</Label><Input id={`${fieldId}-primary_keyword`} value={f.primary_keyword} onChange={set('primary_keyword')} placeholder='انتخاب پیراهن مردانه' /></div>
+            <div className='grid gap-1'><Label htmlFor={`${fieldId}-secondary_keywords`}>کلمات کلیدی ثانویه (با ویرگول)</Label><Input id={`${fieldId}-secondary_keywords`} value={f.secondary_keywords} onChange={set('secondary_keywords')} placeholder='سایز پیراهن، جنس پارچه، استایل مردانه' /></div>
             <div className='grid gap-1'>
-              <Label>دستهٔ وردپرس</Label>
-              <NativeSelect value={f.category_id} onChange={set('category_id')}>
+              <Label htmlFor={`${fieldId}-category_id`}>دستهٔ وردپرس</Label>
+              <NativeSelect id={`${fieldId}-category_id`} value={f.category_id} onChange={set('category_id')}>
                 <NativeSelectOption value=''>بدون دسته</NativeSelectOption>
                 {wpCategories.map((c) => <NativeSelectOption key={c.id} value={String(c.id)}>{c.name}</NativeSelectOption>)}
               </NativeSelect>
               {wpCategories.length === 0 && <span className='text-muted-foreground text-[11px]'>دسته‌ای از وردپرس همگام نشده — از کارت وردپرس سایت همگام‌سازی کنید.</span>}
             </div>
             <div className='grid gap-1'>
-              <Label>وضعیت</Label>
+              <Label htmlFor={`${fieldId}-status`}>وضعیت</Label>
               {p ? (
-                <NativeSelect value={p.status} disabled={!!busy} onChange={(e) => run('status', () => endpoints.planTransition(siteId, p.id, e.target.value), `وضعیت → ${PLAN_STATUS_FA[e.target.value as PlanStatus]}`)}>
+                <NativeSelect id={`${fieldId}-status`} value={p.status} disabled={!!busy} onChange={(e) => run('status', () => endpoints.planTransition(siteId, p.id, e.target.value), `وضعیت → ${PLAN_STATUS_FA[e.target.value as PlanStatus]}`)}>
                   {[p.status, ...p.allowed_transitions].filter((s, i, a) => SIMPLE_STATUSES.includes(s) && a.indexOf(s) === i).map((s) => <NativeSelectOption key={s} value={s}>{PLAN_STATUS_FA[s]}</NativeSelectOption>)}
                 </NativeSelect>
-              ) : <Input value={PLAN_STATUS_FA.planned} disabled />}
+              ) : <Input id={`${fieldId}-status`} value={PLAN_STATUS_FA.planned} disabled />}
             </div>
-            <div className='grid gap-1'><Label>تاریخ انتشار (شمسی)</Label><JalaliDateInput value={f.publish_date} onChange={(d) => setF((s) => ({ ...s, publish_date: d }))} /></div>
-            <div className='grid gap-1'><Label>ساعت انتشار</Label><Input type='time' value={f.publish_time} onChange={set('publish_time')} dir='ltr' /></div>
+            <div className='grid gap-1'><Label htmlFor={`${fieldId}-publish_date`}>تاریخ انتشار (شمسی)</Label><JalaliDateInput id={`${fieldId}-publish_date`} value={f.publish_date} onChange={(d) => setF((s) => ({ ...s, publish_date: d }))} /></div>
+            <div className='grid gap-1'><Label htmlFor={`${fieldId}-publish_time`}>ساعت انتشار</Label><Input id={`${fieldId}-publish_time`} type='time' value={f.publish_time} onChange={set('publish_time')} dir='ltr' /></div>
             <div className='grid gap-1 md:col-span-2'>
-              <Label>نویسندهٔ هوش مصنوعی و مدل</Label>
-              <NativeSelect value={f.provider ? `${f.provider}::${f.model}` : ''} onChange={(e) => { const [prov, mod] = e.target.value.split('::'); setF((s) => ({ ...s, provider: prov ?? '', model: mod ?? '' })); }}>
+              <Label htmlFor={`${fieldId}-provider`}>نویسندهٔ هوش مصنوعی و مدل</Label>
+              <NativeSelect id={`${fieldId}-provider`} value={f.provider ? `${f.provider}::${f.model}` : ''} onChange={(e) => { const [prov, mod] = e.target.value.split('::'); setF((s) => ({ ...s, provider: prov ?? '', model: mod ?? '' })); }}>
                 <NativeSelectOption value=''>پیش‌فرض{opts?.default?.provider ? ` — ${opts.default.provider}${opts.default.model ? ` / ${opts.default.model}` : ''}` : ''}</NativeSelectOption>
                 {providers.filter((p) => p.configured).map((p) => (
                   <NativeSelectOptGroup key={p.name} label={`${p.kind_label ?? p.kind} · ${p.name}`}>
@@ -188,18 +199,18 @@ export function ArticleSheet({ siteId, pid, defaultDate, categories, opts, onClo
                   </NativeSelectOptGroup>
                 ))}
               </NativeSelect>
-              {providers.filter((p) => p.configured).length === 0 && <span className='text-[11px] text-amber-600'>هیچ نویسنده‌ای کلید ندارد — با دکمهٔ «کلیدها» بالای تقویم، کلید Claude یا Grok را وارد کنید.</span>}
+              {providers.filter((p) => p.configured).length === 0 && <span className='text-[11px] text-amber-800 dark:text-amber-300'>هیچ نویسنده‌ای کلید ندارد — با دکمهٔ «کلیدها» بالای تقویم، کلید Claude یا Grok را وارد کنید.</span>}
             </div>
-            <div className='grid gap-1'><Label>عنوان سئو (اختیاری)</Label><Input value={f.seo_title} onChange={set('seo_title')} /></div>
-            <div className='grid gap-1'><Label>توضیحات متا (اختیاری)</Label><Input value={f.meta_description} onChange={set('meta_description')} /><span className='text-muted-foreground text-[10px]'>{f.meta_description.length} نویسه</span></div>
+            <div className='grid gap-1'><Label htmlFor={`${fieldId}-seo_title`}>عنوان سئو (اختیاری)</Label><Input id={`${fieldId}-seo_title`} value={f.seo_title} onChange={set('seo_title')} /></div>
+            <div className='grid gap-1'><Label htmlFor={`${fieldId}-meta_description`}>توضیحات متا (اختیاری)</Label><Input id={`${fieldId}-meta_description`} value={f.meta_description} onChange={set('meta_description')} /><span className='text-muted-foreground text-[10px]'>{f.meta_description.length} نویسه</span></div>
           </div>
 
           <details className='rounded-md border p-2'>
             <summary className='cursor-pointer text-xs font-medium'>تنظیمات نویسندهٔ هوش مصنوعی</summary>
             <div className='mt-2 grid gap-2 md:grid-cols-2'>
-              <div className='grid gap-1'><Label>لحن</Label><NativeSelect value={f.tone} onChange={set('tone')}><NativeSelectOption value=''>رسمی (پیش‌فرض)</NativeSelectOption>{(opts?.tones ?? []).map((t) => <NativeSelectOption key={t.key} value={t.key}>{t.fa}</NativeSelectOption>)}</NativeSelect></div>
-              <div className='grid gap-1'><Label>تعداد کلمات</Label><Input type='number' min={300} max={6000} value={f.word_count} onChange={set('word_count')} dir='ltr' placeholder='1200' /></div>
-              <div className='grid gap-1 md:col-span-2'><Label>دستور اضافه برای نویسنده</Label><Textarea rows={3} value={f.prompt} onChange={set('prompt')} placeholder='مثلاً: از مثال‌های واقعی تهران استفاده کن؛ شماره تماس را در پاراگراف اول بیاور…' /></div>
+              <div className='grid gap-1'><Label htmlFor={`${fieldId}-tone`}>لحن</Label><NativeSelect id={`${fieldId}-tone`} value={f.tone} onChange={set('tone')}><NativeSelectOption value=''>رسمی (پیش‌فرض)</NativeSelectOption>{(opts?.tones ?? []).map((t) => <NativeSelectOption key={t.key} value={t.key}>{t.fa}</NativeSelectOption>)}</NativeSelect></div>
+              <div className='grid gap-1'><Label htmlFor={`${fieldId}-word_count`}>تعداد کلمات</Label><Input id={`${fieldId}-word_count`} type='number' min={300} max={6000} value={f.word_count} onChange={set('word_count')} dir='ltr' placeholder='1200' /></div>
+              <div className='grid gap-1 md:col-span-2'><Label htmlFor={`${fieldId}-prompt`}>دستور اضافه برای نویسنده</Label><Textarea id={`${fieldId}-prompt`} rows={3} value={f.prompt} onChange={set('prompt')} placeholder='مثلاً: کاربرد پارچه، راهنمای انتخاب سایز و پیشنهاد ترکیب لباس را توضیح بده…' /></div>
             </div>
           </details>
 

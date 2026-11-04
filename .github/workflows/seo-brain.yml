@@ -27,7 +27,9 @@ jobs:
         run: python -m pytest backend/tests -q
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      UI_QA_CHROME: '1'
     defaults:
       run:
         working-directory: frontend
@@ -42,5 +44,21 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm typecheck
+      - name: Unit tests
+        run: pnpm test
       - name: Production build
         run: pnpm build
+      # Chrome is preinstalled in actions/runner-images' Ubuntu 24.04 image.
+      - name: Verify installed Chrome for UI checks
+        run: google-chrome --version
+      - name: Browser workflows and accessibility (synthetic data only)
+        run: pnpm test:e2e
+      - name: Upload UI failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-test-evidence
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7

@@ -679,6 +679,13 @@ export function PortfolioDashboard({
         </div>
       </header>
 
+      {selected && <nav aria-label='مسیرهای اصلی رشد' className='grid gap-2 sm:grid-cols-3'>
+        {[
+          { href: '/dashboard/rank-tracking', title: 'رتبهٔ واقعی کلمات', text: 'نتیجهٔ پایش گوگل و تغییر جایگاه', icon: IconTargetArrow },
+          { href: '/dashboard/research', title: 'کلمات تازه و رقبا', text: 'فرصت‌های جست‌وجو با منبع روشن', icon: IconSearch },
+          { href: '/dashboard/sales', title: 'از ورودی تا فروش', text: 'صفحات تجاری و وضعیت سنجش سفارش', icon: IconChartBar }
+        ].map(({ href, title, text, icon: Icon }) => <Link key={href} href={`${href}?site=${encodeURIComponent(selected.site_id)}`} className='group flex min-h-20 items-center gap-3 rounded-xl border bg-card px-4 py-3 hover:border-primary focus-visible:outline-2 focus-visible:outline-ring'><Icon className='size-5 shrink-0 text-primary' aria-hidden='true' /><span className='min-w-0 flex-1'><strong className='block text-sm'>{title}</strong><span className='mt-1 block text-xs text-muted-foreground'>{text}</span></span><IconArrowLeft className='size-4 shrink-0 text-muted-foreground' aria-hidden='true' /></Link>)}
+      </nav>}
       {selected && <SearchDataHealth siteId={selected.site_id} />}
 
       <div className='grid gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(310px,1fr)]'>

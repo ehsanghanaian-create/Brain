@@ -1,6 +1,7 @@
 """A fresh full crawl must not report retained pages from older snapshots."""
 import json
 from datetime import datetime, timedelta, timezone
+import pytest
 
 from seo_brain.analysis.seo import run_analysis
 from seo_brain.common.config import CrawlerConfig, SiteConfig
@@ -212,27 +213,33 @@ def test_noindex_canonical_filter_is_not_an_indexability_or_duplicate_title_prob
         assert conn.execute("SELECT COUNT(*) FROM seo_problems WHERE problem_type='duplicate_title'").fetchone()[0] == 0
 
 
-def test_analysis_excludes_old_pages_and_non_html_responses(tmp_path):
+@pytest.mark.parametrize("crawl_age_days,expected_problems", [(0, 1), (31, 0)])
+def test_analysis_excludes_old_pages_and_non_html_responses(tmp_path, crawl_age_days, expected_problems):
     site = SiteConfig(site_id="demo", name="Demo", canonical_url="https://demo.example/", wp_url="")
+    # Keep the fresh-crawl case fresh as wall time advances, and explicitly
+    # verify that stale coverage cannot establish missing inbound links.
+    started = datetime.now(timezone.utc) - timedelta(days=crawl_age_days, minutes=1)
+    current_at = (started + timedelta(seconds=30)).isoformat(timespec="seconds")
+    old_at = (started - timedelta(days=60)).isoformat(timespec="seconds")
     with db(tmp_path / "seo.db") as conn:
         ensure_site(conn, site)
         conn.execute("INSERT INTO crawl_runs(run_id,site_id,started_at,status,notes) VALUES "
-                     "('crawl-current','demo','2026-09-30T10:00:00Z','completed','{\"scope\":\"site\"}')")
+                     "('crawl-current','demo',?,'completed','{\"scope\":\"site\"}')", (started.isoformat(timespec="seconds"),))
         base = ("INSERT INTO pages(site_id,url,crawl_status,status_code,title,meta_description,h1,h1_count,canonical,"
                 "indexable,word_count,images_missing_alt,in_sitemap,last_crawled,crawl_run_id) "
                 "VALUES ('demo',?,'ok',200,'Page','Useful description','[\"Page\"]',?, ?,1,500,0,1,?,?)")
         old = "https://demo.example/old"
         target = "https://demo.example/current"
-        conn.execute(base, (old, 1, old, "2026-09-01T10:00:00Z", "crawl-old"))
-        conn.execute(base, (target, 1, target, "2026-09-30T10:01:00Z", "crawl-current"))
+        conn.execute(base, (old, 1, old, old_at, "crawl-old"))
+        conn.execute(base, (target, 1, target, current_at, "crawl-current"))
         conn.execute(base, ("https://demo.example/feed.xml", None, None,
-                            "2026-09-30T10:01:00Z", "crawl-current"))
+                            current_at, "crawl-current"))
         conn.execute("INSERT INTO links(site_id,source_url,target_url,is_internal,is_nav) "
                      "VALUES ('demo',?,?,1,0)", (old, target))
         result = run_analysis(conn, site)
         findings = conn.execute("SELECT problem_type,url FROM seo_problems WHERE site_id='demo'").fetchall()
-    assert result["problems"] == 1
-    assert [(row[0], row[1]) for row in findings] == [("orphan", target)]
+    assert result["problems"] == expected_problems
+    assert [(row[0], row[1]) for row in findings] == ([("orphan", target)] if expected_problems else [])
 
 
 def test_paginated_archive_keeps_its_heading_without_duplicate_h1_findings(tmp_path):

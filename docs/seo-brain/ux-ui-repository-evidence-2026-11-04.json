@@ -1,0 +1,156 @@
+{
+  "reviewed_on": "2026-11-04",
+  "scope": "Public GitHub metadata for all listed repositories; selected README/LICENSE and official docs were read. No installation, dependency-security audit or compatibility test was performed.",
+  "maintenance_caveat": "Last push and non-archived status are activity signals, not proof of maintenance quality or security.",
+  "licensing_caveat": "API SPDX fields are observations. Mixed repository licenses require reading the license of the actual directories and packages used.",
+  "repositories": [
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "microsoft/playwright",
+      "html_url": "https://github.com/microsoft/playwright",
+      "license": "Apache-2.0",
+      "pushed_at": "2026-11-03T23:19:24Z",
+      "metadata_source": "https://api.github.com/repos/microsoft/playwright"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "dequelabs/axe-core",
+      "html_url": "https://github.com/dequelabs/axe-core",
+      "license": "MPL-2.0",
+      "pushed_at": "2026-11-03T15:37:57Z",
+      "metadata_source": "https://api.github.com/repos/dequelabs/axe-core"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "dequelabs/axe-core-npm",
+      "html_url": "https://github.com/dequelabs/axe-core-npm",
+      "license": "MPL-2.0",
+      "pushed_at": "2026-11-01T05:03:10Z",
+      "metadata_source": "https://api.github.com/repos/dequelabs/axe-core-npm"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "storybookjs/storybook",
+      "html_url": "https://github.com/storybookjs/storybook",
+      "license": "MIT",
+      "pushed_at": "2026-11-04T14:14:23Z",
+      "metadata_source": "https://api.github.com/repos/storybookjs/storybook"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "testing-library/react-testing-library",
+      "html_url": "https://github.com/testing-library/react-testing-library",
+      "license": "MIT",
+      "pushed_at": "2026-08-27T17:40:18Z",
+      "metadata_source": "https://api.github.com/repos/testing-library/react-testing-library"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "mswjs/msw",
+      "html_url": "https://github.com/mswjs/msw",
+      "license": "MIT",
+      "pushed_at": "2026-10-17T11:14:59Z",
+      "metadata_source": "https://api.github.com/repos/mswjs/msw"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "GoogleChrome/lighthouse-ci",
+      "html_url": "https://github.com/GoogleChrome/lighthouse-ci",
+      "license": "Apache-2.0",
+      "pushed_at": "2026-11-03T00:18:52Z",
+      "metadata_source": "https://api.github.com/repos/GoogleChrome/lighthouse-ci"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "garris/BackstopJS",
+      "html_url": "https://github.com/garris/BackstopJS",
+      "license": "MIT",
+      "pushed_at": "2026-10-10T21:05:23Z",
+      "metadata_source": "https://api.github.com/repos/garris/BackstopJS"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "grafana/k6",
+      "html_url": "https://github.com/grafana/k6",
+      "license": "AGPL-3.0",
+      "pushed_at": "2026-11-03T17:19:26Z",
+      "metadata_source": "https://api.github.com/repos/grafana/k6"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "sitespeedio/sitespeed.io",
+      "html_url": "https://github.com/sitespeedio/sitespeed.io",
+      "license": "MIT",
+      "pushed_at": "2026-11-02T06:10:34Z",
+      "metadata_source": "https://api.github.com/repos/sitespeedio/sitespeed.io"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "rrweb-io/rrweb",
+      "html_url": "https://github.com/rrweb-io/rrweb",
+      "license": "MIT",
+      "pushed_at": "2026-11-04T13:30:52Z",
+      "metadata_source": "https://api.github.com/repos/rrweb-io/rrweb"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "PostHog/posthog",
+      "html_url": "https://github.com/PostHog/posthog",
+      "license": "NOASSERTION",
+      "pushed_at": "2026-11-04T14:40:37Z",
+      "metadata_source": "https://api.github.com/repos/PostHog/posthog",
+      "license_notes": "Root LICENSE: MIT Expat outside stated exclusions; ee/ has a separate license; third-party components retain their licenses.",
+      "license_source": "https://github.com/PostHog/posthog/blob/master/LICENSE"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "formbricks/formbricks",
+      "html_url": "https://github.com/formbricks/formbricks",
+      "license": "NOASSERTION",
+      "pushed_at": "2026-11-04T14:22:16Z",
+      "metadata_source": "https://api.github.com/repos/formbricks/formbricks",
+      "license_notes": "Root LICENSE: AGPLv3 outside exclusions; listed SDK/API/survey packages MIT as declared in package.json; apps/web/modules/ee has a separate license.",
+      "license_source": "https://github.com/formbricks/formbricks/blob/main/LICENSE"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "ruxailab/RUXAILAB",
+      "html_url": "https://github.com/ruxailab/RUXAILAB",
+      "license": "MIT",
+      "pushed_at": "2026-11-03T16:41:05Z",
+      "metadata_source": "https://api.github.com/repos/ruxailab/RUXAILAB"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "indigane/cardsort",
+      "html_url": "https://github.com/indigane/cardsort",
+      "license": "MIT-0",
+      "pushed_at": "2023-10-14T21:06:28Z",
+      "metadata_source": "https://api.github.com/repos/indigane/cardsort"
+    },
+    {
+      "archived": false,
+      "disabled": false,
+      "full_name": "carlsonp/kort",
+      "html_url": "https://github.com/carlsonp/kort",
+      "license": "GPL-3.0",
+      "pushed_at": "2024-12-06T06:37:34Z",
+      "metadata_source": "https://api.github.com/repos/carlsonp/kort"
+    }
+  ]
+}

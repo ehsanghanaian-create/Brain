@@ -13,6 +13,7 @@ The November 4 read-only production baseline inspected overview, sales, graph, r
 - Calendar shows explicit loading, failure and retry states. Failed fetches are not presented as an empty calendar. Request generations prevent old site/filter responses replacing the current view. Calendar filters have accessible names, list items are real keyboard buttons, and unscheduled cards can be opened without dragging.
 - Shared breadcrumbs, table keyboard scrolling, native select RTL spacing/touch targets, tab contrast, report deltas, graph scores, and reduced-motion theme changes are corrected.
 - Settings starts with actual user actions and connection state; technical diagnostics and the service graph are disclosed on demand.
+- Article fields are associated with their labels, examples fit the clothing business, failed saves retain input, closing a dirty form requires discarding confirmation, and late article responses are ignored. Query debugging UI is opt-in for local development.
 - GitHub frontend validation now runs existing unit tests and the versioned Playwright/axe suite, in addition to typecheck/build. Failure artifacts use synthetic data.
 
 ## Verification boundaries

@@ -100,3 +100,20 @@ test('settings offers working product paths before technical details', async ({ 
   await expect(page.getByText('http://backend:8000')).toHaveCount(0);
   await expect(page.getByText('نسخهٔ سرویس', { exact: true })).toBeHidden();
 });
+
+test('article form preserves input after a failed save and confirms discarding changes', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 900 });
+  await page.goto(`/dashboard/calendar?site=${site}`);
+  await page.getByRole('button', { name: '+ مقالهٔ جدید', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('عنوان مقاله', { exact: true }).fill('پیش‌نویس آزمایش؛ منتشر نشود');
+  await dialog.getByLabel('کلمهٔ کلیدی اصلی', { exact: true }).fill('انتخاب پیراهن مردانه');
+  expect((await new AxeBuilder({ page }).include('[role="dialog"]').withTags(['wcag2a','wcag2aa','wcag21aa','wcag22aa']).analyze()).violations).toEqual([]);
+  await page.route('**/content-plans', route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 503, json: { error: { message: 'ذخیرهٔ آزمایشی ناموفق' } } }) : route.continue());
+  await dialog.getByRole('button', { name: 'ذخیره', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: 'ذخیره', exact: true })).toBeEnabled();
+  await expect(dialog.getByLabel('عنوان مقاله', { exact: true })).toHaveValue('پیش‌نویس آزمایش؛ منتشر نشود');
+  page.once('dialog', d => d.dismiss()); await page.keyboard.press('Escape'); await expect(dialog).toBeVisible();
+  page.once('dialog', d => d.accept()); await page.keyboard.press('Escape'); await expect(dialog).toHaveCount(0);
+});

@@ -4,6 +4,7 @@ from io import BytesIO
 import json
 from urllib.error import HTTPError
 from urllib.request import Request
+from types import SimpleNamespace
 
 import pytest
 
@@ -223,3 +224,61 @@ def test_rank_api_requires_provider_and_scopes_settings(tmp_path, monkeypatch):
     assert changed.json()["depth"] == 20
     assert client.get("/api/v1/sites/other/rank-tracking/overview").json()["settings"]["depth"] == 10
     assert client.get("/api/v1/sites/missing/rank-tracking/overview").status_code == 404
+
+
+def test_api_resumes_only_remaining_keywords_after_daily_budget_increase(tmp_path, monkeypatch):
+    from seo_brain.api.routers import serp_rank as router
+    engine = _engine(tmp_path)
+    monkeypatch.setenv("SERPKITE_API_KEY", "test-only")
+    monkeypatch.delenv("API_TOKEN", raising=False)
+    monkeypatch.setattr(serp_rank.time, "sleep", lambda _: None)
+    serp_rank.save_settings(engine, "s", provider="serpkite", device="mobile", depth=10,
+                            max_keywords_per_run=2, enabled=True)
+    seen = []
+
+    def fetch(keyword, _cfg):
+        seen.append(keyword)
+        return serp_rank.SerpResult([{"position": 4, "absolute_position": 4,
+                                     "url": "https://store.example/target"}], keyword)
+
+    run = serp_rank.create_run(engine, "s")
+    assert serp_rank.execute_run(engine, "s", run["run_id"], fetch=fetch)["status"] == "partial"
+    with engine.connect() as cx:
+        original = list(cx.execute(text("SELECT id,keyword_id,checked_at FROM serp_rank_observations ORDER BY id")))
+    queued = []
+    queue = SimpleNamespace(enqueue=lambda job: (queued.append(job) or SimpleNamespace(run_id="resume-job")))
+    monkeypatch.setattr(router, "get_job_queue", lambda: queue)
+    app = create_app()
+    app.dependency_overrides[deps.engine] = lambda: engine
+    client = TestClient(app)
+    base = "/api/v1/sites/s/rank-tracking"
+    assert client.post(base + "/run").json()["status"] == "already_scheduled"
+    assert client.put(base + "/settings", json={"enabled": True, "provider": "serpkite", "device": "mobile",
+        "depth": 10, "max_keywords_per_run": 3}).status_code == 200
+    resumed = client.post(base + "/run").json()
+    assert resumed["status"] == "queued" and resumed["resumed"] is True
+    assert resumed["run_id"] == run["run_id"] and resumed["remaining"] == 1
+    assert client.post(base + "/run").json()["status"] == "already_scheduled"
+    assert len(queued) == 1
+    result = serp_rank.execute_run(engine, "s", run["run_id"], fetch=fetch)
+    assert result["status"] == "succeeded" and result["checked"] == 3
+    assert seen == ["first", "second", "third"]
+    with engine.connect() as cx:
+        assert list(cx.execute(text("SELECT id,keyword_id,checked_at FROM serp_rank_observations ORDER BY id LIMIT 2"))) == original
+        assert cx.execute(text("SELECT COUNT(*) FROM serp_rank_runs")).scalar() == 1
+        assert cx.execute(text("SELECT provider_requests FROM serp_rank_runs")).scalar() == 3
+    assert all(row["organic_position"] is None for row in serp_rank.overview(engine, "other")["keywords"])
+
+
+@pytest.mark.parametrize("change", [{"device": "desktop"}, {"depth": 20}, {"provider": "serpapi"}])
+def test_cap_resume_never_mixes_provider_or_device_scope(tmp_path, monkeypatch, change):
+    engine = _engine(tmp_path)
+    monkeypatch.setenv("SERPKITE_API_KEY", "test-only")
+    monkeypatch.setenv("SERPAPI_API_KEY", "test-only")
+    monkeypatch.setattr(serp_rank.time, "sleep", lambda _: None)
+    cfg = dict(provider="serpkite", device="mobile", depth=10, max_keywords_per_run=1, enabled=True)
+    serp_rank.save_settings(engine, "s", **cfg)
+    run = serp_rank.create_run(engine, "s")
+    serp_rank.execute_run(engine, "s", run["run_id"], fetch=lambda *_: serp_rank.SerpResult([], None))
+    serp_rank.save_settings(engine, "s", **{**cfg, "max_keywords_per_run": 3, **change})
+    assert serp_rank.create_run(engine, "s")["status"] == "already_scheduled"

@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 export type AccessDecision = { ip: string; status: 'blocked' | 'pending' | 'unknown'; received: number; match_gclids: string[]; decision_id: number; origins: { name: string; acknowledged: boolean }[] };
-export type AccessStatus = { site: string; enabled: boolean; healthy: boolean; generated_at: number; items: AccessDecision[]; errors: string[] };
+export type AccessStatus = { site: string; configured?: boolean; enabled: boolean; healthy: boolean; generated_at: number; items: AccessDecision[]; errors: string[] };
 export function useAccessStatus(site: string) {
   const [status, setStatus] = useState<AccessStatus | null>(null);
   useEffect(() => {
@@ -21,7 +21,7 @@ export function useAccessStatus(site: string) {
   return status;
 }
 export function matchAccess(status: AccessStatus | null, ip: string, gclid?: string | null, trustedIp = false) {
-  if (!status || Math.abs(Date.now()/1000-status.generated_at) >= 30) return null;
+  if (!status || status.configured === false || Math.abs(Date.now()/1000-status.generated_at) >= 30) return null;
   const exact = status.items.find(item => item.ip === ip);
   if (exact && trustedIp) return exact;
   const matches = gclid ? status.items.filter(item => item.match_gclids.includes(gclid)) : [];
@@ -37,9 +37,10 @@ export function AccessBadge({ status, ip, gclid, legacyBlocked = false, automati
   }
   if (automaticPluginBlocked) return <Badge variant='destructive' className='text-[10px]' title='این IP به‌صورت خودکار به‌دلیل عبور از آستانهٔ ورود یا تماس Ads در افزونهٔ سایت مسدود شده است.'>مسدود خودکار · دائمی</Badge>;
   if (legacyBlocked) return <Badge variant='destructive' className='text-[10px]' title='در فهرست افزونهٔ مسدودسازی سایت ثبت شده؛ تأیید بلاک هر دو هاست توسط قانون خودکار نیست.'>مسدود در افزونهٔ سایت</Badge>;
-  return <Badge variant='outline' className='text-muted-foreground text-[10px]'>{status ? 'بلاک خودکار ثبت نشده' : 'وضعیت بلاک در دسترس نیست'}</Badge>;
+  return <Badge variant='outline' className='text-muted-foreground text-[10px]'>{status?.configured === false ? 'بلاک خودکار راه‌اندازی نشده' : status ? 'بلاک خودکار ثبت نشده' : 'وضعیت بلاک در دسترس نیست'}</Badge>;
 }
 export function AccessOverview({ status, automaticPluginIps = new Set<string>() }: { status: AccessStatus | null; automaticPluginIps?: Set<string> }) {
+  if (status?.configured === false) return <Badge variant='outline'>مسدودسازی خودکار برای این سایت راه‌اندازی نشده</Badge>;
   const count = status ? new Set([...status.items.filter(i => i.status === 'blocked').map(i => i.ip), ...automaticPluginIps]).size : automaticPluginIps.size;
   return <Badge variant='outline'>{!status ? 'وضعیت مسدودسازی نامشخص' : !status.enabled ? 'قانون خودکار خاموش' : !status.healthy ? 'قانون فعال؛ ارتباط نیازمند بررسی' : `قانون خودکار فعال · ${count.toLocaleString('fa-IR')} IP مسدود`}</Badge>;
 }

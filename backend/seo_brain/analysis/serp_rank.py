@@ -238,9 +238,27 @@ def create_run(engine: Engine, site_id: str, now: datetime | None = None) -> dic
         return {"status": "disabled"}
     day = _date(now)
     with engine.begin() as cx:
-        existing = cx.execute(text("SELECT id,status FROM serp_rank_runs WHERE site_id=:s AND local_date=:d"),
+        existing = cx.execute(text("SELECT * FROM serp_rank_runs WHERE site_id=:s AND local_date=:d"),
                               {"s": site_id, "d": day}).mappings().first()
         if existing:
+            # A larger daily allowance must let the operator finish today's
+            # capped snapshot, without repeating observations or changing its
+            # provider/device/depth. The conditional update admits one enqueue.
+            if (existing["status"] == "partial" and existing["error_code"] == "daily_request_cap_reached"
+                    and existing["provider_requests"] < cfg["max_keywords_per_run"]
+                    and (existing["provider"], existing["device"], existing["requested_depth"])
+                    == (cfg["provider"], cfg["device"], cfg["depth"])):
+                remaining = cx.execute(text("""SELECT COUNT(*) FROM keywords WHERE site_id=:s AND status!='ignored'
+                  AND id NOT IN (SELECT keyword_id FROM serp_rank_observations WHERE run_id=:r)"""),
+                  {"s": site_id, "r": existing["id"]}).scalar() or 0
+                if remaining:
+                    claimed = cx.execute(text("""UPDATE serp_rank_runs SET status='queued',finished_at=NULL,error_code=NULL
+                      WHERE id=:i AND status='partial' AND error_code='daily_request_cap_reached'"""),
+                      {"i": existing["id"]})
+                    if claimed.rowcount:
+                        return {"status": "queued", "run_id": existing["id"], "resumed": True,
+                                "keywords_total": existing["keywords_total"], "remaining": remaining,
+                                "request_cap": cfg["max_keywords_per_run"]}
             return {"status": "already_scheduled", "run_id": existing["id"], "run_status": existing["status"]}
         count = cx.execute(text("SELECT COUNT(*) FROM keywords WHERE site_id=:s AND status!='ignored'"),
                            {"s": site_id}).scalar() or 0

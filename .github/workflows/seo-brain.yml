@@ -27,7 +27,9 @@ jobs:
         run: python -m pytest backend/tests -q
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    env:
+      UI_QA_CHROME: '1'
     defaults:
       run:
         working-directory: frontend
@@ -46,8 +48,9 @@ jobs:
         run: pnpm test
       - name: Production build
         run: pnpm build
-      - name: Install browser for UI checks
-        run: pnpm exec playwright install --with-deps chromium
+      # Chrome is preinstalled in actions/runner-images' Ubuntu 24.04 image.
+      - name: Verify installed Chrome for UI checks
+        run: google-chrome --version
       - name: Browser workflows and accessibility (synthetic data only)
         run: pnpm test:e2e
       - name: Upload UI failure evidence

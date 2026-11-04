@@ -1,6 +1,6 @@
 # UI release checks
 
-`pnpm test:e2e` starts an isolated synthetic API and the dashboard on loopback ports 18121/18120. CI runs the production build; local runs use webpack development mode. Install Chromium with `pnpm exec playwright install chromium` first, or set `UI_QA_CHROME=1` to use installed Chrome. No Google credentials, database, WordPress access or paid SERP requests are required.
+`pnpm test:e2e` starts an isolated synthetic API and the dashboard on loopback ports 18121/18120. CI runs the production build on Ubuntu 24.04 using its [preinstalled Chrome](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md), avoiding redundant browser downloads; local runs use webpack development mode. Install Chromium with `pnpm exec playwright install chromium` first, or set `UI_QA_CHROME=1` to use installed Chrome. No Google credentials, database, WordPress access or paid SERP requests are required.
 
 Covered tasks: overview navigation and source freshness at 320/375/768/1024/1440 px, Escape and focus return in the mobile menu, readable graph direction and keyboard selection, source failure, calendar failure/retry, named filters, keyboard opening of calendar articles, stale response after switching sites, and discoverable settings. Axe covers applicable WCAG A/AA rules in the checked states; this is not a full accessibility conformance audit.
 

@@ -14,6 +14,7 @@ for (const width of [320, 375, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.goto('/dashboard/overview');
     await expect(page.getByRole('navigation', { name: 'مسیرهای اصلی رشد' })).toBeVisible();
+    await expect(page.locator('header').getByRole('button', { name: 'کارهای پس‌زمینه', exact: true })).toBeVisible();
     await expect(page.getByRole('link', { name: /رتبهٔ واقعی کلمات/ })).toHaveAttribute('href', `/dashboard/rank-tracking?site=${site}`);
     await expect(page.getByLabel('تازگی داده‌های جست‌وجو')).toContainText('آخرین روز داده');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);

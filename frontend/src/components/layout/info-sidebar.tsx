@@ -21,13 +21,13 @@ const defaultData = {
     {
       title: 'SEO Brain چیست؟',
       description:
-        'سیستم‌عامل سئوی محلی: گراف دانش سایت، داده Search Console، استراتژی کلمات کلیدی، مغز محتوا و لینک‌سازی — همه روی همین دستگاه و فقط-خواندنی مگر اینکه خودتان حالت انتشار سایت را تغییر دهید.',
-      links: [{ title: 'معماری و نقشه راه (docs/seo-brain)', url: '#' }]
+        'از وضعیت داده‌های سایت شروع کنید، فرصت‌های سئو را بررسی کنید و اقدام بعدی را با شواهد همان سایت انتخاب کنید.',
+      links: [{ title: 'وضعیت سایت‌ها و اتصال‌ها', url: '/dashboard/sites' }]
     },
     {
       title: 'راهنمای هر بخش',
-      description: 'در هر صفحه، این پنل راهنمای همان بخش را نشان می‌دهد (فاز ۱۸ راهنمای کامل فارسی را اضافه می‌کند).',
-      links: []
+      description: 'برای بررسی یک مورد، ابتدا سایت و بازهٔ زمانی را انتخاب کنید. در نقشهٔ تصمیم روی گره کلیک کنید تا جزئیات و مسیر اقدام آن باز شود.',
+      links: [{ title: 'مرکز فرصت‌های سئو', url: '/dashboard/opportunities' }]
     }
   ]
 };
@@ -64,7 +64,7 @@ export function InfoSidebar({ ...props }: React.ComponentProps<typeof Infobar>) 
                     {section.links && section.links.length > 0 && (
                       <div className='flex flex-col gap-2'>
                         <h4 className='text-muted-foreground text-xs font-medium tracking-wide uppercase'>
-                          Learn more
+                          مسیرهای مرتبط
                         </h4>
                         <ul className='flex flex-col gap-1.5'>
                           {section.links.map((link) => (
@@ -72,8 +72,6 @@ export function InfoSidebar({ ...props }: React.ComponentProps<typeof Infobar>) 
                               <Link
                                 href={link.url}
                                 className='text-primary flex items-center gap-1.5 text-sm underline'
-                                target='_blank'
-                                rel='noopener noreferrer'
                               >
                                 <span>{link.title}</span>
                                 <Icons.chevronRight className='h-3 w-3' />
@@ -87,7 +85,7 @@ export function InfoSidebar({ ...props }: React.ComponentProps<typeof Infobar>) 
                 ))
               ) : (
                 <div className='text-muted-foreground px-2 py-4 text-center text-sm'>
-                  No content available
+                  راهنمایی برای این بخش ثبت نشده است.
                 </div>
               )}
             </div>

@@ -81,7 +81,7 @@ const actionFa: Record<string, string> = {
   review_indexing_and_intent: 'در نتایج دریافت‌شده دیده نشد؛ ایندکس، نیت جست‌وجو و عمق دریافت را بررسی کنید.'
 };
 const runErrorFa: Record<string, string> = {
-  daily_request_cap_reached: 'سقف درخواست روزانه رسید؛ کلمات باقی‌مانده در نوبت‌های بعدی بررسی می‌شوند.',
+  daily_request_cap_reached: 'سقف داخلی درخواست روزانه رسید. پس از افزایش سقف و بررسی اعتبار سرویس، «اجرای امروز» کلمات باقی‌مانده را ادامه می‌دهد.',
   provider_repeated_errors: 'منبع جست‌وجو چند بار نتیجهٔ معتبر نداد؛ پایش برای جلوگیری از درخواست‌های بی‌فایده متوقف شد.',
   provider_quota_or_rate_limit: 'سهمیه یا محدودیت درخواست منبع جست‌وجو مانع ادامهٔ پایش شد.',
   provider_auth_failed: 'اتصال به منبع جست‌وجو تأیید نشد؛ کلید سرویس باید بررسی شود.',
@@ -150,8 +150,8 @@ export function RankTrackingDashboard({ sites, initialSiteId }: { sites: Site[];
   async function runNow() {
     setBusy(true);
     try {
-      const response = await api<{ status: string; run_status?: string }>(`${path}/run`, { method: 'POST' });
-      if (response.status === 'queued') toast.success('پایش رتبه در صف قرار گرفت.');
+      const response = await api<{ status: string; run_status?: string; resumed?: boolean }>(`${path}/run`, { method: 'POST' });
+      if (response.status === 'queued') toast.success(response.resumed ? 'ادامهٔ کلمات باقی‌مانده در صف قرار گرفت؛ نتایج قبلی حفظ می‌شوند.' : 'پایش رتبه در صف قرار گرفت.');
       else toast.info(response.run_status === 'blocked' ? 'اجرای امروز متوقف شده است؛ زمان و علت را در وضعیت آخرین اجرا ببینید.' : 'اجرای امروز قبلاً ثبت شده است.');
       await load();
     } catch (cause) { toast.error(cause instanceof Error ? cause.message : 'اجرای پایش ممکن نشد.'); }

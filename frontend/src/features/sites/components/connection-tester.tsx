@@ -80,6 +80,8 @@ export function ConnectionTester({
       const extra = kind === 'wordpress' && wpUser && wpPass ? { wp_username: wpUser.trim(), wp_app_password: wpPass } : undefined;
       const r = await endpoints.testConnection(siteId, kind, value || null, extra);
       setResult(r);
+      if (kind === 'gsc') setGscProps((previous) => previous ? { ...previous, status: r.status } : previous);
+      if (kind === 'ga4') setGa4Props((previous) => previous ? { ...previous, status: r.status } : previous);
       onResult?.(r);
       if (kind === 'gsc' || kind === 'ga4') {
         const sj = r.detail?.sync_job as { status?: string; job_id?: string | null; error?: string | null } | undefined;
@@ -104,7 +106,7 @@ export function ConnectionTester({
     <div className='rounded-md border p-3'>
       <div className='mb-2 flex items-center justify-between gap-2'>
         <Label className='font-medium'>{label}</Label>
-        <StatusBadge status={kind === 'wordpress' && (result?.detail?.auth as { configured?: boolean; status?: string } | undefined)?.configured && (result?.detail?.auth as { status?: string }).status !== 'ok' ? 'not_authorized' : result?.status} />
+        <StatusBadge status={(kind === 'gsc' && gscProps?.status === 'not_authorized') || (kind === 'ga4' && ga4Props?.status === 'not_authorized') || (kind === 'wordpress' && (result?.detail?.auth as { configured?: boolean; status?: string } | undefined)?.configured && (result?.detail?.auth as { status?: string }).status !== 'ok') ? 'not_authorized' : result?.status} />
       </div>
       <div className='flex flex-col gap-2 md:flex-row'>
         {kind === 'gsc' && gscProps?.status === 'ok' && gscProps.properties.length > 0 ? (
@@ -170,7 +172,8 @@ export function ConnectionTester({
         <p className='text-muted-foreground mt-1 text-xs'>{gscProps.message ?? 'فهرست property های Google در دسترس نیست'} — می‌توانید property را دستی وارد کنید.</p>
       )}
       {result && (
-        <p className={`mt-2 text-sm ${result.ok && !(kind === 'wordpress' && (result.detail?.auth as { configured?: boolean; status?: string } | undefined)?.configured && (result.detail?.auth as { status?: string }).status !== 'ok') ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}`}>
+        <p className='mt-2 text-xs leading-6 text-muted-foreground'>
+          نتیجهٔ آخرین تست ثبت‌شده{Number.isFinite(Date.parse(result.tested_at)) ? ` (${new Date(result.tested_at).toLocaleDateString('fa-IR')})` : ''}: {' '}
           {result.message}
           {result.detail?.permission ? <span dir='ltr'> · {String(result.detail.permission)}</span> : null}
         </p>

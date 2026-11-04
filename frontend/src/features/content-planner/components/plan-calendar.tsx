@@ -39,6 +39,8 @@ export function PlanCalendar({ siteId, onOpenPlan, onOpenItem, onNewOnDay, refre
   while (cells.length % 7) cells.push(null);
   const today = iso(new Date());
   const scheduled = useMemo(() => Object.entries(cal?.days ?? {}).flatMap(([d, items]) => (items as Card[]).map((i) => ({ ...i, publish_date: d }))).sort((a, b) => (a.publish_date + (a.publish_time ?? '')).localeCompare(b.publish_date + (b.publish_time ?? ''))), [cal]);
+  const visibleDays = view === 'week' ? Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)) : month.days;
+  const mobileDays = visibleDays.filter((date) => (cal?.days[iso(date)] ?? []).length > 0);
   const CardBtn = ({ c, full }: { c: Card; full?: boolean }) => (
     <button draggable onDragStart={() => setDrag(c)} onClick={() => open(c)} title={`${c.title} · ${PLAN_STATUS_FA[c.status as PlanStatus] ?? c.status}${c.priority ? ` · اولویت ${PRIORITY_FA[c.priority]}` : ''}${c.category ? ` · ${c.category.name}` : ''}`}
             className={`flex items-center gap-1 truncate rounded px-1 py-0.5 text-start text-[11px] text-white ${full ? 'w-full' : ''}`} style={{ background: PLAN_STATUS_COLOR[c.status as PlanStatus] ?? '#64748b', borderInlineStart: `3px solid ${PRIORITY_COLOR[c.priority ?? ''] ?? 'transparent'}` }}>
@@ -56,6 +58,24 @@ export function PlanCalendar({ siteId, onOpenPlan, onOpenItem, onNewOnDay, refre
       </div>
       <div className='mt-1 flex flex-col gap-0.5'>{items.map((c) => <CardBtn key={`${c.kind ?? 'p'}-${c.id}`} c={c} full />)}</div>
     </div>); };
+  const mobileAgenda = (
+    <div className='space-y-2 md:hidden' aria-label='برنامهٔ روزانهٔ محتوا'>
+      {mobileDays.length === 0 && <p className='rounded-xl border border-dashed bg-card p-5 text-center text-sm text-muted-foreground'>برای این بازه محتوای زمان‌بندی‌شده‌ای نیست.</p>}
+      {mobileDays.map((date) => { const day = iso(date); const j = jalali(date); const items = (cal?.days[day] ?? []) as Card[]; return (
+        <section key={day} className='rounded-xl border bg-card p-3'>
+          <div className='mb-2 flex items-center justify-between gap-2 border-b pb-2'>
+            <div><strong className='text-sm'>{faNum.format(j.d)} {JMONTHS[j.m - 1]}</strong><span className='ms-2 text-xs text-muted-foreground' dir='ltr'>{day}</span></div>
+            {onNewOnDay && <button type='button' className='min-h-10 rounded-lg border px-3 text-xs font-medium hover:bg-muted' onClick={() => onNewOnDay(day)}>+ مقاله</button>}
+          </div>
+          <div className='space-y-2'>{items.map((c) => <button key={`${c.kind ?? 'p'}-${c.id}`} type='button' onClick={() => open(c)} className='flex min-h-12 w-full items-center gap-2 rounded-lg border bg-background px-3 text-start hover:bg-muted'>
+            <span className='size-2 shrink-0 rounded-full' style={{ background: PLAN_STATUS_COLOR[c.status as PlanStatus] ?? '#64748b' }} />
+            <span className='min-w-0 flex-1 text-sm font-medium'>{c.title}</span>
+            <span className='shrink-0 text-[11px] text-muted-foreground'>{PLAN_STATUS_FA[c.status as PlanStatus] ?? c.status}</span>
+          </button>)}</div>
+        </section>
+      ); })}
+    </div>
+  );
   return (
     <div className='flex flex-col gap-2'>
       <div className='flex flex-wrap items-center gap-1 text-xs'>
@@ -71,13 +91,16 @@ export function PlanCalendar({ siteId, onOpenPlan, onOpenItem, onNewOnDay, refre
       <Tabs value={view} onValueChange={(v) => setView(v as any)}>
         <TabsList><TabsTrigger value='month'>ماهانه</TabsTrigger><TabsTrigger value='week'>هفتگی</TabsTrigger><TabsTrigger value='list'>فهرست</TabsTrigger></TabsList>
         <TabsContent value='month'>
-          <div className='grid grid-cols-7 gap-1 text-center text-xs'>{WEEKDAYS_FA.map((w) => <div key={w} className='text-muted-foreground py-1 font-medium'>{w}</div>)}{cells.map((d, i) => (d ? dayCell(d) : <div key={i} className='min-h-24 rounded border border-dashed opacity-30' />))}</div>
+          {mobileAgenda}
+          <div className='hidden grid-cols-7 gap-1 text-center text-xs md:grid'>{WEEKDAYS_FA.map((w) => <div key={w} className='text-muted-foreground py-1 font-medium'>{w}</div>)}{cells.map((d, i) => (d ? dayCell(d) : <div key={i} className='min-h-24 rounded border border-dashed opacity-30' />))}</div>
         </TabsContent>
         <TabsContent value='week'>
-          <div className='grid grid-cols-7 gap-1 text-center text-xs'>{WEEKDAYS_FA.map((w) => <div key={w} className='text-muted-foreground py-1 font-medium'>{w}</div>)}{Array.from({ length: 7 }, (_, i) => dayCell(addDays(weekStart, i), true))}</div>
+          {mobileAgenda}
+          <div className='hidden grid-cols-7 gap-1 text-center text-xs md:grid'>{WEEKDAYS_FA.map((w) => <div key={w} className='text-muted-foreground py-1 font-medium'>{w}</div>)}{Array.from({ length: 7 }, (_, i) => dayCell(addDays(weekStart, i), true))}</div>
         </TabsContent>
         <TabsContent value='list'>
-          <div className='overflow-x-auto rounded-md border'><Table>
+          {mobileAgenda}
+          <div className='hidden overflow-x-auto rounded-md border md:block'><Table>
             <TableHeader><TableRow><TableHead>تاریخ</TableHead><TableHead>عنوان</TableHead><TableHead>کلمه کلیدی</TableHead><TableHead>دسته</TableHead><TableHead>وضعیت</TableHead><TableHead>اولویت</TableHead></TableRow></TableHeader>
             <TableBody>{scheduled.map((c) => { const j = jalali(new Date(c.publish_date + 'T00:00:00Z')); return (
               <TableRow key={`${c.kind ?? 'p'}-${c.id}`} className='cursor-pointer' onClick={() => open(c)}><TableCell title={c.publish_date}>{faNum.format(j.d)} {JMONTHS[j.m - 1]} {faYear.format(j.y)}{c.publish_time && <span className='text-muted-foreground' dir='ltr'> · {c.publish_time}</span>}</TableCell><TableCell className='font-medium'>{c.title}</TableCell><TableCell>{c.primary_keyword ?? '—'}</TableCell><TableCell>{c.category?.name ?? '—'}</TableCell><TableCell><Badge style={{ background: PLAN_STATUS_COLOR[c.status as PlanStatus] }}>{PLAN_STATUS_FA[c.status as PlanStatus] ?? c.status}</Badge></TableCell><TableCell>{c.priority ? PRIORITY_FA[c.priority] : '—'}</TableCell></TableRow>); })}

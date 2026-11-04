@@ -13,7 +13,7 @@ import { endpoints, type IpGraph, type IpGraphNode } from '@/lib/api/client';
 import { cn } from '@/lib/utils';
 
 /** Entry-flow graph: source → visitor/IP → landing page → goal (تماس / فرم). `seo` = cookieless tracker (anonymous daily
- *  visitors), `ads` = ads collector (real IPs + click-fraud risk). Same glass/flow language as the knowledge graph. */
+ *  visitors), `ads` = ads collector (real IPs + click-fraud risk). */
 
 type Kind = IpGraphNode['kind'];
 const KIND: Record<Kind, { color: string; fa: string; Icon: typeof IconRoute; w: number; h: number; x: number; gap: number }> = {
@@ -43,8 +43,8 @@ function CardImpl({ data, selected }: NodeProps<CardNode>) {
   return (
     <div
       dir='rtl'
-      className={cn('flex items-center gap-2 rounded-2xl border px-3 py-1.5 text-xs backdrop-blur-md transition-all duration-300', data.dimmed && 'opacity-25', lit && 'scale-[1.05]')}
-      style={{ width: k.w, minHeight: k.h, borderColor: `${tone}${lit ? 'ff' : '70'}`, background: 'color-mix(in oklab, var(--card) 74%, transparent)', boxShadow: lit ? `0 0 0 1px ${tone}66, 0 0 28px ${tone}55` : `0 0 12px ${tone}22` }}
+      className={cn('flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs transition-colors duration-200', data.dimmed && 'opacity-25')}
+      style={{ width: k.w, minHeight: k.h, borderColor: `${tone}${lit ? 'ff' : '70'}`, background: 'var(--card)', boxShadow: lit ? `0 0 0 2px ${tone}` : undefined }}
     >
       <Handle type='target' position={Position.Left} style={{ opacity: 0, pointerEvents: 'none' }} />
       <Handle type='source' position={Position.Right} style={{ opacity: 0, pointerEvents: 'none' }} />

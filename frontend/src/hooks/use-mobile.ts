@@ -1,6 +1,8 @@
 import * as React from 'react';
 
-const MOBILE_BREAKPOINT = 768;
+// Keep the full navigation off the canvas until there is room for both
+// the sidebar and a readable analytics workspace.
+const MOBILE_BREAKPOINT = 1024;
 
 export function useIsMobile() {
   const [isMobile, setIsMobile] = React.useState<boolean | undefined>(undefined);

@@ -44,20 +44,36 @@ export default function AppSidebar() {
 
   return (
     <Sidebar collapsible='icon' side='right'>
-      <SidebarHeader className='border-b'>
+      <SidebarHeader className='border-b border-sidebar-border/70'>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size='lg' tooltip='SEO Brain' render={<Link href='/dashboard/overview' aria-label='صفحه اصلی SEO Brain' />} className='data-[state=open]:bg-sidebar-accent'>
-              <span className='bg-primary text-primary-foreground flex size-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold'>SB</span>
-              <span className='grid flex-1 text-start leading-tight'><span className='truncate text-sm font-semibold'>SEO Brain</span><span className='text-muted-foreground truncate text-[11px]'>سیستم‌عامل سئوی محلی</span></span>
+            <SidebarMenuButton
+              size='lg'
+              tooltip='SEO Brain'
+              render={<Link href='/dashboard/overview' aria-label='صفحه اصلی SEO Brain' />}
+              className='data-[state=open]:bg-sidebar-accent'
+            >
+              <span className='flex size-8 shrink-0 items-center justify-center rounded-lg bg-slate-950 text-xs font-bold tracking-wide text-teal-300 dark:bg-teal-300 dark:text-slate-950'>
+                SB
+              </span>
+              <span className='grid flex-1 text-start leading-tight'>
+                <span className='truncate text-sm font-semibold'>SEO Brain</span>
+                <span className='text-muted-foreground truncate text-[11px]'>
+                  مرکز تصمیم و اجرای سئو
+                </span>
+              </span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent className='overflow-x-hidden'>
         {filteredGroups.map((group) => (
-          <SidebarGroup key={group.label || 'ungrouped'} className='py-0'>
-            {group.label && <SidebarGroupLabel>{group.label}</SidebarGroupLabel>}
+          <SidebarGroup key={group.label || 'ungrouped'} className='py-1'>
+            {group.label && (
+              <SidebarGroupLabel className='text-[10px] font-semibold text-sidebar-foreground/55'>
+                {group.label}
+              </SidebarGroupLabel>
+            )}
             <SidebarMenu>
               {group.items.map((item) => {
                 const Icon = item.icon ? Icons[item.icon] : Icons.logo;
@@ -101,6 +117,7 @@ export default function AppSidebar() {
                       render={<Link href={item.url} aria-label={item.title} />}
                       tooltip={item.title}
                       isActive={pathname === item.url}
+                      className='data-active:bg-teal-500/10 data-active:font-semibold data-active:text-teal-800 dark:data-active:text-teal-200'
                     >
                       <Icon />
                       <span>{item.title}</span>
@@ -124,7 +141,7 @@ export default function AppSidebar() {
                   />
                 }
               >
-                <span className='truncate'>SEO Brain · نسخه محلی</span>
+                <span className='truncate'>تنظیمات و اتصال‌ها</span>
                 <Icons.chevronsDown className='ms-auto size-4' />
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -136,7 +153,7 @@ export default function AppSidebar() {
                 <DropdownMenuGroup>
                   <DropdownMenuLabel className='p-0 font-normal'>
                     <div className='text-muted-foreground px-1 py-1.5 text-sm'>
-                      کاربر محلی — بدون ورود. بک‌اند: 127.0.0.1:8000
+                      مدیریت ظاهر، اتصال‌ها و ترجیحات داشبورد
                     </div>
                   </DropdownMenuLabel>
                 </DropdownMenuGroup>

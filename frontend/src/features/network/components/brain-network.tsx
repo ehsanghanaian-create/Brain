@@ -60,13 +60,13 @@ function NetNodeImpl({ data, selected }: NodeProps<NetFlowNode>) {
   return (
     <div
       dir='rtl'
-      className={cn('flex items-center gap-2 rounded-2xl border px-3 py-2 text-xs backdrop-blur-md transition-all duration-300', data.dimmed && 'opacity-30', lit && 'scale-[1.05]')}
+      className={cn('flex items-center gap-2 rounded-xl border px-3 py-2 text-xs transition-colors duration-200', data.dimmed && 'opacity-30')}
       style={{
         width: k.w,
         minHeight: k.h,
         borderColor: `${k.color}${lit ? 'ff' : '66'}`,
-        background: 'color-mix(in oklab, var(--card) 74%, transparent)',
-        boxShadow: lit ? `0 0 0 1px ${k.color}66, 0 0 30px ${k.color}55` : `0 0 14px ${k.color}22`
+        background: 'var(--card)',
+        boxShadow: lit ? `0 0 0 2px ${k.color}` : undefined
       }}
     >
       <Handle type='target' position={Position.Top} style={{ opacity: 0, pointerEvents: 'none' }} />

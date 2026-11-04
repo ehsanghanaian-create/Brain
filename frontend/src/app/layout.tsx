@@ -1,5 +1,4 @@
 import Providers from '@/components/layout/providers';
-import { SparkleLayer } from '@/components/layout/sparkle-layer';
 import { Toaster } from '@/components/ui/sonner';
 import { fontVariables } from '@/components/themes/font.config';
 import { DEFAULT_THEME, THEMES } from '@/components/themes/theme.config';
@@ -62,14 +61,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <NuqsAdapter>
           <ThemeProvider
             attribute='class'
-            defaultTheme='dark'
+            defaultTheme='light'
             enableSystem
             disableTransitionOnChange
             enableColorScheme
           >
             <Providers activeThemeValue={themeToApply}>
               <Toaster />
-              <SparkleLayer />
               {children}
             </Providers>
           </ThemeProvider>

@@ -233,6 +233,7 @@ function CommandCenterInner({ sites, portfolio, initialSiteId, initialMode = 'se
       return;
     }
     setDetailsLoading(true);
+    setDetails(null);
     setDetailsError(null);
     endpoints
       .nodeDetails(state.siteId, selectedId)
@@ -280,7 +281,7 @@ function CommandCenterInner({ sites, portfolio, initialSiteId, initialMode = 'se
         <span className='text-xs text-muted-foreground'>شواهد و اقدام هر مورد در پروندهٔ همان گره دیده می‌شود.</span>
       </div>
       <div className='grid min-w-0 min-h-[640px] gap-3 xl:h-[min(79vh,900px)] xl:grid-cols-[minmax(0,1fr)_360px]'>
-        {display === 'list' && view && <GraphRelationshipList view={view} query={state.query} hiddenTypes={hiddenTypes} hiddenRelations={state.relationOff} onSelect={(id) => setSelectedId(id)} />}
+        {display === 'list' && view && <GraphRelationshipList view={view} query={state.query} hiddenTypes={hiddenTypes} hiddenRelations={state.relationOff} focusId={state.focusNeighbors ? selectedId : null} onSelect={(id) => setSelectedId(id)} />}
         <div className={`graph-map relative min-w-0 min-h-[500px] overflow-hidden rounded-2xl border border-border ${display === 'list' ? 'hidden' : ''} ${animating ? 'graph-animating' : ''}`} dir='ltr'>
           {view && view.nodes.length > 0 && <div className='graph-map-legend pointer-events-none absolute top-3 left-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs' dir='rtl'>
             <span><strong>{nodes.filter((node) => node.type === 'seo').length.toLocaleString('fa-IR')}</strong> گره نمایان</span>

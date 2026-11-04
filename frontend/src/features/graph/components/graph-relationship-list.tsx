@@ -4,17 +4,18 @@ import type { GraphView } from '@/lib/api/client';
 import { NODE_STYLE, RELATION_FA } from '../constants';
 
 /** The same sampled evidence as the map, with explicit direction and keyboard access. */
-export function GraphRelationshipList({ view, query, hiddenTypes, hiddenRelations, onSelect }: {
+export function GraphRelationshipList({ view, query, hiddenTypes, hiddenRelations, focusId, onSelect }: {
   view: GraphView; query: string; hiddenTypes: Set<string>; hiddenRelations: Set<string>;
-  onSelect: (id: string) => void;
+  focusId: string | null; onSelect: (id: string) => void;
 }) {
   const nodes = new Map(view.nodes.filter((n) => !hiddenTypes.has(n.type)).map((n) => [n.id, n]));
   const q = query.trim().toLocaleLowerCase();
   const label = (id: string) => String(nodes.get(id)?.metadata.label || id);
-  const relations = view.edges.filter((e) => nodes.has(e.source) && nodes.has(e.target) && !hiddenRelations.has(e.relation_type) && (!q || `${label(e.source)} ${label(e.target)}`.toLocaleLowerCase().includes(q)));
+  const relations = view.edges.filter((e) => nodes.has(e.source) && nodes.has(e.target) && (!focusId || e.source === focusId || e.target === focusId) && !hiddenRelations.has(e.relation_type) && (!q || `${label(e.source)} ${label(e.target)}`.toLocaleLowerCase().includes(q)));
   return <section aria-label='فهرست ارتباط‌های گراف' className='graph-panel min-w-0 rounded-2xl p-4'>
     <h2 className='text-base font-semibold'>ارتباط‌ها به زبان ساده</h2>
     <p className='mt-1 text-xs leading-6 text-muted-foreground'>هر ردیف از مبدأ به مقصد خوانده می‌شود. روی نام کلیک کنید تا شواهد و اقدام آن همین‌جا باز شود. این فهرست از نمونهٔ بارگذاری‌شده است، نه همهٔ روابط سایت.</p>
+    {focusId && <p className='mt-2 text-xs leading-6 text-primary'>فقط ارتباط‌های گرهٔ انتخاب‌شده نمایش داده می‌شود. برای گسترش، «نمایش کل گراف» را بزنید.</p>}
     <p role='status' className='my-3 text-xs text-muted-foreground'>{relations.length.toLocaleString('fa-IR')} رابطه مطابق فیلترها{relations.length > 80 ? '؛ ۸۰ مورد نخست نمایش داده می‌شود.' : ''}</p>
     <ol className='max-h-[560px] space-y-2 overflow-y-auto'>
       {relations.slice(0, 80).map((edge, i) => <li key={`${edge.source}-${edge.target}-${edge.relation_type}-${i}`} className='grid gap-2 rounded-xl border border-border p-3 text-sm sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center'>

@@ -37,6 +37,13 @@ test('source failure is explained without claiming the data is fresh', async ({ 
 });
 
 test('graph relationships can be read and selected using the keyboard', async ({ page }) => {
+  if (!external) await page.route('**/graph/view?**', async route => {
+    const response = await route.fetch(); const data = await response.json();
+    data.nodes.push({ id: 'unrelated-page', site_id: site, type: 'PAGE', metadata: { label: 'صفحهٔ نامرتبط' } }, { id: 'unrelated-query', site_id: site, type: 'QUERY', metadata: { label: 'پرسش نامرتبط' } });
+    data.edges.push({ source: 'unrelated-page', target: 'unrelated-query', relation_type: 'RANKS_FOR', site_id: site, weight: 1, metadata: {} });
+    data.total_nodes = 4;
+    await route.fulfill({ response, json: data });
+  });
   await page.setViewportSize({ width: 375, height: 900 });
   await page.goto(`/dashboard/graph?site=${site}`);
   await page.getByRole('button', { name: 'فهرست خوانای ارتباط‌ها', exact: true }).click();
@@ -44,7 +51,13 @@ test('graph relationships can be read and selected using the keyboard', async ({
   await expect(list).toBeVisible();
   await expect(list.getByText(/مبدأ ·/).first()).toBeVisible();
   await expect(list.getByText(/مقصد ·/).first()).toBeVisible();
-  const node = list.getByRole('button').first(); await node.focus(); await page.keyboard.press('Enter');
+  if (!external) {
+    await expect(list.getByRole('button', { name: 'صفحهٔ نامرتبط' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'نمایش کل گراف', exact: true }).click();
+    await expect(list.getByRole('button', { name: 'صفحهٔ نامرتبط' })).toBeVisible();
+  }
+  const node = list.getByRole('button').nth(1); const label = await node.innerText(); await node.focus(); await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: label, exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'بستن جزئیات گره' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
 });

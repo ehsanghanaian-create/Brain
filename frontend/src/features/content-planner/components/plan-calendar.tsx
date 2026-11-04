@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { JMONTHS, WEEKDAYS_FA, addDays, faNum, faYear, iso, jalali, jalaliMonthDays } from '@/features/content/constants';
 import { ApiError, endpoints, type PlanStatus } from '@/lib/api/client';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { PLAN_STATUS_COLOR, PLAN_STATUS_FA, PLAN_STATUS_ORDER, PRIORITY_COLOR, PRIORITY_FA } from '../constants';
 
@@ -18,14 +18,23 @@ export function PlanCalendar({ siteId, onOpenPlan, onOpenItem, onNewOnDay, refre
   const [anchor, setAnchor] = useState(() => new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())));
   const [view, setView] = useState<'month' | 'week' | 'list'>('month');
   const [cal, setCal] = useState<Awaited<ReturnType<typeof endpoints.planCalendar>> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const request = useRef(0);
   const [filters, setFilters] = useState({ category_id: '', status: '', priority: '' });
   const [drag, setDrag] = useState<Card | null>(null);
   const month = useMemo(() => jalaliMonthDays(anchor), [anchor]);
   const first = month.days[0]; const last = month.days[month.days.length - 1];
   const weekStart = useMemo(() => addDays(anchor, -((anchor.getUTCDay() + 1) % 7)), [anchor]);
   const from = view === 'week' ? iso(weekStart) : iso(addDays(first, -7)); const to = view === 'week' ? iso(addDays(weekStart, 6)) : iso(addDays(last, 7));
-  const load = useCallback(async () => { try { setCal(await endpoints.planCalendar(siteId, { from, to, ...filters })); } catch (e) { toast.error(e instanceof ApiError ? e.message : String(e)); } }, [siteId, from, to, filters]);
-  useEffect(() => { load(); }, [load, refreshKey]);
+  const load = useCallback(async () => {
+    const current = ++request.current;
+    setLoading(true); setLoadError(null); setCal(null);
+    try { const result = await endpoints.planCalendar(siteId, { from, to, ...filters }); if (current === request.current) setCal(result); }
+    catch (e) { if (current === request.current) setLoadError(e instanceof ApiError ? e.message : 'دریافت برنامه ناموفق بود.'); }
+    finally { if (current === request.current) setLoading(false); }
+  }, [siteId, from, to, filters]);
+  useEffect(() => { void load(); return () => { request.current++; }; }, [load, refreshKey]);
   async function reschedule(c: Card, day: string | null) {
     try {
       if (c.kind === 'content_item') await endpoints.updateContent(siteId, c.id, day ? { publish_date: day } : { clear_date: true });
@@ -43,7 +52,7 @@ export function PlanCalendar({ siteId, onOpenPlan, onOpenItem, onNewOnDay, refre
   const mobileDays = visibleDays.filter((date) => (cal?.days[iso(date)] ?? []).length > 0);
   const CardBtn = ({ c, full }: { c: Card; full?: boolean }) => (
     <button draggable onDragStart={() => setDrag(c)} onClick={() => open(c)} title={`${c.title} · ${PLAN_STATUS_FA[c.status as PlanStatus] ?? c.status}${c.priority ? ` · اولویت ${PRIORITY_FA[c.priority]}` : ''}${c.category ? ` · ${c.category.name}` : ''}`}
-            className={`flex items-center gap-1 truncate rounded px-1 py-0.5 text-start text-[11px] text-white ${full ? 'w-full' : ''}`} style={{ background: PLAN_STATUS_COLOR[c.status as PlanStatus] ?? '#64748b', borderInlineStart: `3px solid ${PRIORITY_COLOR[c.priority ?? ''] ?? 'transparent'}` }}>
+            className={`flex min-h-8 items-center gap-1 truncate rounded px-2 py-1 text-start text-xs text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${full ? 'w-full' : ''}`} style={{ background: PLAN_STATUS_COLOR[c.status as PlanStatus] ?? '#64748b', borderInlineStart: `3px solid ${PRIORITY_COLOR[c.priority ?? ''] ?? 'transparent'}` }}>
       {c.kind === 'content_item' && <span title='آیتم محتوا بدون برنامه'>◦</span>}{c.publish_time ? <span dir='ltr'>{c.publish_time}</span> : null}<span className='truncate'>{c.title}</span>
     </button>
   );
@@ -83,12 +92,14 @@ export function PlanCalendar({ siteId, onOpenPlan, onOpenItem, onNewOnDay, refre
         <span className='text-sm font-semibold'>{view === 'week' ? `هفته ${faNum.format(jalali(weekStart).d)} ${JMONTHS[jalali(weekStart).m - 1]}` : `${JMONTHS[month.m - 1]} ${faYear.format(month.y)}`}</span>
         <Button variant='outline' size='sm' onClick={() => setAnchor(view === 'week' ? addDays(anchor, 7) : addDays(last, 1))}>{view === 'week' ? 'هفته بعد' : 'ماه بعد'} ›</Button>
         <Button variant='ghost' size='sm' onClick={() => setAnchor(new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())))}>امروز</Button>
-        <NativeSelect value={filters.category_id} onChange={(e) => setFilters((f) => ({ ...f, category_id: e.target.value }))} className='h-8 w-36'><NativeSelectOption value=''>همه دسته‌ها</NativeSelectOption>{(cal?.categories ?? []).map((c) => <NativeSelectOption key={c.id} value={c.id}>{c.name}</NativeSelectOption>)}</NativeSelect>
-        <NativeSelect value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))} className='h-8 w-32'><NativeSelectOption value=''>همه وضعیت‌ها</NativeSelectOption>{PLAN_STATUS_ORDER.map((s) => <NativeSelectOption key={s} value={s}>{PLAN_STATUS_FA[s]}</NativeSelectOption>)}</NativeSelect>
-        <NativeSelect value={filters.priority} onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value }))} className='h-8 w-24'><NativeSelectOption value=''>اولویت</NativeSelectOption>{Object.entries(PRIORITY_FA).map(([k, v]) => <NativeSelectOption key={k} value={k}>{v}</NativeSelectOption>)}</NativeSelect>
+        <NativeSelect aria-label='فیلتر دستهٔ محتوا' value={filters.category_id} onChange={(e) => setFilters((f) => ({ ...f, category_id: e.target.value }))} className='h-8 w-36'><NativeSelectOption value=''>همه دسته‌ها</NativeSelectOption>{(cal?.categories ?? []).map((c) => <NativeSelectOption key={c.id} value={c.id}>{c.name}</NativeSelectOption>)}</NativeSelect>
+        <NativeSelect aria-label='فیلتر وضعیت محتوا' value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))} className='h-8 w-32'><NativeSelectOption value=''>همه وضعیت‌ها</NativeSelectOption>{PLAN_STATUS_ORDER.map((s) => <NativeSelectOption key={s} value={s}>{PLAN_STATUS_FA[s]}</NativeSelectOption>)}</NativeSelect>
+        <NativeSelect aria-label='فیلتر اولویت محتوا' value={filters.priority} onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value }))} className='h-8 w-24'><NativeSelectOption value=''>اولویت</NativeSelectOption>{Object.entries(PRIORITY_FA).map(([k, v]) => <NativeSelectOption key={k} value={k}>{v}</NativeSelectOption>)}</NativeSelect>
         <span className='ms-auto flex flex-wrap gap-2'>{PLAN_STATUS_ORDER.map((s) => <span key={s} className='flex items-center gap-1'><span className='inline-block h-2.5 w-2.5 rounded-full' style={{ background: PLAN_STATUS_COLOR[s] }} />{PLAN_STATUS_FA[s]} {cal ? faNum.format(cal.counts.by_status[s] ?? 0) : ''}</span>)}</span>
       </div>
-      <Tabs value={view} onValueChange={(v) => setView(v as any)}>
+      {loading && <p role='status' className='rounded-xl border bg-muted p-6 text-sm'>در حال دریافت برنامهٔ محتوا…</p>}
+      {loadError && <div role='alert' aria-label='خطای تقویم' className='rounded-xl border border-destructive/40 p-4 text-sm'><p>برنامه دریافت نشد. این وضعیت به معنی خالی بودن تقویم نیست.</p><p className='mt-1 text-muted-foreground'>{loadError}</p><Button variant='outline' className='mt-3' onClick={() => void load()}>تلاش دوباره</Button></div>}
+      {cal && <><Tabs value={view} onValueChange={(v) => setView(v as any)}>
         <TabsList><TabsTrigger value='month'>ماهانه</TabsTrigger><TabsTrigger value='week'>هفتگی</TabsTrigger><TabsTrigger value='list'>فهرست</TabsTrigger></TabsList>
         <TabsContent value='month'>
           {mobileAgenda}
@@ -103,15 +114,16 @@ export function PlanCalendar({ siteId, onOpenPlan, onOpenItem, onNewOnDay, refre
           <div className='hidden overflow-x-auto rounded-md border md:block'><Table>
             <TableHeader><TableRow><TableHead>تاریخ</TableHead><TableHead>عنوان</TableHead><TableHead>کلمه کلیدی</TableHead><TableHead>دسته</TableHead><TableHead>وضعیت</TableHead><TableHead>اولویت</TableHead></TableRow></TableHeader>
             <TableBody>{scheduled.map((c) => { const j = jalali(new Date(c.publish_date + 'T00:00:00Z')); return (
-              <TableRow key={`${c.kind ?? 'p'}-${c.id}`} className='cursor-pointer' onClick={() => open(c)}><TableCell title={c.publish_date}>{faNum.format(j.d)} {JMONTHS[j.m - 1]} {faYear.format(j.y)}{c.publish_time && <span className='text-muted-foreground' dir='ltr'> · {c.publish_time}</span>}</TableCell><TableCell className='font-medium'>{c.title}</TableCell><TableCell>{c.primary_keyword ?? '—'}</TableCell><TableCell>{c.category?.name ?? '—'}</TableCell><TableCell><Badge style={{ background: PLAN_STATUS_COLOR[c.status as PlanStatus] }}>{PLAN_STATUS_FA[c.status as PlanStatus] ?? c.status}</Badge></TableCell><TableCell>{c.priority ? PRIORITY_FA[c.priority] : '—'}</TableCell></TableRow>); })}
+              <TableRow key={`${c.kind ?? 'p'}-${c.id}`}><TableCell title={c.publish_date}>{faNum.format(j.d)} {JMONTHS[j.m - 1]} {faYear.format(j.y)}{c.publish_time && <span className='text-muted-foreground' dir='ltr'> · {c.publish_time}</span>}</TableCell><TableCell className='font-medium'><button type='button' onClick={() => open(c)} className='min-h-11 text-start text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring'>{c.title}</button></TableCell><TableCell>{c.primary_keyword ?? '—'}</TableCell><TableCell>{c.category?.name ?? '—'}</TableCell><TableCell><Badge style={{ background: PLAN_STATUS_COLOR[c.status as PlanStatus] }}>{PLAN_STATUS_FA[c.status as PlanStatus] ?? c.status}</Badge></TableCell><TableCell>{c.priority ? PRIORITY_FA[c.priority] : '—'}</TableCell></TableRow>); })}
               {scheduled.length === 0 && <TableRow><TableCell colSpan={6} className='text-muted-foreground text-center'>در این بازه برنامه‌ای نیست.</TableCell></TableRow>}
             </TableBody></Table></div>
         </TabsContent>
       </Tabs>
       <div className='rounded-lg border border-dashed p-2' onDragOver={(e) => e.preventDefault()} onDrop={() => { if (drag) reschedule(drag, null); setDrag(null); }}>
-        <div className='mb-1 text-xs font-medium'>بدون تاریخ ({faNum.format(cal?.unscheduled.length ?? 0)}) — برای زمان‌بندی، به یک روز بکشید</div>
-        <div className='flex flex-wrap gap-1'>{(cal?.unscheduled ?? []).map((p) => <Badge key={p.id} draggable onDragStart={() => setDrag({ ...p, publish_date: '' })} onClick={() => onOpenPlan(p.id)} className='cursor-grab' style={{ background: PLAN_STATUS_COLOR[p.status] }}>{p.title}</Badge>)}</div>
+        <div className='mb-1 text-xs font-medium'>بدون تاریخ ({faNum.format(cal.unscheduled.length)}) — برای تعیین تاریخ، مقاله را باز کنید یا به یک روز بکشید</div>
+        <div className='flex flex-wrap gap-2'>{cal.unscheduled.map((p) => <button type='button' key={p.id} draggable onDragStart={() => setDrag({ ...p, publish_date: '' })} onClick={() => onOpenPlan(p.id)} className='min-h-11 rounded-lg border bg-card px-3 py-2 text-start text-sm text-primary focus-visible:outline-2 focus-visible:outline-ring'>{p.title}</button>)}</div>
       </div>
+      </>}
     </div>
   );
 }

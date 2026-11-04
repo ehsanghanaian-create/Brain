@@ -17,8 +17,8 @@ describe('graph mapping', () => {
   it('maps nodes with type colours and per-type metrics', () => {
     const fn = toFlowNodes(nodes);
     expect(fn.map((n) => n.id)).toEqual(nodes.map((n) => n.id));
-    expect(fn[1].data.metric).toBe('3 in · #7.9');
-    expect(fn[2].data.metric).toBe('#8.2 · 100 imp');
+    expect(fn[1].data.metric).toBe('3 لینک ورودی · میانگین GSC: 7.9');
+    expect(fn[2].data.metric).toBe('میانگین جایگاه: 8.2 · 100 نمایش');
     expect(fn[3].data.metric).toBe('3 high');
     expect(fn[0].data.color).toMatch(/^#/);
   });

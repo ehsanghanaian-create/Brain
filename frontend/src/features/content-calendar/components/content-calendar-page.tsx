@@ -34,9 +34,9 @@ export function ContentCalendarPage({ sites, initialSiteId, initialPlanId }: { s
   return (
     <div className='flex flex-col gap-3'>
       <div className='flex flex-wrap items-center gap-2'>
-        <NativeSelect value={siteId} onChange={(e) => switchSite(e.target.value)} className='w-48'>{sites.map((s) => <NativeSelectOption key={s.site_id} value={s.site_id}>{s.name}</NativeSelectOption>)}</NativeSelect>
+        <label className='space-y-1 text-xs text-muted-foreground'><span className='block'>سایت تقویم</span><NativeSelect value={siteId} onChange={(e) => switchSite(e.target.value)} className='w-48'>{sites.map((s) => <NativeSelectOption key={s.site_id} value={s.site_id}>{s.name}</NativeSelectOption>)}</NativeSelect></label>
         {site && !site.wp_url && <span className='text-xs text-amber-600'>این سایت آدرس وردپرس ندارد — انتشار غیرفعال است.</span>}
-        <button type='button' className='flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors hover:bg-accent' onClick={() => setKeysOpen(true)} title='کلیدهای نویسندهٔ هوش مصنوعی'>
+        <button type='button' className='flex min-h-11 flex-wrap items-center gap-1.5 rounded-md border px-3 py-2 text-xs transition-colors hover:bg-accent' onClick={() => setKeysOpen(true)} title='کلیدهای نویسندهٔ هوش مصنوعی'>
           {WRITER_KINDS.map((k) => { const st = keyStatus(providers.find((p) => p.kind === k.kind)); return <span key={k.kind} className='flex items-center gap-1'><span className='inline-block h-2 w-2 rounded-full' style={{ background: TONE_COLOR[st.tone] }} />{k.label}: {st.text}</span>; })}
           <Badge variant='outline' className='ms-1'>کلیدها</Badge>
         </button>

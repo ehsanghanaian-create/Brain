@@ -32,14 +32,14 @@ function metricFor(n: GraphNode): string | undefined {
   if (n.type === 'QUERY' || n.type === 'KEYWORD') {
     const pos = p.position as number | undefined;
     const imp = p.impressions as number | undefined;
-    if (pos != null) return `#${Number(pos).toFixed(1)}${imp != null ? ` · ${imp} imp` : ''}`;
+    if (pos != null) return `میانگین جایگاه: ${Number(pos).toFixed(1)}${imp != null ? ` · ${imp} نمایش` : ''}`;
   }
   if (n.type === 'PAGE' || n.type === 'POST' || n.type === 'CATEGORY') {
     const inn = p.internal_links_in as number | undefined;
     const pos = p.gsc_position as number | undefined;
     const parts = [];
-    if (inn != null) parts.push(`${inn} in`);
-    if (pos != null) parts.push(`#${Number(pos).toFixed(1)}`);
+    if (inn != null) parts.push(`${inn} لینک ورودی`);
+    if (pos != null) parts.push(`میانگین GSC: ${Number(pos).toFixed(1)}`);
     if (parts.length) return parts.join(' · ');
   }
   if (n.type === 'SEO_PROBLEM') return `${p.count ?? ''} ${p.severity ?? ''}`.trim() || undefined;

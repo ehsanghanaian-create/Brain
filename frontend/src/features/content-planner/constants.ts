@@ -2,8 +2,8 @@ import type { PlanStatus } from '@/lib/api/client';
 
 export const PLAN_STATUS_ORDER: PlanStatus[] = ['planned', 'researching', 'brief_ready', 'writing', 'review', 'approved', 'published'];
 export const PLAN_STATUS_FA: Record<PlanStatus, string> = { planned: 'برنامه‌ریزی‌شده', researching: 'در حال تحقیق', brief_ready: 'بریف آماده', writing: 'در حال نگارش', review: 'بازبینی', approved: 'تأییدشده', published: 'منتشرشده' };
-export const PLAN_STATUS_COLOR: Record<PlanStatus, string> = { planned: '#64748b', researching: '#6366f1', brief_ready: '#0ea5e9', writing: '#f59e0b', review: '#a855f7', approved: '#22c55e', published: '#16a34a' };
-export const PRIORITY_COLOR: Record<string, string> = { high: '#dc2626', medium: '#f59e0b', low: '#94a3b8' };
+export const PLAN_STATUS_COLOR: Record<PlanStatus, string> = { planned: '#64748b', researching: '#6366f1', brief_ready: '#0369a1', writing: '#92400e', review: '#a855f7', approved: '#15803d', published: '#15803d' };
+export const PRIORITY_COLOR: Record<string, string> = { high: '#dc2626', medium: '#92400e', low: '#94a3b8' };
 export const PRIORITY_FA: Record<string, string> = { high: 'بالا', medium: 'متوسط', low: 'پایین' };
 export const INTENT_FA: Record<string, string> = { informational: 'اطلاعاتی', navigational: 'ناوبری', commercial: 'تجاری', transactional: 'تراکنشی', local: 'محلی' };
 export const PAGE_TYPE_FA: Record<string, string> = { service_landing: 'لندینگ خدمت', location_landing: 'لندینگ مکان', pillar: 'صفحه ستون', article: 'مقاله', guide: 'راهنما', comparison: 'مقایسه', faq: 'پرسش‌های متداول', product: 'محصول', category_page: 'صفحه دسته', news: 'خبر' };

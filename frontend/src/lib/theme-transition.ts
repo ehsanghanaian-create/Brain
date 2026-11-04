@@ -10,7 +10,7 @@ export function startThemeTransition(
 ) {
   const root = document.documentElement;
 
-  if (!document.startViewTransition) {
+  if (!document.startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     apply();
     return;
   }

@@ -65,6 +65,10 @@ test('quick access saves route choices and ordering, while collapsed rail preser
     .click();
   await expect(page.getByRole('button', { name: 'جمع کردن منو', exact: true })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'دسترسی‌های سریع' })).toBeVisible();
+  await page.getByRole('button', { name: 'سالیمور، نمای کلی', exact: true }).click();
+  const menu = page.getByRole('navigation', { name: 'بخش‌های محصول', exact: true });
+  await expect(menu.getByRole('button', { name: 'داشبورد', exact: true })).toBeInViewport();
+  await expect.poll(() => menu.evaluate((el) => el.scrollTop)).toBeLessThan(10);
 });
 
 test('status refresh refetches real sources, rotates while pending, and recovers from failure', async ({
@@ -96,10 +100,14 @@ test('status refresh refetches real sources, rotates while pending, and recovers
   expect(calls).toBeGreaterThan(initial);
   fail = true;
   await refresh.click();
-  await expect(page.getByText('وضعیت تازه دریافت نشد؛ دوباره تلاش کنید.', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('وضعیت تازه دریافت نشد؛ دوباره تلاش کنید.', { exact: true })
+  ).toBeVisible();
   fail = false;
   await refresh.click();
-  await expect(page.getByText('وضعیت تازه دریافت نشد؛ دوباره تلاش کنید.', { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText('وضعیت تازه دریافت نشد؛ دوباره تلاش کنید.', { exact: true })
+  ).toHaveCount(0);
 });
 
 test('support preserves a failed draft and supports ticket, reply, close and reopen in the same dialog', async ({
@@ -197,4 +205,3 @@ test('support preserves a failed draft and supports ticket, reply, close and reo
   await dialog.getByRole('button', { name: 'باز کردن دوباره', exact: true }).click();
   await expect(dialog.getByRole('button', { name: 'بستن درخواست', exact: true })).toBeVisible();
 });
-

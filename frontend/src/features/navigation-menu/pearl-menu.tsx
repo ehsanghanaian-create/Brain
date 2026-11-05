@@ -147,6 +147,8 @@ export function PearlMenu(props: PearlMenuProps) {
   const search = useRef<HTMLInputElement>(null);
   const siteBox = useRef<HTMLDivElement>(null);
   const profileBox = useRef<HTMLDivElement>(null);
+  const navigation = useRef<HTMLElement>(null);
+  const [pendingGroup, setPendingGroup] = useState<string | null>(null);
   const site = props.sites.find((s) => s.id === props.selectedSiteId) ?? props.sites[0];
   const normalized = query.trim().replace(/ي/g, 'ی').replace(/ك/g, 'ک');
   const matches = (text: string) => text.replace(/ي/g, 'ی').replace(/ك/g, 'ک').includes(normalized);
@@ -160,6 +162,28 @@ export function PearlMenu(props: PearlMenuProps) {
       setExpanded((current) => (current.includes(parent.id) ? current : [...current, parent.id]));
     }
   }, [activeId]);
+
+  useEffect(() => {
+    if (collapsed || !pendingGroup) return;
+    const frame = requestAnimationFrame(() => {
+      const nav = navigation.current;
+      const group = nav?.querySelector<HTMLElement>(`#pearl-group-${pendingGroup}`);
+      if (nav && group) {
+        // scrollIntoView also scrolls the page's ancestors. A rail category
+        // should move only the menu's own scroll area, keeping work in place.
+        const top =
+          group.getBoundingClientRect().top - nav.getBoundingClientRect().top + nav.scrollTop - 8;
+        nav.scrollTo({
+          top: Math.max(0, top),
+          behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? 'instant'
+            : 'smooth'
+        });
+      }
+      setPendingGroup(null);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [collapsed, pendingGroup]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -196,20 +220,14 @@ export function PearlMenu(props: PearlMenuProps) {
     props.onNavigate(entry.href, entry.label);
   }
   function chooseModule(id: string) {
+    const groupId = id === 'overview' ? 'start' : id;
     setModule(id);
     setCollapsed(false);
     setQuery('');
+    setExpanded((current) => (current.includes(groupId) ? current : [...current, groupId]));
+    setPendingGroup(groupId);
     if (id === 'overview')
       go({ id, label: 'نمای کلی', href: '/dashboard/overview', icon: IconHome });
-    else setExpanded((current) => (current.includes(id) ? current : [...current, id]));
-    requestAnimationFrame(() =>
-      document.getElementById(`pearl-group-${id}`)?.scrollIntoView({
-        block: 'nearest',
-        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
-          ? 'instant'
-          : 'smooth'
-      })
-    );
   }
   function renderEntry(entry: Entry) {
     const Icon = entry.icon;
@@ -376,7 +394,7 @@ export function PearlMenu(props: PearlMenuProps) {
           </button>
         </div>
 
-        <nav className={styles.navigation} aria-label='بخش‌های محصول'>
+        <nav ref={navigation} className={styles.navigation} aria-label='بخش‌های محصول'>
           {normalized ? (
             <div className={styles.searchResults}>
               <p className={styles.resultsLabel}>نتیجهٔ جست‌وجو</p>

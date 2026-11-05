@@ -356,6 +356,11 @@
   padding-block: 13px;
 }
 .menu {
+  --menu-padding: 8px;
+  --rail-top: 16px;
+  --rail-control: 44px;
+  --rail-gap: 12px;
+  --rail-brand-gap: 32px;
   direction: ltr;
   position: relative;
   display: grid;
@@ -993,9 +998,9 @@
   font-size: 20px !important;
 }
 .collapsed {
-  grid-template-columns: 0 58px;
+  grid-template-columns: 0 minmax(0, 1fr);
   width: 82px;
-  padding-inline: 6px;
+  padding-inline: 10px;
   gap: 0;
 }
 .collapsed .context {
@@ -1256,6 +1261,7 @@
   }
   .menu {
     grid-template-columns: minmax(0, 1fr) 48px;
+    --menu-padding: 6px;
     gap: 5px;
     padding: 6px;
     height: max(620px, calc(100svh - 200px));
@@ -1360,8 +1366,9 @@
     gap: 3px;
   }
   .collapsed {
-    grid-template-columns: 0 48px;
+    grid-template-columns: 0 minmax(0, 1fr);
     width: 68px;
+    padding-inline: 6px;
   }
   .stageNote {
     font-size: 10px;
@@ -1748,4 +1755,72 @@
 }
 :global(html):has(.stage)::-webkit-scrollbar {
   display: none;
+}
+
+/* One axis for the compact rail: fill the actual remaining track, rather than
+   leaving an unused strip beside a fixed-width column. Keep control geometry
+   identical for the logo, modules, utilities and account in both menu states. */
+.rail {
+  min-width: 0;
+  padding: var(--rail-top) 0 10px;
+}
+.railBrand,
+.railButton {
+  width: var(--rail-control);
+  height: var(--rail-control);
+  min-height: var(--rail-control);
+  flex: 0 0 var(--rail-control);
+}
+.railBrand {
+  margin-bottom: var(--rail-brand-gap);
+}
+.modules,
+.railBottom {
+  width: 100%;
+  align-items: center;
+  gap: var(--rail-gap);
+  flex-shrink: 0;
+}
+.railBottom {
+  padding-top: 20px;
+}
+.collapseToggle {
+  width: 40px;
+  height: 40px;
+  left: -20px;
+  top: calc(var(--menu-padding) + var(--rail-top) + 1px + (var(--rail-control) - 40px) / 2);
+}
+.collapsed {
+  border-radius: 41px;
+}
+.collapsed::before {
+  border-radius: 37px;
+}
+.collapsed .rail {
+  border-radius: 30px;
+}
+@media (max-width: 710px) {
+  .collapsed {
+    border-radius: 34px;
+  }
+  .collapsed::before {
+    border-radius: 30px;
+  }
+  .collapsed .rail {
+    border-radius: 25px;
+  }
+}
+@media (max-height: 700px) {
+  .menu {
+    --rail-top: 10px;
+    --rail-control: 40px;
+    --rail-gap: 8px;
+    --rail-brand-gap: 16px;
+  }
+  .canvas .railBrand {
+    margin-bottom: var(--rail-brand-gap);
+  }
+  .railBottom {
+    padding-top: 16px;
+  }
 }

@@ -41,7 +41,7 @@ export default function PrivacyPage() {
         <p>
           مدیر می‌تواند از بخش اتصال‌های پنل، حساب گوگل را قطع کند و برای حذف داده‌های سایت از گزینهٔ حذف سایت
           استفاده کند. برای پرسش دربارهٔ داده‌ها یا درخواست حذف، به{' '}
-          <a className='text-primary underline' href='mailto:ehsanghanaian@gmail.com'>ehsanghanaian@gmail.com</a>{' '}
+          <a className='text-primary underline' href='mailto:salehmohamadkhani77@gmail.com'>salehmohamadkhani77@gmail.com</a>{' '}
           پیام بدهید.
         </p>
       </section>

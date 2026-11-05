@@ -234,6 +234,19 @@ for (const width of [375, 768, 1440]) {
     ])
       await expect(dialog.getByLabel(label, { exact: true })).toBeVisible();
     await expect(dialog.getByLabel('نام سایت', { exact: true })).toBeFocused();
+    if (width >= 768) {
+      for (const [right, left] of [
+        ['نام سایت', 'دامنه'],
+        ['شناسه (slug)', 'حوزه کسب‌وکار'],
+        ['زبان محتوا', 'مکان / کشور هدف']
+      ]) {
+        const a = await dialog.getByLabel(right, { exact: true }).boundingBox();
+        const b = await dialog.getByLabel(left, { exact: true }).boundingBox();
+        expect(Math.abs(a!.y - b!.y)).toBeLessThan(1);
+        expect(Math.abs(a!.width - b!.width)).toBeLessThan(1);
+      }
+    }
+
     const box = await dialog.boundingBox();
     expect(Math.abs(box!.x + box!.width / 2 - width / 2)).toBeLessThan(2);
     expect(Math.abs(box!.y + box!.height / 2 - 450)).toBeLessThan(2);

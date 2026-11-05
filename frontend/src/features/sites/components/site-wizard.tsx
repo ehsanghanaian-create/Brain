@@ -185,7 +185,7 @@ export function SiteWizard({
             }}
             aria-busy={busy}
           >
-            <CardContent className='grid gap-4 sm:grid-cols-2'>
+            <CardContent className='grid items-start gap-4 sm:grid-cols-2'>
               <div className='grid gap-1.5'>
                 <Label htmlFor={`${formId}-name`}>نام سایت</Label>
                 <Input

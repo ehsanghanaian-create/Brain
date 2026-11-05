@@ -15,17 +15,12 @@ import {
 } from '@/lib/api/client';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
-import {
-  BUSINESS_CATEGORIES,
-  COUNTRIES,
-  LANGUAGES,
-  normalizeUrl,
-  slugifyDomain
-} from '../constants';
+import { useEffect, useId, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { BUSINESS_CATEGORIES, COUNTRIES, LANGUAGES, slugifyDomain } from '../constants';
 import { ConnectionTester } from './connection-tester';
 import { GoogleAccountCard } from './google-account-card';
-import type { SiteDraft } from '../site-draft';
+import { parseSiteDraft, type SiteDraft } from '../site-draft';
 
 type Step = 1 | 2 | 3;
 const STEPS: { n: Step; title: string; desc: string }[] = [
@@ -34,8 +29,20 @@ const STEPS: { n: Step; title: string; desc: string }[] = [
   { n: 3, title: 'ایجاد فضای کاری', desc: 'فضای کاری، حافظه سایت و فضای نام گراف' }
 ];
 
-export function SiteWizard({ initialValues }: { initialValues?: SiteDraft }) {
+export function SiteWizard({
+  initialValues,
+  embedded = false,
+  onBusyChange,
+  onFinish
+}: {
+  initialValues?: SiteDraft;
+  embedded?: boolean;
+  onBusyChange?: (busy: boolean) => void;
+  onFinish?: () => void;
+}) {
+  const formId = useId();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<{ message: string; details?: unknown } | null>(null);
@@ -45,7 +52,7 @@ export function SiteWizard({ initialValues }: { initialValues?: SiteDraft }) {
   const [domain, setDomain] = useState(initialValues?.domain ?? '');
   const [siteId, setSiteId] = useState('');
   const [siteIdTouched, setSiteIdTouched] = useState(false);
-  const [category, setCategory] = useState('auto-service');
+  const [category, setCategory] = useState('');
   const [language, setLanguage] = useState('fa-IR');
   const [country, setCountry] = useState('IR');
   const derivedId = useMemo(() => slugifyDomain(domain), [domain]);
@@ -59,41 +66,45 @@ export function SiteWizard({ initialValues }: { initialValues?: SiteDraft }) {
   const [googleRefresh, setGoogleRefresh] = useState(0);
   const [init, setInit] = useState<InitializeResult | null>(null);
 
+  useEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
+  const validOrigin = parseSiteDraft({ name, domain }).domain;
   const step1Valid =
     name.trim().length >= 2 &&
     /^[a-z0-9][a-z0-9-]{1,62}$/.test(effectiveId) &&
-    normalizeUrl(domain).startsWith('http');
+    !!validOrigin &&
+    !!category;
 
   async function createSite() {
+    if (!step1Valid || busy) return;
     setBusy(true);
     setError(null);
     try {
       const body = {
         site_id: effectiveId,
         name: name.trim(),
-        canonical_url: normalizeUrl(domain),
-        wp_url: normalizeUrl(domain).replace(/\/$/, ''),
+        canonical_url: `${validOrigin}/`,
+        wp_url: validOrigin,
         business_type: category,
         language,
         country,
         timezone: COUNTRIES.find((c) => c.value === country)?.tz ?? 'Asia/Tehran',
         mode: 'manual' as const
       };
-      const created = await endpoints.createSite(body);
+      const created = site
+        ? await endpoints.updateSite(site.site_id, {
+            name: body.name,
+            business_type: category,
+            language,
+            country,
+            timezone: body.timezone
+          })
+        : await endpoints.createSite(body);
+      void queryClient.invalidateQueries({ queryKey: ['sites'] });
       setSite(created);
       setStep(2);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) {
-        // already exists → continue with it (wizard is resumable)
-        try {
-          const existing = await endpoints.site(effectiveId);
-          setSite(existing);
-          setStep(2);
-          return;
-        } catch {
-          /* fallthrough */
-        }
-      }
       setError(
         e instanceof ApiError ? { message: e.message, details: e.details } : { message: String(e) }
       );
@@ -120,24 +131,32 @@ export function SiteWizard({ initialValues }: { initialValues?: SiteDraft }) {
   }
 
   return (
-    <div className='flex flex-col gap-4'>
-      <ol className='grid gap-2 md:grid-cols-3'>
+    <div
+      data-site-wizard
+      className={
+        embedded ? 'flex min-w-0 flex-col gap-5' : 'mx-auto flex w-full max-w-4xl flex-col gap-5'
+      }
+    >
+      <ol aria-label='مراحل افزودن سایت' className='grid grid-cols-3 gap-2'>
         {STEPS.map((s) => (
           <li
             key={s.n}
-            className={`rounded-md border p-3 ${step === s.n ? 'border-primary bg-primary/5' : step > s.n ? 'opacity-70' : 'opacity-50'}`}
+            className={`rounded-md border p-3 ${step === s.n ? 'border-primary bg-primary/5' : 'border-border bg-muted/20'}`}
           >
-            <div className='flex items-center gap-2 text-sm font-medium'>
+            <div className='flex flex-wrap items-center gap-2 text-xs font-medium sm:text-sm'>
               <Badge variant={step > s.n ? 'default' : 'outline'}>{step > s.n ? '✓' : s.n}</Badge>{' '}
               {s.title}
             </div>
-            <p className='text-muted-foreground mt-1 text-xs'>{s.desc}</p>
+            <p className='text-muted-foreground mt-1 hidden text-xs leading-5 sm:block'>{s.desc}</p>
           </li>
         ))}
       </ol>
 
       {error && (
-        <div className='border-destructive/50 text-destructive rounded-md border p-3 text-sm'>
+        <div
+          role='alert'
+          className='border-destructive/50 text-destructive rounded-md border p-3 text-sm'
+        >
           {error.message}
           {Array.isArray(error.details) && (
             <ul className='mt-1 list-disc ps-5 text-xs'>
@@ -152,95 +171,132 @@ export function SiteWizard({ initialValues }: { initialValues?: SiteDraft }) {
       )}
 
       {step === 1 && (
-        <Card>
+        <Card data-site-step='1'>
           <CardHeader>
             <CardTitle>مرحله ۱ — اطلاعات سایت</CardTitle>
-            <CardDescription>شناسه سایت از دامنه ساخته می‌شود و بعداً تغییر نمی‌کند.</CardDescription>
+            <CardDescription>
+              شناسه از دامنه ساخته می‌شود؛ دامنه و شناسه پس از ایجاد ثابت می‌مانند.
+            </CardDescription>
           </CardHeader>
-          <CardContent className='grid gap-4 md:grid-cols-2'>
-            <div className='grid gap-1.5'>
-              <Label htmlFor='name'>نام سایت</Label>
-              <Input
-                id='name'
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder='نمونه سایت'
-              />
-            </div>
-            <div className='grid gap-1.5'>
-              <Label htmlFor='domain'>دامنه</Label>
-              <Input
-                id='domain'
-                value={domain}
-                onChange={(e) => setDomain(e.target.value)}
-                placeholder='example.com'
-                dir='ltr'
-              />
-            </div>
-            <div className='grid gap-1.5'>
-              <Label htmlFor='site_id'>شناسه (slug)</Label>
-              <Input
-                id='site_id'
-                value={effectiveId}
-                onChange={(e) => {
-                  setSiteIdTouched(true);
-                  setSiteId(e.target.value.toLowerCase());
-                }}
-                dir='ltr'
-                placeholder='example'
-              />
-              <p className='text-muted-foreground text-xs'>
-                حروف کوچک انگلیسی، عدد و خط تیره؛ نام پوشه فضای کاری هم همین است.
-              </p>
-            </div>
-            <div className='grid gap-1.5'>
-              <Label htmlFor='category'>حوزه کسب‌وکار</Label>
-              <NativeSelect
-                id='category'
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-              >
-                {BUSINESS_CATEGORIES.map((c) => (
-                  <NativeSelectOption key={c.value} value={c.value}>
-                    {c.label}
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void createSite();
+            }}
+            aria-busy={busy}
+          >
+            <CardContent className='grid gap-4 sm:grid-cols-2'>
+              <div className='grid gap-1.5'>
+                <Label htmlFor={`${formId}-name`}>نام سایت</Label>
+                <Input
+                  data-site-initial-field
+                  id={`${formId}-name`}
+                  required
+                  minLength={2}
+                  maxLength={80}
+                  disabled={busy}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder='نمونه سایت'
+                />
+              </div>
+              <div className='grid gap-1.5'>
+                <Label htmlFor={`${formId}-domain`}>دامنه</Label>
+                <Input
+                  id={`${formId}-domain`}
+                  required
+                  inputMode='url'
+                  disabled={busy || !!site}
+                  value={domain}
+                  onChange={(e) => setDomain(e.target.value)}
+                  placeholder='example.com'
+                  dir='ltr'
+                />
+              </div>
+              <div className='grid gap-1.5'>
+                <Label htmlFor={`${formId}-site_id`}>شناسه (slug)</Label>
+                <Input
+                  id={`${formId}-site_id`}
+                  required
+                  maxLength={63}
+                  disabled={busy || !!site}
+                  value={effectiveId}
+                  onChange={(e) => {
+                    setSiteIdTouched(true);
+                    setSiteId(e.target.value.toLowerCase());
+                  }}
+                  dir='ltr'
+                  placeholder='example'
+                />
+                <p className='text-muted-foreground text-xs'>
+                  حروف کوچک انگلیسی، عدد و خط تیره؛ نام پوشه فضای کاری هم همین است.
+                </p>
+              </div>
+              <div className='grid gap-1.5'>
+                <Label htmlFor={`${formId}-category`}>حوزه کسب‌وکار</Label>
+                <NativeSelect
+                  id={`${formId}-category`}
+                  className='w-full'
+                  disabled={busy}
+                  required
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value)}
+                >
+                  <NativeSelectOption value='' disabled>
+                    انتخاب حوزهٔ کسب‌وکار
                   </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </div>
-            <div className='grid gap-1.5'>
-              <Label htmlFor='language'>زبان محتوا</Label>
-              <NativeSelect
-                id='language'
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
-              >
-                {LANGUAGES.map((l) => (
-                  <NativeSelectOption key={l.value} value={l.value}>
-                    {l.label}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </div>
-            <div className='grid gap-1.5'>
-              <Label htmlFor='country'>مکان / کشور هدف</Label>
-              <NativeSelect
-                id='country'
-                value={country}
-                onChange={(e) => setCountry(e.target.value)}
-              >
-                {COUNTRIES.map((c) => (
-                  <NativeSelectOption key={c.value} value={c.value}>
-                    {c.label} ({c.value})
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </div>
-            <div className='md:col-span-2 flex justify-end gap-2'>
-              <Button onClick={createSite} disabled={!step1Valid || busy}>
-                {busy ? 'در حال ایجاد…' : 'ایجاد سایت و ادامه'}
-              </Button>
-            </div>
-          </CardContent>
+                  {BUSINESS_CATEGORIES.map((c) => (
+                    <NativeSelectOption key={c.value} value={c.value}>
+                      {c.label}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </div>
+              <div className='grid gap-1.5'>
+                <Label htmlFor={`${formId}-language`}>زبان محتوا</Label>
+                <NativeSelect
+                  id={`${formId}-language`}
+                  className='w-full'
+                  disabled={busy}
+                  required
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                >
+                  {LANGUAGES.map((l) => (
+                    <NativeSelectOption key={l.value} value={l.value}>
+                      {l.label}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </div>
+              <div className='grid gap-1.5'>
+                <Label htmlFor={`${formId}-country`}>مکان / کشور هدف</Label>
+                <NativeSelect
+                  id={`${formId}-country`}
+                  className='w-full'
+                  disabled={busy}
+                  required
+                  value={country}
+                  onChange={(e) => setCountry(e.target.value)}
+                >
+                  {COUNTRIES.map((c) => (
+                    <NativeSelectOption key={c.value} value={c.value}>
+                      {c.label} ({c.value})
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </div>
+              <div className='sm:col-span-2 flex justify-end gap-2 pt-2'>
+                <Button
+                  type='submit'
+                  className='min-h-11 w-full sm:w-auto'
+                  disabled={!step1Valid || busy}
+                >
+                  {busy ? 'در حال ثبت…' : site ? 'ذخیره اطلاعات و ادامه' : 'ایجاد سایت و ادامه'}
+                </Button>
+              </div>
+            </CardContent>
+          </form>
         </Card>
       )}
 
@@ -340,6 +396,7 @@ export function SiteWizard({ initialValues }: { initialValues?: SiteDraft }) {
                     render={
                       <Link
                         href={`/dashboard/sites/${site.site_id}?tab=brain`}
+                        onClick={onFinish}
                         aria-label='پیکربندی مغز سایت'
                       />
                     }
@@ -351,6 +408,7 @@ export function SiteWizard({ initialValues }: { initialValues?: SiteDraft }) {
                     render={
                       <Link
                         href={`/dashboard/sites/${site.site_id}`}
+                        onClick={onFinish}
                         aria-label='رفتن به صفحه سایت'
                       />
                     }

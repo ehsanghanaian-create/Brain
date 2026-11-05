@@ -1,15 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { useKBar } from 'kbar';
-import { IconArrowUpLeft, IconX } from '@tabler/icons-react';
 import { PearlMenu } from './pearl-menu';
 import { pearlNavigation } from './navigation-model';
 import { navigationHref, siteFromLocation } from './routing';
 import { endpoints } from '@/lib/api/client';
-import { parseSiteDraft, siteDraftHref } from '@/features/sites/site-draft';
+import { AddSiteDialog } from '@/features/sites/components/add-site-dialog';
 import { useSidebar } from '@/components/ui/sidebar';
 import { useInfobar } from '@/components/ui/infobar';
 import {
@@ -23,7 +22,6 @@ import Header from '@/components/layout/header';
 import { TYPE_FA as JOB_LABELS } from '@/components/layout/background-jobs';
 import { InfoSidebar } from '@/components/layout/info-sidebar';
 import styles from './salimore-shell.module.css';
-import menuStyles from './pearl-menu.module.css';
 
 export function SalimoreShell({
   children,
@@ -40,12 +38,9 @@ export function SalimoreShell({
   const { query: search } = useKBar();
   const [jobsOpen, setJobsOpen] = useState(false);
   const [siteFormOpen, setSiteFormOpen] = useState(false);
-  const [formError, setFormError] = useState('');
   const [rememberedSite, setRememberedSite] = useState('');
   const initialized = useRef(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dialog = useRef<HTMLDialogElement>(null);
-  const formTrigger = useRef<HTMLElement | null>(null);
 
   const sitesQuery = useQuery({ queryKey: ['sites'], queryFn: endpoints.sites, staleTime: 30_000 });
   const sites = sitesQuery.data ?? [];
@@ -98,19 +93,6 @@ export function SalimoreShell({
     },
     []
   );
-  useEffect(() => {
-    if (!siteFormOpen) return;
-    formTrigger.current = document.activeElement as HTMLElement;
-    dialog.current?.showModal();
-    dialog.current?.querySelector<HTMLInputElement>('input')?.focus();
-  }, [siteFormOpen]);
-
-  const closeSiteForm = useCallback(() => {
-    dialog.current?.close();
-    setSiteFormOpen(false);
-    setFormError('');
-    formTrigger.current?.focus();
-  }, []);
   const navigate = (href: string) => {
     setOpenMobile(false);
     router.push(navigationHref(href, siteId));
@@ -163,7 +145,6 @@ export function SalimoreShell({
       onNavigate={navigate}
       onAddSite={() => {
         const show = () => {
-          setFormError('');
           setSiteFormOpen(true);
         };
         if (isMobile && openMobile) {
@@ -232,69 +213,7 @@ export function SalimoreShell({
             </SheetContent>
           </Sheet>
         )}
-        {siteFormOpen && (
-          <dialog
-            ref={dialog}
-            className={menuStyles.dialog}
-            dir='rtl'
-            aria-labelledby='quick-site-title'
-            onCancel={(event) => {
-              event.preventDefault();
-              closeSiteForm();
-            }}
-          >
-            <header>
-              <h2 id='quick-site-title'>افزودن سایت</h2>
-              <button type='button' aria-label='بستن پنجره' onClick={closeSiteForm}>
-                <IconX size={20} />
-              </button>
-            </header>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                const data = new FormData(event.currentTarget);
-                const draft = parseSiteDraft({
-                  name: data.get('name'),
-                  domain: data.get('domain')
-                });
-                if (draft.name.length < 2 || !draft.domain) {
-                  setFormError('نام سایت و یک دامنهٔ معتبر مانند example.com وارد کن.');
-                  return;
-                }
-                closeSiteForm();
-                setOpenMobile(false);
-                router.push(siteDraftHref(draft));
-              }}
-            >
-              <p>اطلاعات اولیه را وارد کن؛ اتصال‌ها در مرحلهٔ بعد تنظیم می‌شوند.</p>
-              <label>
-                نام سایت
-                <input name='name' required minLength={2} maxLength={80} />
-              </label>
-              <label>
-                دامنه
-                <input
-                  name='domain'
-                  required
-                  dir='ltr'
-                  inputMode='url'
-                  placeholder='example.com'
-                  aria-invalid={!!formError}
-                  aria-describedby={formError ? 'quick-site-error' : undefined}
-                />
-              </label>
-              {formError && (
-                <p id='quick-site-error' role='alert' className={menuStyles.formError}>
-                  {formError}
-                </p>
-              )}
-              <button type='submit' className={menuStyles.createButton}>
-                ادامهٔ مراحل افزودن سایت
-                <IconArrowUpLeft size={19} />
-              </button>
-            </form>
-          </dialog>
-        )}
+        <AddSiteDialog open={siteFormOpen} onOpenChange={setSiteFormOpen} />
       </div>
       <InfoSidebar side='left' />
     </>

@@ -18,6 +18,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // Persisting the sidebar state in the cookie.
   const cookieStore = await cookies();
   const defaultOpen = cookieStore.get('sidebar_state')?.value !== 'false';
+  const sessionCookieName = process.env.SEO_BRAIN_SESSION_COOKIE_NAME ?? 'salimore_seo_session';
   return (
     <KBar>
       <SidebarProvider defaultOpen={defaultOpen}>
@@ -28,7 +29,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
           پرش به محتوا
         </a>
         <InfobarProvider defaultOpen={false}>
-          <SalimoreShell accountName={sessionDisplayName(cookieStore.get('seo_session')?.value)}>
+          <SalimoreShell
+            accountName={sessionDisplayName(cookieStore.get(sessionCookieName)?.value)}
+          >
             {children}
           </SalimoreShell>
         </InfobarProvider>

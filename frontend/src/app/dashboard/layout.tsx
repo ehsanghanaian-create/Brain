@@ -1,9 +1,8 @@
 import KBar from '@/components/kbar';
-import AppSidebar from '@/components/layout/app-sidebar';
-import Header from '@/components/layout/header';
-import { InfoSidebar } from '@/components/layout/info-sidebar';
+import { SalimoreShell } from '@/features/navigation-menu/salimore-shell';
+import { sessionDisplayName } from '@/features/navigation-menu/session-display';
 import { InfobarProvider } from '@/components/ui/infobar';
-import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
+import { SidebarProvider } from '@/components/ui/sidebar';
 import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 
@@ -28,16 +27,11 @@ export default async function DashboardLayout({ children }: { children: React.Re
         >
           پرش به محتوا
         </a>
-        <AppSidebar />
-        <SidebarInset id='main-content' tabIndex={-1} className='scroll-mt-16'>
-          <InfobarProvider defaultOpen={false}>
-            <div className='flex min-w-0 flex-1 flex-col'>
-              <Header />
-              {children}
-            </div>
-            <InfoSidebar side='right' />
-          </InfobarProvider>
-        </SidebarInset>
+        <InfobarProvider defaultOpen={false}>
+          <SalimoreShell accountName={sessionDisplayName(cookieStore.get('seo_session')?.value)}>
+            {children}
+          </SalimoreShell>
+        </InfobarProvider>
       </SidebarProvider>
     </KBar>
   );

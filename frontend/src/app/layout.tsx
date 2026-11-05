@@ -12,8 +12,8 @@ import '@fontsource-variable/vazirmatn';
 import '../styles/globals.css';
 
 const META_THEME_COLORS = {
-  light: '#f7f8fc',
-  dark: '#0e1020'
+  light: '#fffcf2',
+  dark: '#252422'
 };
 
 export const metadata: Metadata = {
@@ -21,7 +21,8 @@ export const metadata: Metadata = {
     default: 'SEO Brain — سیستم‌عامل سئوی محلی',
     template: '%s | SEO Brain'
   },
-  description: 'گراف دانش سئو، تحلیل Search Console، استراتژی کلمات کلیدی و مغز محتوا — محلی و چندسایته.',
+  description:
+    'گراف دانش سئو، تحلیل Search Console، استراتژی کلمات کلیدی و مغز محتوا — محلی و چندسایته.',
   robots: { index: false, follow: false }
 };
 

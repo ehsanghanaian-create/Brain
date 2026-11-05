@@ -85,3 +85,9 @@
   --rim-bright: #fffcf261;
   --rim-low: #252422b3;
 }
+
+/* The exact brand orange is retained for fills. Small orange text needs the
+   darker/lighter ink of the same accent family to meet normal-text contrast. */
+[data-theme='salimore'] .text-primary {
+  color: var(--accent-foreground);
+}

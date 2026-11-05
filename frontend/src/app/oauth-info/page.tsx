@@ -24,7 +24,7 @@ export default function OAuthInfoPage() {
         <a href='/terms'>شرایط استفاده</a>
         <a href='/dashboard/overview'>ورود به پنل</a>
       </nav>
-      <p className='text-sm text-muted-foreground'>پشتیبانی: ehsanghanaian@gmail.com</p>
+      <p className='text-sm text-muted-foreground'>پشتیبانی: salehmohamadkhani77@gmail.com</p>
     </main>
   );
 }

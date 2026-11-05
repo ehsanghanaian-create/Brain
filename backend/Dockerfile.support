@@ -1,0 +1,9 @@
+# Reuse the already validated Python dependencies; do not import/start the SEO
+# application or its scheduler. No Google/WordPress credentials are required.
+ARG SUPPORT_BASE_IMAGE=seo-brain-backend:rank-resume-20261104
+FROM ${SUPPORT_BASE_IMAGE}
+WORKDIR /app
+COPY backend/seo_brain/support /app/support
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+USER 10001:10001
+CMD ["python", "-m", "uvicorn", "support.app:app", "--host", "0.0.0.0", "--port", "8010"]

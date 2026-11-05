@@ -6,20 +6,26 @@ import { useRouter } from 'next/navigation';
 import { useMemo } from 'react';
 import RenderResults from './render-result';
 import useThemeSwitching from './use-theme-switching';
-import { useFilteredNavGroups } from '@/hooks/use-nav';
+import { navigationHref, siteFromLocation } from '@/features/navigation-menu/routing';
 
 export default function KBar({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const filteredGroups = useFilteredNavGroups(navGroups);
 
   // These action are for the navigation
   const actions = useMemo(() => {
     // Define navigateTo inside the useMemo callback to avoid dependency array issues
     const navigateTo = (url: string) => {
-      router.push(url);
+      let site = siteFromLocation(
+        window.location.pathname,
+        new URLSearchParams(window.location.search).get('site')
+      );
+      try {
+        site ||= localStorage.getItem('salimore-selected-site') || '';
+      } catch {}
+      router.push(navigationHref(url, site));
     };
 
-    const allItems = filteredGroups.flatMap((group) => group.items);
+    const allItems = navGroups.flatMap((group) => group.items);
 
     return allItems.flatMap((navItem) => {
       // Only include base action if the navItem has a real URL and is not just a container
@@ -30,8 +36,8 @@ export default function KBar({ children }: { children: React.ReactNode }) {
               name: navItem.title,
               shortcut: navItem.shortcut,
               keywords: navItem.title.toLowerCase(),
-              section: 'Navigation',
-              subtitle: `Go to ${navItem.title}`,
+              section: 'بخش‌های پنل',
+              subtitle: navItem.description?.replace(/\s*\([^)]*فاز[^)]*\)/g, ''),
               perform: () => navigateTo(navItem.url)
             }
           : null;
@@ -44,14 +50,14 @@ export default function KBar({ children }: { children: React.ReactNode }) {
           shortcut: childItem.shortcut,
           keywords: childItem.title.toLowerCase(),
           section: navItem.title,
-          subtitle: `Go to ${childItem.title}`,
+          subtitle: childItem.title,
           perform: () => navigateTo(childItem.url)
         })) ?? [];
 
       // Return only valid actions (ignoring null base actions for containers)
       return baseAction ? [baseAction, ...childActions] : childActions;
     });
-  }, [router, filteredGroups]);
+  }, [router]);
 
   return (
     <KBarProvider actions={actions}>
@@ -68,7 +74,10 @@ const KBarComponent = ({ children }: { children: React.ReactNode }) => {
         <KBarPositioner className='bg-black/45 fixed inset-0 z-99999 flex items-start! justify-center p-4! pt-[14vh]!'>
           <KBarAnimator className='bg-popover text-popover-foreground ring-foreground/10 relative mx-auto w-full max-w-[600px] overflow-hidden rounded-xl shadow-lg ring-1'>
             <div className='bg-popover sticky top-0 z-10 border-b'>
-              <KBarSearch className='placeholder:text-muted-foreground w-full border-none bg-transparent px-4 py-3.5 text-sm outline-hidden focus:ring-0 focus:outline-hidden' />
+              <KBarSearch
+                defaultPlaceholder='جست‌وجوی بخش‌ها و فرمان‌ها…'
+                className='placeholder:text-muted-foreground w-full border-none bg-transparent px-4 py-3.5 text-sm outline-hidden focus:ring-0 focus:outline-hidden'
+              />
             </div>
             <div className='h-[400px]'>
               <RenderResults />
@@ -76,13 +85,13 @@ const KBarComponent = ({ children }: { children: React.ReactNode }) => {
             <div className='text-muted-foreground flex items-center gap-3 border-t px-3 py-2 text-xs'>
               <span className='flex items-center gap-1'>
                 <Kbd>↑</Kbd>
-                <Kbd>↓</Kbd> navigate
+                <Kbd>↓</Kbd> جابه‌جایی
               </span>
               <span className='flex items-center gap-1'>
-                <Kbd>↵</Kbd> open
+                <Kbd>↵</Kbd> باز کردن
               </span>
               <span className='flex items-center gap-1'>
-                <Kbd>esc</Kbd> close
+                <Kbd>esc</Kbd> بستن
               </span>
             </div>
           </KBarAnimator>

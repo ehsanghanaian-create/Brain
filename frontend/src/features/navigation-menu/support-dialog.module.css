@@ -1,0 +1,153 @@
+.dialog {
+  width: min(760px, calc(100vw - 24px));
+  max-width: 760px;
+}
+.toolbar,
+.actions,
+.ticketHead,
+.tickets button > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.toolbar {
+  margin-bottom: 16px;
+}
+.toolbar h3 {
+  margin: 0;
+  font-size: 13px;
+}
+.toolbar button,
+.actions button {
+  min-height: 44px;
+}
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 36px 12px;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+.tickets {
+  display: grid;
+  gap: 10px;
+}
+.tickets button {
+  text-align: right;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--card) 55%, transparent);
+}
+.tickets button:hover {
+  background: var(--accent);
+}
+.tickets button:focus-visible {
+  outline: 2px solid var(--ring);
+}
+.tickets strong {
+  font-size: 13px;
+}
+.tickets span,
+.ticketHead > span {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.tickets small,
+.ticketHead small {
+  display: block;
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.form {
+  display: grid;
+  gap: 16px;
+}
+.form label {
+  display: grid;
+  gap: 7px;
+  font-size: 12px;
+}
+.fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.error {
+  border: 1px solid color-mix(in srgb, var(--destructive) 40%, transparent);
+  padding: 12px;
+  border-radius: 10px;
+  color: var(--destructive);
+  font-size: 12px;
+  line-height: 1.8;
+  margin-bottom: 12px;
+}
+.ticketHead {
+  margin-bottom: 16px;
+}
+.ticketHead strong {
+  font-size: 15px;
+}
+.messages {
+  display: grid;
+  gap: 12px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 2px 4px 16px;
+  overscroll-behavior: contain;
+}
+.messages article {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--muted) 65%, transparent);
+}
+.messages article[data-staff='true'] {
+  background: color-mix(in srgb, var(--primary) 7%, var(--card));
+  border-color: color-mix(in srgb, var(--primary) 25%, var(--border));
+}
+.messages header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+}
+.messages time {
+  font-size: 10px;
+  color: var(--muted-foreground);
+}
+.messages p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.9;
+  font-size: 13px;
+  margin-top: 8px;
+}
+.form .staffOption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+.staffOption input {
+  accent-color: var(--primary);
+}
+@media (max-width: 520px) {
+  .fields {
+    grid-template-columns: 1fr;
+  }
+  .tickets button > div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .messages header {
+    flex-wrap: wrap;
+  }
+}

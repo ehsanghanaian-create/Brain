@@ -22,7 +22,7 @@ export default function TermsPage() {
       </p>
       <p>
         برای پرسش دربارهٔ دسترسی یا داده‌های ذخیره‌شده، با{' '}
-        <a className='text-primary underline' href='mailto:ehsanghanaian@gmail.com'>ehsanghanaian@gmail.com</a>{' '}
+        <a className='text-primary underline' href='mailto:salehmohamadkhani77@gmail.com'>salehmohamadkhani77@gmail.com</a>{' '}
         تماس بگیرید.
       </p>
       <nav aria-label='پیوندهای اطلاعاتی' className='flex flex-wrap gap-5 text-primary underline'>

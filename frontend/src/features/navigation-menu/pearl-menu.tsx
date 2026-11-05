@@ -138,9 +138,11 @@ export function PearlMenu(props: PearlMenuProps) {
   const search = useRef<HTMLInputElement>(null);
   const menuElement = useRef<HTMLElement>(null);
   const navigationElement = useRef<HTMLElement>(null);
-  const [selectionBridge, setSelectionBridge] = useState<{ top: number; height: number } | null>(
-    null
-  );
+  const [selectionBridge, setSelectionBridge] = useState<{
+    top: number;
+    height: number;
+    width: number;
+  } | null>(null);
 
   useLayoutEffect(() => {
     const menu = menuElement.current;
@@ -163,7 +165,11 @@ export function PearlMenu(props: PearlMenuProps) {
         setSelectionBridge(null);
         return;
       }
-      setSelectionBridge({ top: itemRect.top - menuRect.top, height: itemRect.height });
+      setSelectionBridge({
+        top: itemRect.top - menuRect.top - menu.clientTop,
+        height: itemRect.height,
+        width: itemRect.right - menuRect.left - menu.clientLeft - 3
+      });
     }
     const schedule = () => {
       cancelAnimationFrame(frame);

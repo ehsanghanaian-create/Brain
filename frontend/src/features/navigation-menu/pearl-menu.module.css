@@ -1694,40 +1694,49 @@
     inset 2px 2px 5px var(--material-shadow),
     inset -2px -2px 5px var(--material-light);
 }
+/* A single frosted selection surface stays inside the menu. Separate opaque
+   bridge/concave patches caused a black rectangular seam at the outside edge. */
 .selectionBridge {
   position: absolute;
   pointer-events: none;
   z-index: 2;
-  left: -22px;
-  width: 58px;
-  background: var(--background);
-}
-.selectionBridge::before,
-.selectionBridge::after {
-  content: '';
-  position: absolute;
-  left: 22px;
-  width: 19px;
-  height: 19px;
+  left: 3px;
+  border-radius: 15px 22px 22px 15px;
+  border: 1px solid var(--glass-rim);
+  background: linear-gradient(
+    120deg,
+    color-mix(in srgb, var(--card) 58%, transparent),
+    color-mix(in srgb, var(--brand-stone) 12%, transparent) 48%,
+    color-mix(in srgb, var(--primary) 12%, transparent)
+  );
+  backdrop-filter: blur(14px) saturate(135%);
+  box-shadow:
+    inset 0 1px 1px var(--glass-reflection),
+    inset 0 -1px 1px var(--rim-low),
+    0 4px 14px -10px var(--material-shadow);
 }
 .selectionBridge::before {
-  top: -19px;
-  background: radial-gradient(circle at 100% 0, transparent 19px, var(--background) 19.5px);
-}
-.selectionBridge::after {
-  bottom: -19px;
-  background: radial-gradient(circle at 100% 100%, transparent 19px, var(--background) 19.5px);
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: inherit;
+  border-top: 1px solid color-mix(in srgb, var(--brand-ivory) 22%, transparent);
+  pointer-events: none;
 }
 .menu .entry.selected,
 .menu .entry.selected:hover {
-  border-radius: 0 21px 21px 0;
+  border-radius: 15px 22px 22px 15px;
   border-color: transparent;
-  background: var(--background);
+  background: transparent;
   color: var(--foreground);
-  box-shadow:
-    inset -3px 0 0 var(--brand-orange),
-    inset 0 1px 0 color-mix(in srgb, var(--brand-ivory) 10%, transparent);
+  box-shadow: inset -3px 0 0 var(--brand-orange);
   font-weight: 650;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .selectionBridge {
+    background: var(--accent);
+    backdrop-filter: none;
+  }
 }
 .menu .entry.selected > svg {
   color: var(--brand-orange);

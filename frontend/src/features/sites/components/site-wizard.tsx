@@ -55,7 +55,7 @@ export function SiteWizard({
   const [category, setCategory] = useState('');
   const [language, setLanguage] = useState('fa-IR');
   const [country, setCountry] = useState('IR');
-  const derivedId = useMemo(() => slugifyDomain(domain), [domain]);
+  const derivedId = useMemo(() => (domain.trim() ? slugifyDomain(domain) : ''), [domain]);
   const effectiveId = siteIdTouched ? siteId : derivedId;
 
   // created site + step 2/3 state
@@ -189,6 +189,7 @@ export function SiteWizard({
               <div className='grid gap-1.5'>
                 <Label htmlFor={`${formId}-name`}>نام سایت</Label>
                 <Input
+                  className='h-11'
                   data-site-initial-field
                   id={`${formId}-name`}
                   required
@@ -203,6 +204,7 @@ export function SiteWizard({
               <div className='grid gap-1.5'>
                 <Label htmlFor={`${formId}-domain`}>دامنه</Label>
                 <Input
+                  className='h-11'
                   id={`${formId}-domain`}
                   required
                   inputMode='url'
@@ -216,6 +218,7 @@ export function SiteWizard({
               <div className='grid gap-1.5'>
                 <Label htmlFor={`${formId}-site_id`}>شناسه (slug)</Label>
                 <Input
+                  className='h-11'
                   id={`${formId}-site_id`}
                   required
                   maxLength={63}

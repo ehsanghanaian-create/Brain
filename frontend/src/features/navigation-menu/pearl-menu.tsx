@@ -321,7 +321,14 @@ export function PearlMenu(props: PearlMenuProps) {
                         ? 'دریافت سایت‌ها ناموفق بود'
                         : 'انتخاب سایت')}
                 </strong>
-                <small dir='ltr'>{site?.domain ?? 'هنوز سایتی اضافه نشده'}</small>
+                <small dir='ltr'>
+                  {site?.domain ??
+                    (props.sitesStatus === 'error'
+                      ? 'برای تلاش دوباره باز کن'
+                      : props.sitesStatus === 'loading'
+                        ? 'در حال دریافت اطلاعات'
+                        : 'هنوز سایتی اضافه نشده')}
+                </small>
               </span>
               <span className={styles.connectionDot} title='سایت انتخاب‌شده' />
               <IconChevronDown size={17} />

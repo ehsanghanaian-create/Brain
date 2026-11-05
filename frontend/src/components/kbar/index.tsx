@@ -37,7 +37,7 @@ export default function KBar({ children }: { children: React.ReactNode }) {
               shortcut: navItem.shortcut,
               keywords: navItem.title.toLowerCase(),
               section: 'بخش‌های پنل',
-              subtitle: navItem.description,
+              subtitle: navItem.description?.replace(/\s*\([^)]*فاز[^)]*\)/g, ''),
               perform: () => navigateTo(navItem.url)
             }
           : null;
@@ -75,7 +75,7 @@ const KBarComponent = ({ children }: { children: React.ReactNode }) => {
           <KBarAnimator className='bg-popover text-popover-foreground ring-foreground/10 relative mx-auto w-full max-w-[600px] overflow-hidden rounded-xl shadow-lg ring-1'>
             <div className='bg-popover sticky top-0 z-10 border-b'>
               <KBarSearch
-                placeholder='جست‌وجوی بخش‌ها و فرمان‌ها…'
+                defaultPlaceholder='جست‌وجوی بخش‌ها و فرمان‌ها…'
                 className='placeholder:text-muted-foreground w-full border-none bg-transparent px-4 py-3.5 text-sm outline-hidden focus:ring-0 focus:outline-hidden'
               />
             </div>

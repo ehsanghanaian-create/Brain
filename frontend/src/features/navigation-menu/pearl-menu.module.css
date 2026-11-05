@@ -1695,58 +1695,6 @@
     inset 2px 2px 5px var(--material-shadow),
     inset -2px -2px 5px var(--material-light);
 }
-/* A single frosted selection surface stays inside the menu. Separate opaque
-   bridge/concave patches caused a black rectangular seam at the outside edge. */
-.selectionBridge {
-  position: absolute;
-  pointer-events: none;
-  z-index: 2;
-  left: 3px;
-  border-radius: 15px 22px 22px 15px;
-  border: 1px solid var(--glass-rim);
-  background: linear-gradient(
-    120deg,
-    color-mix(in srgb, var(--card) 58%, transparent),
-    color-mix(in srgb, var(--brand-stone) 12%, transparent) 48%,
-    color-mix(in srgb, var(--primary) 12%, transparent)
-  );
-  backdrop-filter: blur(14px) saturate(135%);
-  box-shadow:
-    inset 0 1px 1px var(--glass-reflection),
-    inset 0 -1px 1px var(--rim-low),
-    0 4px 14px -10px var(--material-shadow);
-}
-.selectionBridge::before {
-  content: '';
-  position: absolute;
-  inset: 2px;
-  border-radius: inherit;
-  border-top: 1px solid color-mix(in srgb, var(--brand-ivory) 22%, transparent);
-  pointer-events: none;
-}
-.menu .entry.selected,
-.menu .entry.selected:hover {
-  border-radius: 15px 22px 22px 15px;
-  border-color: transparent;
-  background: transparent;
-  color: var(--foreground);
-  box-shadow: inset -3px 0 0 var(--brand-orange);
-  font-weight: 650;
-}
-@media (prefers-reduced-transparency: reduce) {
-  .selectionBridge {
-    background: var(--accent);
-    backdrop-filter: none;
-  }
-}
-.menu .entry.selected > svg {
-  color: var(--brand-orange);
-}
-.selectedDot,
-.children .entry.selected::before {
-  background: var(--brand-orange);
-}
-
 /* Keep wheel/touch/keyboard scrolling while removing the native scrollbar chrome. */
 .menu *,
 .workspaceBody,
@@ -1832,5 +1780,160 @@
   }
   .railBottom {
     padding-top: 16px;
+  }
+}
+
+/* Navigation has one contained selection; decorative tree dots/bridges compete
+   with the label and exaggerate empty space in short destinations. */
+.children::before,
+.children .entry::before {
+  display: none;
+}
+.children .entry,
+.entry {
+  width: calc(100% - 8px);
+  margin-inline: 4px;
+  padding-inline: 12px;
+  gap: 10px;
+  border-radius: 11px;
+}
+.menu .entry.selected,
+.menu .entry.selected:hover {
+  color: var(--foreground);
+  border-color: transparent;
+  border-radius: 11px;
+  background: linear-gradient(
+    270deg,
+    color-mix(in srgb, var(--primary) 11%, transparent),
+    color-mix(in srgb, var(--card) 16%, transparent) 62%,
+    transparent
+  );
+  box-shadow: inset -2px 0 0 var(--primary);
+  backdrop-filter: blur(8px);
+  font-weight: 600;
+}
+.menu .entry.selected > svg {
+  color: var(--accent-foreground);
+}
+.navigation {
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 22px), transparent 100%);
+  padding-bottom: 20px;
+  scroll-padding-block: 8px 28px;
+}
+.activity {
+  position: relative;
+  border-top: 0;
+  padding-top: 12px;
+  line-height: 1.9;
+}
+.activity::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 4px;
+  right: 4px;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--foreground) 22%, transparent),
+    transparent
+  );
+  filter: blur(0.35px);
+}
+.statusDock {
+  border-color: color-mix(in srgb, var(--foreground) 12%, transparent);
+  box-shadow: inset 0 1px 1px color-mix(in srgb, var(--glass-reflection) 60%, transparent);
+}
+.statusPills {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 5px;
+}
+.statusPills > span {
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+  padding: 6px 0;
+  font-size: 10px;
+}
+.statusPills .refreshStatus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 36px;
+  padding: 5px 3px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--foreground) 4%, transparent);
+  color: var(--muted);
+  font-size: 10px;
+}
+.refreshStatus > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.refreshStatus svg {
+  flex-shrink: 0;
+}
+.statusPills .refreshStatus:hover {
+  background: var(--hover);
+  border-color: var(--edge);
+}
+.refreshStatus:disabled {
+  cursor: wait;
+}
+.refreshError {
+  color: var(--destructive);
+  font-size: 10px;
+  line-height: 1.8;
+  margin: 5px 3px 0;
+}
+.spinning {
+  animation: refreshSpin 0.75s linear infinite;
+}
+@keyframes refreshSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.collapseToggle {
+  width: 28px;
+  height: 44px;
+  left: -14px;
+  border-radius: 11px;
+  top: calc(var(--menu-padding) + var(--rail-top) + 1px + (var(--rail-control) - 44px) / 2);
+  background: color-mix(in srgb, var(--popover) 86%, transparent);
+  backdrop-filter: blur(12px);
+  box-shadow:
+    inset 0 1px 1px var(--glass-reflection),
+    0 4px 10px -5px var(--material-shadow);
+}
+.collapseToggle::after {
+  content: '';
+  position: absolute;
+  inset: 0 -8px;
+}
+.railBrand {
+  margin-bottom: 12px;
+}
+.railCaption {
+  font-size: 9px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+.editQuick {
+  border-style: dashed;
+  border-color: var(--edge);
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinning {
+    animation-duration: 1.5s;
   }
 }

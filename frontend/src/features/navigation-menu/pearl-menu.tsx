@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useTheme } from 'next-themes';
 import {
   IconBell,
@@ -25,10 +25,13 @@ import {
   IconWriting,
   IconX,
   IconHeartbeat,
-  IconRefresh
+  IconRefresh,
+  IconAdjustmentsHorizontal,
+  IconHeadset
 } from '@tabler/icons-react';
 import styles from './pearl-menu.module.css';
 import { pearlNavigation } from './navigation-model';
+import { DEFAULT_QUICK_ACCESS } from './quick-access';
 
 type MenuIcon = typeof IconHome;
 type Entry = { id: string; label: string; href: string; icon: MenuIcon; badge?: string };
@@ -50,6 +53,12 @@ export type PearlMenuProps = {
   statsMessage?: string;
   sitesStatus?: 'loading' | 'error';
   onRetrySites?: () => void;
+  onQuickSettings?: () => void;
+  quickAccessIds?: string[];
+  onRefresh?: () => void;
+  refreshing?: boolean;
+  refreshError?: boolean;
+  supportLabel?: string;
   onSettings: () => void;
   onNotifications: () => void;
   onHelp: () => void;
@@ -136,56 +145,6 @@ export function PearlMenu(props: PearlMenuProps) {
   useEffect(() => setMounted(true), []);
   const night = mounted && resolvedTheme === 'dark';
   const search = useRef<HTMLInputElement>(null);
-  const menuElement = useRef<HTMLElement>(null);
-  const navigationElement = useRef<HTMLElement>(null);
-  const [selectionBridge, setSelectionBridge] = useState<{
-    top: number;
-    height: number;
-    width: number;
-  } | null>(null);
-
-  useLayoutEffect(() => {
-    const menu = menuElement.current;
-    const nav = navigationElement.current;
-    if (!menu || !nav || collapsed) {
-      setSelectionBridge(null);
-      return;
-    }
-    let frame = 0;
-    function measure() {
-      const entry = nav?.querySelector<HTMLElement>('[aria-current="page"]');
-      if (!entry || !menu || !nav) {
-        setSelectionBridge(null);
-        return;
-      }
-      const itemRect = entry.getBoundingClientRect();
-      const navRect = nav.getBoundingClientRect();
-      const menuRect = menu.getBoundingClientRect();
-      if (itemRect.top < navRect.top || itemRect.bottom > navRect.bottom) {
-        setSelectionBridge(null);
-        return;
-      }
-      setSelectionBridge({
-        top: itemRect.top - menuRect.top - menu.clientTop,
-        height: itemRect.height,
-        width: itemRect.right - menuRect.left - menu.clientLeft - 3
-      });
-    }
-    const schedule = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(measure);
-    };
-    const observer = new ResizeObserver(schedule);
-    observer.observe(menu);
-    observer.observe(nav);
-    nav.addEventListener('scroll', schedule, { passive: true });
-    schedule();
-    return () => {
-      observer.disconnect();
-      nav.removeEventListener('scroll', schedule);
-      cancelAnimationFrame(frame);
-    };
-  }, [active, expanded, query, collapsed]);
   const siteBox = useRef<HTMLDivElement>(null);
   const profileBox = useRef<HTMLDivElement>(null);
   const site = props.sites.find((s) => s.id === props.selectedSiteId) ?? props.sites[0];
@@ -265,7 +224,6 @@ export function PearlMenu(props: PearlMenuProps) {
         <Icon size={21} stroke={1.65} />
         <span>{entry.label}</span>
         {entry.badge && <small className={styles.badge}>{entry.badge}</small>}
-        {active === entry.id && <i className={styles.selectedDot} />}
       </button>
     );
   }
@@ -273,7 +231,6 @@ export function PearlMenu(props: PearlMenuProps) {
   return (
     <aside
       className={`${styles.menu} ${collapsed ? styles.collapsed : ''}`}
-      ref={menuElement}
       aria-label='منوی سالیمور'
       dir='rtl'
     >
@@ -287,9 +244,6 @@ export function PearlMenu(props: PearlMenuProps) {
       >
         <IconChevronRight size={19} className={collapsed ? styles.flipChevron : undefined} />
       </button>
-      {selectionBridge && (
-        <div aria-hidden='true' className={styles.selectionBridge} style={selectionBridge} />
-      )}
       <div
         id='salimore-menu-context'
         className={styles.context}
@@ -422,7 +376,7 @@ export function PearlMenu(props: PearlMenuProps) {
           </button>
         </div>
 
-        <nav ref={navigationElement} className={styles.navigation} aria-label='بخش‌های محصول'>
+        <nav className={styles.navigation} aria-label='بخش‌های محصول'>
           {normalized ? (
             <div className={styles.searchResults}>
               <p className={styles.resultsLabel}>نتیجهٔ جست‌وجو</p>
@@ -483,11 +437,26 @@ export function PearlMenu(props: PearlMenuProps) {
                   ? (props.statsMessage ?? 'آمار متصل نیست')
                   : `${props.openActions.toLocaleString('fa-IR')} اقدام باز`}
               </span>
-              <span>
-                <IconRefresh size={16} />
-                {props.lastSync ?? 'همگام‌سازی نشده'}
-              </span>
+              <button
+                type='button'
+                className={styles.refreshStatus}
+                aria-label='تازه‌سازی وضعیت'
+                title='دریافت دوبارهٔ وضعیت پردازش‌ها و اقدام‌های باز'
+                aria-busy={props.refreshing}
+                disabled={props.refreshing || !props.onRefresh}
+                onClick={props.onRefresh}
+              >
+                <IconRefresh size={16} className={props.refreshing ? styles.spinning : undefined} />
+                <span>
+                  {props.refreshing ? 'در حال دریافت…' : (props.lastSync ?? 'همگام‌سازی نشده')}
+                </span>
+              </button>
             </div>
+            {props.refreshError && (
+              <p role='alert' className={styles.refreshError}>
+                وضعیت تازه دریافت نشد؛ دوباره تلاش کنید.
+              </p>
+            )}
             {activityOpen && (
               <ul className={styles.activity} id='pearl-activity'>
                 {props.activity?.length ? (
@@ -534,6 +503,18 @@ export function PearlMenu(props: PearlMenuProps) {
                     <IconSettings size={18} />
                     تنظیمات حساب
                   </button>
+                  {props.onQuickSettings && (
+                    <button
+                      type='button'
+                      onClick={() => {
+                        setProfileOpen(false);
+                        props.onQuickSettings?.();
+                      }}
+                    >
+                      <IconAdjustmentsHorizontal size={18} />
+                      تنظیمات دسترسی سریع
+                    </button>
+                  )}
                   {props.onSignOut && (
                     <button type='button' onClick={props.onSignOut}>
                       <IconLogout size={18} />
@@ -555,10 +536,11 @@ export function PearlMenu(props: PearlMenuProps) {
             <button
               type='button'
               className={styles.settingsButton}
-              aria-label='تنظیمات'
-              onClick={props.onSettings}
+              aria-label={props.onSignOut ? 'خروج از حساب' : 'تنظیمات'}
+              title={props.onSignOut ? 'خروج از حساب' : 'تنظیمات'}
+              onClick={props.onSignOut ?? props.onSettings}
             >
-              <IconSettings size={20} />
+              {props.onSignOut ? <IconLogout size={20} /> : <IconSettings size={20} />}
             </button>
           </div>
         </div>
@@ -573,30 +555,63 @@ export function PearlMenu(props: PearlMenuProps) {
         >
           <RibbonMark small />
         </button>
-        <div className={styles.modules}>
-          {[
-            { id: 'overview', label: 'نمای کلی', icon: IconGridDots },
-            { id: 'seo', label: 'سئو و رشد', icon: IconSitemap },
-            { id: 'content', label: 'برنامه و اجرا', icon: IconWriting },
-            { id: 'opportunities', label: 'فرصت‌ها و مسائل', icon: IconSparkles },
-            { id: 'measurement', label: 'سنجش و تنظیمات', icon: IconChartBar }
-          ].map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                type='button'
-                key={item.id}
-                title={item.label}
-                aria-label={item.label}
-                aria-pressed={module === item.id}
-                className={`${styles.railButton} ${module === item.id ? styles.railSelected : ''}`}
-                onClick={() => chooseModule(item.id)}
-              >
-                <Icon size={25} stroke={1.55} />
-              </button>
-            );
-          })}
-        </div>
+        <span className={styles.railCaption}>{collapsed ? 'بخش‌ها' : 'میان‌بر'}</span>
+        <nav className={styles.modules} aria-label={collapsed ? 'دسته‌های منو' : 'دسترسی‌های سریع'}>
+          {collapsed
+            ? [
+                { id: 'overview', label: 'نمای کلی', icon: IconGridDots },
+                { id: 'seo', label: 'سئو و رشد', icon: IconSitemap },
+                { id: 'content', label: 'برنامه و اجرا', icon: IconWriting },
+                { id: 'opportunities', label: 'فرصت‌ها و مسائل', icon: IconSparkles },
+                { id: 'measurement', label: 'سنجش و تنظیمات', icon: IconChartBar }
+              ].map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    type='button'
+                    key={item.id}
+                    title={item.label}
+                    aria-label={item.label}
+                    aria-pressed={module === item.id}
+                    className={`${styles.railButton} ${module === item.id ? styles.railSelected : ''}`}
+                    onClick={() => chooseModule(item.id)}
+                  >
+                    <Icon size={25} stroke={1.55} />
+                  </button>
+                );
+              })
+            : (props.quickAccessIds ?? DEFAULT_QUICK_ACCESS).map((id) => {
+                const entry = groups
+                  .flatMap((group) => group.entries)
+                  .find((item) => item.id === id);
+                if (!entry) return null;
+                const Icon = entry.icon;
+                return (
+                  <button
+                    type='button'
+                    key={id}
+                    title={entry.label}
+                    aria-label={`دسترسی سریع: ${entry.label}`}
+                    aria-current={active === id ? 'page' : undefined}
+                    className={`${styles.railButton} ${active === id ? styles.railSelected : ''}`}
+                    onClick={() => go(entry)}
+                  >
+                    <Icon size={24} stroke={1.6} />
+                  </button>
+                );
+              })}
+          {!collapsed && props.onQuickSettings && (
+            <button
+              type='button'
+              className={`${styles.railButton} ${styles.editQuick}`}
+              title='ویرایش دسترسی سریع'
+              aria-label='ویرایش دسترسی سریع'
+              onClick={props.onQuickSettings}
+            >
+              <IconAdjustmentsHorizontal size={21} />
+            </button>
+          )}
+        </nav>
         <div className={styles.railBottom}>
           <button
             type='button'
@@ -610,11 +625,15 @@ export function PearlMenu(props: PearlMenuProps) {
           <button
             type='button'
             className={styles.railButton}
-            title='راهنما'
-            aria-label='راهنما'
+            title={props.supportLabel ?? 'راهنما'}
+            aria-label={props.supportLabel ?? 'راهنما'}
             onClick={props.onHelp}
           >
-            <IconHelp size={23} stroke={1.55} />
+            {props.supportLabel ? (
+              <IconHeadset size={23} stroke={1.55} />
+            ) : (
+              <IconHelp size={23} stroke={1.55} />
+            )}
           </button>
           <button
             type='button'

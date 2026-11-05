@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { QuickAccessDialog } from './quick-access-dialog';
+import { SupportDialog } from './support-dialog';
+import { DEFAULT_QUICK_ACCESS, normalizeQuickAccess, quickAccessKey } from './quick-access';
 import { useKBar } from 'kbar';
 import { PearlMenu } from './pearl-menu';
 import { pearlNavigation } from './navigation-model';
@@ -10,7 +14,6 @@ import { navigationHref, siteFromLocation } from './routing';
 import { endpoints } from '@/lib/api/client';
 import { AddSiteDialog } from '@/features/sites/components/add-site-dialog';
 import { useSidebar } from '@/components/ui/sidebar';
-import { useInfobar } from '@/components/ui/infobar';
 import {
   Sheet,
   SheetContent,
@@ -34,10 +37,16 @@ export function SalimoreShell({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { open, setOpen, isMobile, openMobile, setOpenMobile } = useSidebar();
-  const help = useInfobar();
   const { query: search } = useKBar();
   const [jobsOpen, setJobsOpen] = useState(false);
   const [siteFormOpen, setSiteFormOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
+  const [quickIds, setQuickIds] = useState<string[]>([...DEFAULT_QUICK_ACCESS]);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState(false);
+  const refreshLock = useRef(false);
+  const preferencesKey = quickAccessKey(accountName);
   const [rememberedSite, setRememberedSite] = useState('');
   const initialized = useRef(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -77,6 +86,49 @@ export function SalimoreShell({
     .flatMap((group) => group.entries)
     .find((entry) => entry.href === pathname);
 
+  useEffect(() => {
+    const read = () => {
+      try {
+        const saved = localStorage.getItem(preferencesKey);
+        setQuickIds(
+          saved === null ? [...DEFAULT_QUICK_ACCESS] : normalizeQuickAccess(JSON.parse(saved))
+        );
+      } catch {
+        setQuickIds([...DEFAULT_QUICK_ACCESS]);
+      }
+    };
+    read();
+    const changed = (event: StorageEvent) => {
+      if (event.key === preferencesKey) read();
+    };
+    window.addEventListener('storage', changed);
+    return () => window.removeEventListener('storage', changed);
+  }, [preferencesKey]);
+  async function refreshNavigation() {
+    if (refreshLock.current) return;
+    refreshLock.current = true;
+    setManualRefreshing(true);
+    setRefreshError(false);
+    const feedback = new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      const results = await Promise.all([jobs.refetch(), ...(siteId ? [inbox.refetch()] : [])]);
+      await feedback;
+      if (results.some((result) => result.isError)) {
+        setRefreshError(true);
+        toast.error('وضعیت تازه دریافت نشد؛ اطلاعات قبلی حفظ شده است.');
+      } else toast.success('وضعیت پردازش‌ها و اقدام‌ها به‌روز شد.');
+    } finally {
+      refreshLock.current = false;
+      setManualRefreshing(false);
+    }
+  }
+  const openPanel = (show: () => void) => {
+    if (isMobile && openMobile) {
+      setOpenMobile(false);
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+      searchTimer.current = setTimeout(show, 220);
+    } else show();
+  };
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
@@ -141,6 +193,11 @@ export function SalimoreShell({
       collapsed={mobile ? false : !open}
       onCollapsedChange={(value) => (mobile ? setOpenMobile(!value) : setOpen(!value))}
       manageSearchShortcut={false}
+      quickAccessIds={quickIds}
+      onQuickSettings={() => openPanel(() => setQuickOpen(true))}
+      onRefresh={() => void refreshNavigation()}
+      refreshing={manualRefreshing}
+      refreshError={refreshError}
       onOpenSearch={openSearch}
       onNavigate={navigate}
       onAddSite={() => {
@@ -161,10 +218,8 @@ export function SalimoreShell({
         setJobsOpen(true);
       }}
       notificationLabel='گزارش پردازش‌ها'
-      onHelp={() => {
-        setOpenMobile(false);
-        help.toggleInfobar();
-      }}
+      supportLabel='پشتیبانی'
+      onHelp={() => openPanel(() => setSupportOpen(true))}
       onSignOut={() => window.location.assign('/auth/logout')}
       openActions={inbox.data?.total}
       statsMessage={
@@ -214,6 +269,25 @@ export function SalimoreShell({
           </Sheet>
         )}
         <AddSiteDialog open={siteFormOpen} onOpenChange={setSiteFormOpen} />
+        <SupportDialog
+          open={supportOpen}
+          onOpenChange={setSupportOpen}
+          accountName={accountName}
+          siteId={siteId}
+          sites={sites}
+          pathname={pathname}
+        />
+        <QuickAccessDialog
+          open={quickOpen}
+          onOpenChange={setQuickOpen}
+          selectedIds={quickIds}
+          onSave={(ids) => {
+            const next = normalizeQuickAccess(ids);
+            localStorage.setItem(preferencesKey, JSON.stringify(next));
+            setQuickIds(next);
+            toast.success('دسترسی‌های سریع ذخیره شد.');
+          }}
+        />
       </div>
       <InfoSidebar side='left' />
     </>

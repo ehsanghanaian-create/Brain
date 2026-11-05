@@ -4,19 +4,58 @@
  * Passes X-Request-ID through (or generates one) and returns the backend body/status untouched.
  */
 import { NextRequest, NextResponse } from 'next/server';
+import { sessionDisplayName } from '@/features/navigation-menu/session-display';
 
 const BASE = (process.env.SEO_BRAIN_API_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '');
 const TOKEN = process.env.SEO_BRAIN_API_TOKEN ?? '';
+const SUPPORT_TOKEN = process.env.SEO_BRAIN_SUPPORT_API_TOKEN ?? '';
 
 async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const { path } = await ctx.params;
   if (path.some((seg) => seg === '' || seg === '.' || seg === '..')) {
-    return NextResponse.json({ error: { code: 'bad_path', message: 'مسیر نامعتبر', request_id: null } }, { status: 400 });
+    return NextResponse.json(
+      { error: { code: 'bad_path', message: 'مسیر نامعتبر', request_id: null } },
+      { status: 400 }
+    );
   }
-  const target = `${BASE}/api/v1/${path.map(encodeURIComponent).join('/')}${req.nextUrl.search}`;
-  const requestId = req.headers.get('x-request-id') ?? crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+  const supportRequest = path[0] === 'support';
+  const supportBase = (process.env.SEO_BRAIN_SUPPORT_API_URL ?? '').replace(/\/$/, '');
+  if (supportRequest && (!supportBase || !SUPPORT_TOKEN))
+    return NextResponse.json(
+      {
+        error: {
+          code: 'support_unavailable',
+          message: 'ارتباط با پشتیبانی هنوز آماده نیست',
+          request_id: null
+        }
+      },
+      { status: 503 }
+    );
+  const target = `${supportRequest ? supportBase : BASE}/api/v1/${path.map(encodeURIComponent).join('/')}${req.nextUrl.search}`;
+  const requestId =
+    req.headers.get('x-request-id') ?? crypto.randomUUID().replace(/-/g, '').slice(0, 16);
   const headers: Record<string, string> = { 'X-Request-ID': requestId, Accept: 'application/json' };
-  if (TOKEN) headers['X-API-Token'] = TOKEN;
+  if (supportRequest) headers['X-API-Token'] = SUPPORT_TOKEN;
+  else if (TOKEN) headers['X-API-Token'] = TOKEN;
+  if (supportRequest) {
+    // Public requests reach Next only after the existing gateway validates the
+    // signed session. Never forward a browser-supplied actor or role header.
+    const who = sessionDisplayName(
+      req.cookies.get(process.env.SEO_BRAIN_SESSION_COOKIE_NAME ?? 'salimore_seo_session')?.value
+    );
+    if (!who)
+      return NextResponse.json(
+        {
+          error: {
+            code: 'login_required',
+            message: 'برای پشتیبانی دوباره وارد حساب شوید',
+            request_id: requestId
+          }
+        },
+        { status: 401 }
+      );
+    headers['X-SEO-Actor'] = encodeURIComponent(who);
+  }
   const ct = req.headers.get('content-type');
   if (ct) headers['Content-Type'] = ct;
   const hasBody = !['GET', 'HEAD'].includes(req.method);
@@ -24,7 +63,7 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
     const res = await fetch(target, {
       method: req.method,
       headers,
-      body: hasBody ? await req.arrayBuffer() : undefined,   // arrayBuffer keeps multipart/binary intact
+      body: hasBody ? await req.arrayBuffer() : undefined, // arrayBuffer keeps multipart/binary intact
       cache: 'no-store'
     });
     const text = await res.text();
@@ -46,7 +85,14 @@ async function forward(req: NextRequest, ctx: { params: Promise<{ path: string[]
   } catch (e) {
     // backend unreachable → same envelope shape as the backend would send
     return NextResponse.json(
-      { error: { code: 'backend_unreachable', message: 'بک‌اند در دسترس نیست', details: { reason: e instanceof Error ? e.name : 'fetch_failed' }, request_id: requestId } },
+      {
+        error: {
+          code: 'backend_unreachable',
+          message: 'بک‌اند در دسترس نیست',
+          details: { reason: e instanceof Error ? e.name : 'fetch_failed' },
+          request_id: requestId
+        }
+      },
       { status: 503, headers: { 'X-Request-ID': requestId } }
     );
   }

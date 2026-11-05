@@ -220,6 +220,9 @@ export function SalimoreShell({
               showCloseButton={false}
               data-sidebar='sidebar'
               className={styles.mobileSheet}
+              finalFocus={() =>
+                document.querySelector<HTMLButtonElement>('[data-sidebar="trigger"]')
+              }
             >
               <SheetHeader className='sr-only'>
                 <SheetTitle>منوی سالیمور</SheetTitle>
